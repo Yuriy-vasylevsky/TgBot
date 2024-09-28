@@ -266,22 +266,23 @@ async def handle_message(update: Update,
             "Будь ласка, використовуйте меню для взаємодії. Або відправте код у такому форматі: 00-00-00-00-00-00-00"
         )
 
-
 def main() -> None:
-    """Запуск бота"""
+    """Запуск бота."""
 
     # Створіть додаток
     keep_alive()
-    application = Application.builder().token(TOKEN).http_version(
-        '1.1').build()
+    application = Application.builder().token(TOKEN).build()
 
     # Додайте обробники команд
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT, handle_message))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Запуск бота
-    application.run_polling(timeout=60)  # Збільшення тайм-ауту до 60 секунд
-
+    try:
+        application.run_polling(timeout=60)  # Збільшення тайм-ауту до 60 секунд
+    except Exception as e:
+        logger.error(f"Сталася помилка: {e}")  # Логування помилок
 
 if __name__ == '__main__':
     main()
+
