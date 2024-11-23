@@ -11,7 +11,7 @@ TOKEN = '6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg'
 # Група та контактні дані
 GROUP_LINK = 'https://t.me/+Z2dJLGrGRVdmM2Yy'
 CONTACT_PHONE = 'https://t.me/KaSSa_4444'
-CARD_NUMBER = """Сенс : 4028082004095285
+CARD_NUMBER = """
 Приват : 5169 3600 2817 8204
 Укрсиб : 5354323085398763
 
