@@ -255,10 +255,10 @@ async def handle_message(update: Update,
             "Будь ласка, використовуйте меню для взаємодії. Або відправте код у такому форматі: 00-00-00-00-00-00-00"
         )
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    print(f"Chat ID: {update.effective_chat.id}")  # 🔹 Ось цей рядок
+# async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+#     print(f"Chat ID: {update.effective_chat.id}")  # 🔹 Ось цей рядок
     
-    text = update.message.text
+#     text = update.message.text
 
 
 def main() -> None:
