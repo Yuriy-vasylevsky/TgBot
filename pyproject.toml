@@ -11,9 +11,10 @@ telegram = "^0.0.1"
 flask = "^3.0.3"
 
 [tool.pyright]
-# https://github.com/microsoft/pyright/blob/main/docs/configuration.md
-useLibraryCodeForTypes = true
+typeCheckingMode = "off"
+useLibraryCodeForTypes = false
 exclude = [".cache"]
+
 
 [tool.ruff]
 # https://beta.ruff.rs/docs/configuration/
