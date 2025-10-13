@@ -1,8 +1,6 @@
-
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from db import get_all_stats, get_slot_session_stats, clear_game_stats
-import aiosqlite
 import config
 
 router = Router()
@@ -37,16 +35,6 @@ async def show_stats(message: types.Message):
                 f"🔹 Відсоток перемог: {slot_rate:.1f}%\n"
             )
 
-            # Додатково — кількість прокрутів у слотах
-            # try:
-            #     async with aiosqlite.connect("users.db") as db:
-            #         async with db.execute("SELECT SUM(spins) FROM slot_sessions") as cur:
-            #             row = await cur.fetchone()
-            #             total_spins = row[0] or 0
-            #             text += f"\n📈 Кількість прокрутів у слотах: {total_spins}\n"
-            # except Exception:
-            #     text += "\n⚠️ Не вдалося отримати дані про прокрути.\n"
-
     # --- Кнопка очищення тільки для адміна
     kb = InlineKeyboardBuilder()
     if message.from_user.id == ADMIN_ID:
@@ -72,7 +60,7 @@ async def confirm_clear_stats(callback: types.CallbackQuery):
 
     await callback.message.answer(
         "⚠️ Ви впевнені, що хочете очистити усю статистику ігор?",
-        reply_markup=kb.as_markup()
+        reply_markup=kb.as_markup(),
     )
     await callback.answer()
 

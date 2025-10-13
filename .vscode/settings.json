@@ -1,3 +1,15 @@
-// "python.analysis.diagnosticSeverityOverrides" {
-//     "reportOptionalMemberAccess": "none"
-// }
+{
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter",
+        "editor.formatOnSave": true
+    },
+    "editor.codeActionsOnSave": {
+        "source.organizeImports": "explicit"
+    },
+    "python.formatting.provider": "black",
+    "python.formatting.blackArgs": [
+        "--line-length=120",
+        "--skip-string-normalization"
+    ]
+}
