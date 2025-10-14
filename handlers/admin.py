@@ -1,5 +1,5 @@
 import aiosqlite
-from aiogram import Router, F, types
+import logging
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import ReplyKeyboardRemove
@@ -12,16 +12,42 @@ from db import (
     check_promocode,
     set_user_access,
     has_claimed_gift,
+    add_casino_code,
+    ensure_ban_table,
+    ban_user,
+    unban_user,
 )
 from menu import admin_menu, main_menu
 from games import games_menu as imported_games_menu
 from states import WinrateFSM, Broadcast, PromoFSM, EnterPromoFSM, CodeLinkFSM
 import config
+from aiogram import Router, F, types
+from pathlib import Path
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+import re
+from aiogram.types import (
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    Message,
+    CallbackQuery,
+)
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters.state import StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import (
+    Message,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    CallbackQuery,
+)
+from typing import Optional
+from db import DB_PATH
+
+ADMIN_ID = config.ADMIN_ID
+USERS_PER_PAGE = 7
 
 router = Router()
-ADMIN_ID = config.ADMIN_ID
-
-USERS_PER_PAGE = 7
 
 
 # ==========================
@@ -89,7 +115,7 @@ async def send_users_page(message_or_query, users, page: int):
         current_users, start=start + 1
     ):
         last_active_str = last_active or "немає даних"
-        text += f"{i}. 👤 <b>{full_name}</b>\n   🔗 @{username or '—'}\n   🕒 {last_active_str}\n\n"
+        text += f"{i}. 👤 <b>{full_name}</b>\n   🔗 @{username or '—'}\n   🕒 {last_active_str}\n  🔐 {uid}\n\n"
 
     kb = InlineKeyboardBuilder()
     if page > 1:
@@ -318,3 +344,303 @@ async def check_user_promo(message: types.Message, state: FSMContext):
 
     # Очищаємо стан FSM
     await state.clear()
+
+
+# ======================
+# СТАНИ
+# ======================
+class AddCodeFSM(StatesGroup):
+    waiting_for_code = State()
+
+
+# class CodeLinkFSM(StatesGroup):
+#     waiting_for_code = State()
+
+
+# FSM для додавання коду
+class AddCodeFSM(StatesGroup):
+    waiting_for_type = State()
+    waiting_for_code = State()
+
+
+# ======================
+# ДОДАВАННЯ КОДУ (для адміна)
+# ======================
+@router.message(F.text == "➕ Додати код")
+async def ask_code_type(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Тільки адміністратор.")
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🏆 Champion", callback_data="add_code_type:champion"
+                ),
+                InlineKeyboardButton(
+                    text="🎰 Superomatic", callback_data="add_code_type:superomatic"
+                ),
+            ]
+        ]
+    )
+    await message.answer("Виберіть тип коду для додавання:", reply_markup=kb)
+
+
+@router.callback_query(F.data.startswith("add_code_type:"))
+async def on_choose_add_type(cb: CallbackQuery, state: FSMContext):
+    _, code_type = cb.data.split(":")
+    await state.update_data(casino_type=code_type)
+    await state.set_state(AddCodeFSM.waiting_for_code)
+    await cb.message.answer(f"Введіть новий код для {code_type}:")
+    await cb.answer()
+
+
+@router.message(AddCodeFSM.waiting_for_code)
+async def add_code_receive(message: Message, state: FSMContext):
+    data = await state.get_data()
+    casino_type = data.get("casino_type")
+    code = message.text.strip()
+
+    if not re.fullmatch(r"(\d{2}-){6}\d{2}", code):
+        await message.answer("❌ Невірний формат! Приклад: 11-36-36-50-20-11-33")
+        return
+
+    await add_casino_code(code, casino_type)
+
+    await message.answer(
+        f"✅ Код <code>{code}</code> додано до {casino_type}.", parse_mode="HTML"
+    )
+    await state.clear()
+
+
+class AddCodeFSM(StatesGroup):
+    waiting_for_code = State()
+
+
+# ++++++++++++++++++                  код в посилання            +++++++++++++++++++++++++++++++++
+
+
+@router.message(F.text.regexp(r"^\d{2}(?:-\d{2}){6}$"))
+async def auto_generate_links(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+
+    # якщо бот зараз очікує код від адміна — пропускаємо
+    if current_state == AddCodeFSM.waiting_for_code.state:
+        return
+
+    code = message.text.strip().replace("-", "")
+    await message.answer(f"🏆 Champion:\nhttps://spinplanet.net/?login_code={code}")
+    await message.answer(f"🎰 Superomatic:\nhttps://code.greenhost.pw/?c={code}")
+
+
+# ________________________________________________БАН________________________________________________________________
+
+
+# async def ban_user(
+#     user_id: int, banned_by: Optional[int] = None, reason: Optional[str] = None
+# ) -> None:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             "INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, ts) VALUES (?, ?, ?, DATETIME('now', '+3 hours'))",
+#             (user_id, reason, banned_by),
+#         )
+#         await db.commit()
+
+
+# async def ban_user(
+#     user_id: int, banned_by: Optional[int] = None, reason: Optional[str] = None
+# ) -> None:
+#     await ensure_ban_table()
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by, ts)
+#             VALUES (?, ?, ?, DATETIME('now', '+3 hours'))
+#             """,
+#             (user_id, reason, banned_by),  # три параметри для трьох ?
+#         )
+#         await db.commit()
+
+
+# async def unban_user(user_id: int) -> None:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute("DELETE FROM banned_users WHERE user_id=?", (user_id,))
+#         await db.commit()
+
+
+async def is_banned(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM banned_users WHERE user_id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return bool(row)
+
+
+async def list_banned() -> list[tuple]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT user_id, reason, banned_by, ts FROM banned_users ORDER BY ts DESC"
+        ) as cur:
+            return await cur.fetchall()
+
+
+# async def ensure_ban_table():
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             CREATE TABLE IF NOT EXISTS banned_users (
+#                 user_id INTEGER PRIMARY KEY,
+#                 reason TEXT,
+#                 banned_by INTEGER,
+#                 ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+#             )
+#             """
+#         )
+#         await db.commit()
+
+
+# async def ensure_ban_table():
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             CREATE TABLE IF NOT EXISTS banned_users (
+#                 user_id INTEGER PRIMARY KEY,
+#                 reason TEXT,
+#                 banned_by INTEGER,
+#                 ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+#             )
+#             """
+#         )
+#         await db.commit()
+
+
+# -----------------------
+# FSM
+# -----------------------
+class BanStates(StatesGroup):
+    waiting_for_ban_id = State()
+    waiting_for_unban_id = State()
+    waiting_for_ban_reason = State()
+
+
+# -----------------------
+# Адмінські хендлери (Router)
+# -----------------------
+
+
+# Кнопка: почати бан (адмін натискає)
+@router.message(F.text == "🚫 Забанити по ID")
+async def cmd_start_ban(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Тільки адміністратор.")
+        return
+    await message.answer("Введи ID користувача для бану:")
+    await state.set_state(BanStates.waiting_for_ban_id)
+
+
+@router.message(BanStates.waiting_for_ban_id)
+async def handle_ban_id(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Введи тільки числовий ID.")
+        return
+    uid = int(message.text)
+    if uid == ADMIN_ID:
+        await message.answer("⛔ Нельзя банити себе.")
+        await state.clear()
+        return
+    await state.update_data(ban_target=uid)
+    await message.answer("Введи причину бану (можеш залишити порожньою):")
+    await state.set_state(BanStates.waiting_for_ban_reason)
+
+
+@router.message(BanStates.waiting_for_ban_reason)
+async def handle_ban_reason(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    uid = data.get("ban_target")
+    reason = message.text.strip() or None
+    await ban_user(uid, banned_by=message.from_user.id, reason=reason)
+    await state.clear()
+    await message.answer(
+        f"✅ Користувач <code>{uid}</code> заблокований.\nПричина: {reason or '—'}",
+        parse_mode="HTML",
+    )
+
+
+@router.message(BanStates.waiting_for_ban_reason)
+async def handle_ban_reason(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    uid = data.get("ban_target")
+    reason = message.text.strip() or None
+    await ban_user(uid, banned_by=message.from_user.id, reason=reason)
+    await state.clear()
+    await message.answer(
+        f"✅ Користувач <code>{uid}</code> заблокований.\nПричина: {reason or '—'}",
+        parse_mode="HTML",
+        reply_markup=main_menu(is_admin=True),
+    )
+
+
+# -----------------------
+# Розбан
+# -----------------------
+@router.message(F.text == "🔓 Розбанити по ID")
+async def cmd_start_unban(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Тільки адміністратор.")
+        return
+    await message.answer("Введи ID користувача для розбану (тільки цифри):")
+    await state.set_state(BanStates.waiting_for_unban_id)
+
+
+@router.message(BanStates.waiting_for_unban_id)
+async def handle_unban_id(message: types.Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer("Невірний формат. Введи тільки числовий ID або /cancel.")
+        return
+    uid = int(text)
+    await unban_user(uid)
+    await state.clear()
+    await message.answer(
+        f"✅ Користувач <code>{uid}</code> розблокований.",
+        parse_mode="HTML",
+        reply_markup=main_menu(is_admin=True),
+    )
+
+
+# -----------------------
+# Список банів
+# -----------------------
+@router.message(F.text == "📋 Список банів")
+async def view_banned_list(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Тільки адміністратор.")
+        return
+    rows = await list_banned()
+    if not rows:
+        await message.answer(
+            "📭 Список банів пустий.", reply_markup=main_menu(is_admin=True)
+        )
+        return
+
+    lines = []
+    for uid, reason, banned_by, ts in rows:
+        by = str(banned_by) if banned_by else "—"
+        r = reason if reason else "—"
+        lines.append(f"ID: <code>{uid}</code> | by: {by} | reason: {r} | {ts}")
+    text = "📋 Заблоковані користувачі:\n\n" + "\n".join(lines)
+    await message.answer(text, parse_mode="HTML", reply_markup=main_menu(is_admin=True))
+
+
+# -----------------------
+# Cancel / back
+# -----------------------
+@router.message(F.text.in_({"/cancel", "❌ Відмінити", "скасувати"}))
+async def cancel_state(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "❌ Дія скасована.",
+        reply_markup=main_menu(is_admin=(message.from_user.id == ADMIN_ID)),
+    )

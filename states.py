@@ -20,3 +20,9 @@ class EnterPromoFSM(StatesGroup):
 
 class CodeLinkFSM(StatesGroup):
     waiting_for_code = State()
+
+
+# БАН ________________________________
+class BanStates(StatesGroup):
+    waiting_for_id = State()
+    waiting_for_unban_id = State()

@@ -5,7 +5,11 @@ from pathlib import Path
 import logging
 import sqlite3
 
-DB_PATH = Path(__file__).parent / "users.db"
+# DB_PATH = Path(__file__).parent / "users.db"
+from pathlib import Path
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "users.db"
 
 
 # ---------------------- Ініціалізація ----------------------
@@ -64,6 +68,47 @@ async def init_db():
         """
         )
         await db.commit()
+        # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+        await db.execute(
+            """
+        CREATE TABLE IF NOT EXISTS casino_codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            casino_type TEXT,
+            code TEXT,
+            used INTEGER DEFAULT 0
+        )
+        """
+        )
+        await db.execute(
+            """
+        CREATE TABLE IF NOT EXISTS pending_rewards (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            code_id INTEGER,
+            casino_type TEXT,
+            status TEXT DEFAULT 'pending',
+            ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+        )
+        """
+        )
+        await db.commit()
+        # +++++++++++++++++++++++++++++++++++++++++++ БЛОК ЮЗЕРІВ ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id INTEGER PRIMARY KEY,
+                reason TEXT,
+                banned_by INTEGER,
+                ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+            """
+        )
+        await db.commit()
+
+
+# _________________________________________________________________________________________________________________
 
 
 async def add_gift_columns(db: aiosqlite.Connection):
@@ -323,3 +368,154 @@ async def get_all_users() -> list[int]:
         async with db.execute("SELECT user_id FROM users") as cur:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
+
+
+# ---------------------- Коди казино ----------------------
+import aiosqlite
+from typing import Optional, Tuple
+
+
+async def add_casino_code(code: str, casino_type: str) -> None:
+    """Додає код у таблицю casino_codes."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO casino_codes (code, casino_type) VALUES (?, ?)",
+            (code, casino_type),
+        )
+        await db.commit()
+
+
+async def get_free_code(casino_type: str) -> Optional[dict]:
+    """
+    Повертає словник {"id": int, "code": str} для першого вільного (used=0) коду.
+    Якщо немає — None.
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, code FROM casino_codes WHERE casino_type=? AND used=0 LIMIT 1",
+            (casino_type,),
+        ) as cur:
+            row = await cur.fetchone()
+            if row:
+                return {"id": row[0], "code": row[1]}
+            return None
+
+
+async def mark_code_used_by_id(code_id: int, user_id: int) -> None:
+    """Позначає код як виданий (used=1) і записує кому і коли."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE casino_codes SET used=1, assigned_to=?, assigned_at=DATETIME('now', '+3 hours') WHERE id=?",
+            (user_id, code_id),
+        )
+        await db.commit()
+
+
+async def mark_code_unused(code_id: int) -> None:
+    """Повернути код у pool (use зняти) — якщо адмін відхилив заяву."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE casino_codes SET used=0, assigned_to=NULL, assigned_at=NULL WHERE id=?",
+            (code_id,),
+        )
+        await db.commit()
+
+
+# ---------------------- Pending rewards ----------------------
+
+
+async def create_pending_reward(
+    user_id: int, code_id: Optional[int], casino_type: str
+) -> int:
+    """Створює запис pending і повертає id pending."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO pending_rewards (user_id, code_id, casino_type, status) VALUES (?, ?, ?, 'pending')",
+            (user_id, code_id, casino_type),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def set_pending_status(pending_id: int, status: str) -> None:
+    """Оновлює статус pending записи (confirmed / rejected)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE pending_rewards SET status=? WHERE id=?", (status, pending_id)
+        )
+        await db.commit()
+
+
+async def get_pending_by_id(pending_id: int) -> Optional[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT id, user_id, code_id, casino_type, status FROM pending_rewards WHERE id=?",
+            (pending_id,),
+        ) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            return {
+                "id": row[0],
+                "user_id": row[1],
+                "code_id": row[2],
+                "casino_type": row[3],
+                "status": row[4],
+            }
+
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+import aiosqlite
+from pathlib import Path
+from typing import Optional
+
+DB_PATH = Path(__file__).parent / "users.db"
+
+
+async def ensure_ban_table():
+    """Гарантує, що таблиця для банів існує"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS banned_users (
+                user_id INTEGER PRIMARY KEY,
+                reason TEXT,
+                banned_by INTEGER,
+                banned_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+        """
+        )
+        await db.commit()
+
+
+async def ban_user(
+    user_id: int, banned_by: Optional[int] = None, reason: str = "Без причини"
+):
+    """Додає користувача в бан"""
+    await ensure_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO banned_users (user_id, reason, banned_by)
+            VALUES (?, ?, ?)
+        """,
+            (user_id, reason, banned_by),
+        )
+        await db.commit()
+
+
+async def unban_user(user_id: int):
+    """Знімає бан"""
+    await ensure_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM banned_users WHERE user_id = ?", (user_id,))
+        await db.commit()
+
+
+async def get_all_banned():
+    """Отримати всіх заблокованих користувачів"""
+    await ensure_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT user_id, reason, banned_at FROM banned_users")
+        rows = await cursor.fetchall()
+        return rows

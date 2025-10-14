@@ -9,6 +9,7 @@ from menu import actions_menu, main_menu
 from db import has_claimed_gift
 import config
 from games import games_menu as imported_games_menu
+from aiogram.types import Message
 
 router = Router()
 
@@ -133,8 +134,21 @@ async def promo_cash_details(callback: types.CallbackQuery):
 # ==========================
 # КОД в посилання
 # ==========================
-class CodeLinkFSM:
-    waiting_for_code = "waiting_for_code"
+import re
+from aiogram import F, types
+from aiogram.types import (
+    Message,
+    CallbackQuery,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from aiogram import Router
+
+
+class CodeLinkFSM(StatesGroup):
+    waiting_for_code = State()
 
 
 @router.message(F.text == "💫 КОД в посилання")
@@ -143,11 +157,7 @@ async def ask_code_for_links(message: types.Message, state: FSMContext):
     await message.answer("Введіть код у форматі: 00-00-00-00-00-00-00")
 
 
-@router.message(lambda message: re.fullmatch(r"\d{2}(-\d{2}){6}", message.text or ""))
-async def global_code_to_links(message: types.Message):
-    code = (message.text or "").replace("-", "")
-    await message.answer(f"Чемпіон https://spinplanet.net/?login_code={code}")
-    await message.answer(f"Суперматік https://code.greenhost.pw/?c={code}")
+# =====================================================================================================
 
 
 @router.message(F.text == "🔙 Назад до головного меню")
@@ -174,3 +184,92 @@ async def admin_games_menu(message: types.Message):
         )
     else:
         await message.answer("⛔ Ця функція лише для адміністратора.")
+
+
+# __________________________ ПЕРЕГЛЯД І ВИДАЛЕННЯ КОДІВ З БД _____________________________________________
+
+from aiogram import Router, F, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+import aiosqlite
+from pathlib import Path
+
+# router = Router()
+
+# DB_PATH = Path(__file__).parent / "users.db"
+from db import DB_PATH
+
+# ________________________________________________________________________________________________________
+
+
+@router.message(F.text == "📜 Перегляд кодів")
+async def view_codes_handler(message: types.Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT id, casino_type, code, used FROM casino_codes"
+        )
+        codes = await cursor.fetchall()
+
+    if not codes:
+        await message.answer(
+            "⚠️ Немає жодного коду в базі.", reply_markup=main_menu(is_admin=True)
+        )
+        return
+
+    text_lines = ["📜 <b>Список кодів:</b>\n"]
+    for code_id, casino_type, code, used in codes:
+        status = "✅ використаний" if used else "🆓 вільний"
+        text_lines.append(f"<b>{casino_type}</b> — <code>{code}</code> — {status}")
+    text = "\n".join(text_lines)
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🧹 Очистити всі коди")],
+            [KeyboardButton(text="⬅️ Назад в адмінку")],
+        ],
+        resize_keyboard=True,
+    )
+
+    await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
+
+@router.message(F.text == "🧹 Очистити всі коди")
+async def ask_clear_codes(message: types.Message):
+    confirm_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="✅ Так, очистити"),
+                KeyboardButton(text="❌ Ні, скасувати"),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+    await message.answer(
+        "⚠️ Ви впевнені, що хочете <b>очистити всі коди</b>?",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard,
+    )
+
+
+@router.message(F.text == "✅ Так, очистити")
+async def clear_all_codes(message: types.Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM casino_codes")
+        await db.commit()
+
+    await message.answer(
+        "🧹 Усі коди успішно видалено!", reply_markup=main_menu(is_admin=True)
+    )
+
+
+@router.message(F.text == "❌ Ні, скасувати")
+async def cancel_clear_codes(message: types.Message):
+    await message.answer(
+        "❌ Очищення скасовано.", reply_markup=main_menu(is_admin=True)
+    )
+
+
+@router.message(F.text == "⬅️ Назад в адмінку")
+async def back_to_admin(message: types.Message):
+    await message.answer(
+        "🔧 Повернення в адмін-меню:", reply_markup=main_menu(is_admin=True)
+    )

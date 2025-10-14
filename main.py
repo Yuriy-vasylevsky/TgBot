@@ -9,14 +9,6 @@ from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import (
-    BotCommand,
-    BotCommandScopeDefault,
-    BotCommandScopeChat,
-    ReplyKeyboardMarkup,
-    KeyboardButton,
-)
-
 import config
 from db import (
     init_db,
@@ -24,12 +16,31 @@ from db import (
     add_promocode,
     has_claimed_gift,
     reset_all_gifts,
+    has_claimed_gift,
+    set_gift_claimed,
+    reset_all_gifts,
+    get_all_users,
 )
+
 from games import register_game_handlers
 from stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin import router as admin_router
 from menu import main_menu
+from games import router as games_router
+from aiogram import F
+from random import choices
+import string, asyncio
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeDefault,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from aiogram import types, F
+from aiogram import Bot, Dispatcher
+from middlewares.ban_middleware import BanMiddleware
+
 
 # ==========================
 # Ініціалізація
@@ -44,7 +55,9 @@ dp = Dispatcher()
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
-
+dp.include_router(games_router)
+dp.message.middleware(BanMiddleware())
+dp.callback_query.middleware(BanMiddleware())
 ADMIN_ID = config.ADMIN_ID
 
 
@@ -80,6 +93,21 @@ def generate_promocode(length: int = 8) -> str:
 # ==========================
 # Хендлери
 # ==========================
+# @dp.message(Command("start"))
+# async def cmd_start(message: types.Message):
+#     user_id = message.from_user.id
+#     is_admin = user_id == ADMIN_ID
+#     gift_claimed = await has_claimed_gift(user_id)
+
+#     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
+
+#     await message.answer(
+#         f"Привіт, {message.from_user.full_name}!", reply_markup=keyboard
+#     )
+
+from aiogram import types
+from aiogram.filters import Command
+from aiogram.types import FSInputFile
 
 
 @dp.message(Command("start"))
@@ -88,19 +116,17 @@ async def cmd_start(message: types.Message):
     is_admin = user_id == ADMIN_ID
     gift_claimed = await has_claimed_gift(user_id)
 
-    # Використовуємо функцію main_menu() з menu.py
     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
 
-    await message.answer(
-        f"Привіт, {message.from_user.full_name}!", reply_markup=keyboard
+    # 📸 Шлях до картинки (збережи її поруч із main.py або в папці images)
+    photo = FSInputFile("images/4444.jpg")  # або .png, .jpeg
+
+    # Надсилаємо фото з підписом і меню
+    await message.answer_photo(
+        photo=photo,
+        caption=f"👋 Привіт, {message.from_user.full_name}!\n\nЛаскаво просимо до гри 🎮",
+        reply_markup=keyboard,
     )
-
-
-from aiogram import F
-from menu import main_menu
-from db import has_claimed_gift, set_gift_claimed, reset_all_gifts, get_all_users
-from random import choices
-import string, asyncio
 
 
 def generate_promocode(length: int = 8) -> str:
@@ -134,10 +160,6 @@ async def gift_command(message: types.Message):
     # Оновлюємо меню без кнопки подарунка
     keyboard = main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=True)
     await message.answer("Меню оновлено ⬇️", reply_markup=keyboard)
-
-
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import types, F
 
 
 # ==========================

@@ -1,3 +1,8 @@
+from pathlib import Path
+
+DB_PATH = Path(__file__).parent / "users.db"
+
+
 TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
 ADMIN_ID = 6335987620
 # ADMIN_IDS = [6335987620, 752963390]
@@ -98,6 +103,11 @@ PROVAIDER = """
 ♦️ Superomatic - https://kod.atlantik.club
 
 🏆 Champion - https://spinplanet.net/
+
+🥇 Чемпіон 🥇
+💹Тут ви можете безкоштовно зіграти  
+
+⚡ https://spinplanet.net/?login_code=00000000000000 ⚡
 """
 
 # 💰 💵 💶 💎 🪙 💳 🤑 🏦 💼 💲

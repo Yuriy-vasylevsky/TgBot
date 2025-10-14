@@ -1,6 +1,6 @@
 import asyncio
+import logging
 import random
-
 from aiogram import F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -12,7 +12,19 @@ from db import (
     get_winrate,
     set_winrate,
     has_claimed_gift,
+    get_free_code,
+    create_pending_reward,
+    get_pending_by_id,
+    set_pending_status,
+    mark_code_used_by_id,
+    mark_code_unused,
 )
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from aiogram import Router, F, Bot
+from config import ADMIN_ID
+from menu import main_menu
+
+router = Router()
 
 
 class CouponGameFSM(StatesGroup):
@@ -88,12 +100,29 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
         options = ["🎁 Варіант 1", "🎁 Варіант 2", "🎁 Варіант 3"]
         user_choice = message.text.strip()
 
+        #    +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
         if is_win:
             winning_button = user_choice
-            result_text = (
-                "🎉 Вітаю! Ви виграли 30 грн! 💸\nАдмін сам напише і видасть код ✅"
-            )
+            result_text = "🎉 Вітаю! Ви виграли 30 грн! 💸\nОберіть, який тип коду бажаєте отримати:"
             outcome = "ВИГРАВ ✅"
+
+            # Кнопки для отримання виграшу
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🏆 Champion",
+                            callback_data=f"choose_reward:champion:{message.from_user.id}",
+                        ),
+                        InlineKeyboardButton(
+                            text="🎰 Superomatic",
+                            callback_data=f"choose_reward:superomatic:{message.from_user.id}",
+                        ),
+                    ]
+                ]
+            )
+            await message.answer(result_text, reply_markup=kb)
+
         else:
             possible = [o for o in options if o != user_choice]
             winning_button = random.choice(possible)
@@ -101,6 +130,7 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
                 f"❌ На жаль, ви програли.\nВиграш був у кнопці: {winning_button}"
             )
             outcome = "ПРОГРАВ ❌"
+            await message.answer(result_text)
 
         # --- Повідомлення адміну ---
         await bot.send_message(
@@ -108,8 +138,8 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
             f"🎯 <b>Гравець зіграв у 'Один із трьох'</b>\n\n"
             f"👤 Ім'я: {message.from_user.full_name}\n"
             f"💬 Username: @{message.from_user.username or 'Немає'}\n"
-            # f"🎲 Вибір: {user_choice}\n"
-            f"📊 Winrate: {winrate * 100:.1f}%\n" f"🏁 Результат: {outcome}",
+            f"📊 Winrate: {winrate * 100:.1f}%\n"
+            f"🏁 Результат: {outcome}",
         )
 
         # --- Збереження результату ---
@@ -118,23 +148,19 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
         except Exception as e:
             print("❌ Error saving game result:", e)
 
-        # --- Результат користувачу ---
-        # await message.answer(
-        #     result_text + "\n\n🔙 Повертаємось у головне меню.",
-        #     reply_markup=main_menu(is_admin=(message.from_user.id == ADMIN_ID)),
-        # )
-
+        # --- Перевірка подарунка та формування головного меню ---
         gift_claimed = await has_claimed_gift(message.from_user.id)
-
-        # Формуємо головне меню з актуальним станом подарунка
         keyboard = main_menu(
             is_admin=(message.from_user.id == ADMIN_ID), user_has_gift=gift_claimed
         )
 
-        # Відповідь користувачу
-        await message.answer(
-            result_text + "\n\n🔙 Повертаємось у головне меню.", reply_markup=keyboard
-        )
+        # --- Відповідь користувачу ---
+        if not is_win:
+            # Якщо програв — просто показуємо результат і головне меню
+            await message.answer(
+                result_text + "\n\n🔙 Повертаємось у головне меню.",
+                reply_markup=keyboard,
+            )
         await state.clear()
 
     # ===================== СЛОТИ =====================
@@ -145,11 +171,8 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
         ):
             await message.answer("⛔ У вас немає доступу. Активуйте промокод!")
             return
-
         await state.set_state(SlotGameFSM.playing)
         await state.update_data(coupons=10, first_bet=False)
-
-        # 🧾 Гарний вступний опис гри
         await message.answer(
             "🎰 <b>Ласкаво просимо у слот-машину!</b>\n\n"
             "💎 Твоя ціль — набити 30купонів! (1 🎟  = 1 грн)\n\n"
@@ -166,7 +189,6 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
             ),
         )
 
-    # Детальний опис правил
     @dp.message(F.text == "ℹ️ Правила та комбінації")
     async def show_slot_rules(message: types.Message):
         rules_text = (
@@ -254,10 +276,10 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
             "🍓",
             "🍍",
             "🥭",
-            "💎",
-            "🃏",
+            # "💎",
+            # "🃏",
             "7️⃣",
-            "🍀",
+            # "🍀",
         ]
         reels = [random.choice(symbols) for _ in range(3)]
         seven_count = reels.count("7️⃣")
@@ -334,9 +356,31 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
 
         if coupons >= 30:
             await message.answer(
-                "🎉 Ви досягли максимального виграшу (30 купонів)! Гра завершена 🎯",
-                reply_markup=main_menu(is_admin=(message.from_user.id == ADMIN_ID)),
+                "🎉 Вітаю! Ви виграли. Оберіть, який тип коду бажаєте отримати:",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="🏆 Champion",
+                                callback_data=f"choose_reward:champion:{message.from_user.id}",
+                                # reply_markup=main_menu(
+                                #     is_admin=(message.from_user.id == ADMIN_ID)
+                                # ),
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="🎰 Superomatic",
+                                callback_data=f"choose_reward:superomatic:{message.from_user.id}",
+                                # reply_markup=main_menu(
+                                #     is_admin=(message.from_user.id == ADMIN_ID)
+                                # ),
+                            )
+                        ],
+                    ]
+                ),
             )
+
             await bot.send_message(
                 ADMIN_ID,
                 f"🏆 @{message.from_user.username or message.from_user.full_name} виграв {coupons} купонів у слотах (максимум).",
@@ -346,3 +390,186 @@ async def register_game_handlers(dp, bot, main_menu, ADMIN_ID):
             return
 
         await show_slot_menu(message, state)
+
+
+@router.callback_query(F.data.startswith("choose_reward:"))
+async def on_choose_reward(cb: CallbackQuery, bot: Bot):
+    parts = cb.data.split(":")
+    if len(parts) < 3:
+        await cb.answer("Невірні дані.", show_alert=True)
+        return
+
+    _, casino_type, user_id_s = parts
+    try:
+        user_id = int(user_id_s)
+    except ValueError:
+        user_id = cb.from_user.id
+
+    # Дістаємо ім’я користувача
+    user_name = cb.from_user.full_name  # first_name + last_name
+    username = cb.from_user.username  # опціонально, якщо потрібен @username
+
+    # Прибираємо кнопки після натискання
+    try:
+        await cb.message.edit_text(
+            f"🎰 Ви обрали платформу <b>{casino_type.capitalize()}</b>!\nОчікуйте підтвердження адміністратора.",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    # Беремо вільний код
+    free = await get_free_code(casino_type)
+    gift_claimed = await has_claimed_gift(user_id)
+    if not free:
+        await bot.send_message(
+            user_id,
+            "⚠️ Вибачте — кодів цього типу наразі немає.\nЗверніться до касира.",
+            reply_markup=main_menu(
+                is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed
+            ),  # повернення в головне меню # повернення в головне меню
+        )
+        await cb.answer("Немає вільних кодів цього типу.", show_alert=True)
+        return
+
+    code_id, code_text = free
+    # Створюємо pending без user_name — тільки з user_id, code_id, casino_type
+    pending_id = await create_pending_reward(user_id, code_id, casino_type)
+
+    # ==========================================
+    # 2️⃣ Відправка адміну для підтвердження
+    # ==========================================
+    kb_admin = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Підтвердити",
+                    callback_data=f"reward_confirm:{pending_id}:confirm",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Відхилити",
+                    callback_data=f"reward_confirm:{pending_id}:reject",
+                ),
+            ]
+        ]
+    )
+    await bot.send_message(
+        ADMIN_ID,
+        f"🔔 <b>Гравець просить код для {casino_type}</b>\n\n"
+        f"👤 Ім’я: <b>{user_name}</b>\n"
+        f"🆔 ID: <code>{user_id}</code>\n"
+        f"🔑 Код (зарезервовано): <code>{code_text}</code>",
+        parse_mode="HTML",
+        reply_markup=kb_admin,
+    )
+
+    gift_claimed = await has_claimed_gift(user_id)
+    await bot.send_message(
+        user_id,
+        "✅ Ваш виграш зафіксовано.\nЗачекайте підтвердження адміністратора.",
+        reply_markup=main_menu(
+            is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed
+        ),
+    )
+    await cb.answer()
+
+
+# ==========================================
+# 3️⃣ Адмін підтверджує або відхиляє код
+# ==========================================
+@router.callback_query(F.data.startswith("reward_confirm:"))
+async def handle_reward_confirm(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        await cb.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+
+    parts = cb.data.split(":")
+    if len(parts) != 3:
+        await cb.answer("Невірні дані.", show_alert=True)
+        return
+
+    _, pending_id_s, action = parts
+    try:
+        pending_id = int(pending_id_s)
+    except ValueError:
+        await cb.answer("Невірний ID.", show_alert=True)
+        return
+
+    pending = await get_pending_by_id(pending_id)
+    if not pending:
+        await cb.answer("Невідомий запит.", show_alert=True)
+        return
+
+    user_id = pending["user_id"]
+    code_text = (pending.get("code") or "").replace("-", "")
+    casino_type = pending.get("casino_type")
+
+    # --- Якщо адмін підтверджує ---
+    if action == "confirm":
+        # якщо коду ще нема — отримуємо новий
+        # if not code_text:
+        #     free_code = await get_free_code(casino_type)
+        #     if not free_code:
+        #         await cb.answer(
+        #             "❌ Немає вільних кодів для цього казино.", show_alert=True
+        #         )
+        #         return
+        #     code_text = free_code["code"]
+        #     await mark_code_used_by_id(free_code["id"], user_id)
+        # якщо коду ще нема — отримуємо новий
+        if not code_text:
+            free_code = await get_free_code(casino_type)
+            if not free_code:
+                await cb.answer(
+                    "❌ Немає вільних кодів для цього казино.", show_alert=True
+                )
+                return
+            code_text = free_code["code"].replace(
+                "-", ""
+            )  # ✅ тут очищаємо від дефісів
+            await mark_code_used_by_id(free_code["id"], user_id)
+        else:
+            code_text = code_text.replace("-", "")  # ✅ якщо код уже був — теж чистимо
+
+        # позначаємо pending як підтверджений
+        await set_pending_status(pending_id, "confirmed")
+
+        # формуємо посилання
+        if casino_type == "champion":
+            url = f"https://spinplanet.net/?login_code={code_text}"
+        else:
+            url = f"https://code.greenhost.pw/?c={code_text}"
+
+        # повідомлення адміну
+        await cb.message.edit_text(
+            f"✅ Виграш підтверджено.\nКод: {casino_type} - {code_text}"
+        )
+
+        # повідомлення користувачу
+        try:
+            await cb.bot.send_message(
+                user_id,
+                f"🎉 Ваш виграш підтверджено!\n\n🎁 Бажаю удачі в грі\n\n 🔗 {url}",
+            )
+        except Exception as e:
+            logging.warning(f"Не вдалося надіслати код користувачу {user_id}: {e}")
+
+    # --- Якщо адмін відхиляє ---
+    else:
+        if pending.get("code_id"):
+            await mark_code_unused(pending["code_id"])
+
+        await set_pending_status(pending_id, "rejected")
+        await cb.message.edit_text(
+            "❌ Виграш відхилено. Код повернуто у пул (якщо був)."
+        )
+
+        try:
+            await cb.bot.send_message(
+                user_id,
+                "❌ Ваш запит на отримання коду відхилено. Адмін зв'яжеться з вами.",
+            )
+        except Exception:
+            pass
+
+    await cb.answer()
