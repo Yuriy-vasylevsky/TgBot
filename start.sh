@@ -1,16 +1,22 @@
 #!/bin/bash
-echo "🚀 Starting Telegram Bot..."
+echo "🚀 Starting Telegram Bot on Railway..."
 
-# Активуємо середовище Railway
-source /app/.venv/bin/activate
+# Активуємо віртуальне середовище Railway
+if [ -f "/app/.venv/bin/activate" ]; then
+    source /app/.venv/bin/activate
+    echo "✅ Virtual environment activated"
+else
+    echo "⚠️ Virtual environment not found, creating new one..."
+    python3 -m venv /app/.venv
+    source /app/.venv/bin/activate
+    pip install -r requirements.txt
+fi
 
-# Перевіримо, чи існує база
+# Перевіримо чи існує база
 if [ ! -f "users.db" ]; then
-  echo "📦 Створюємо нову базу users.db..."
+  echo "📦 Creating users.db..."
   touch users.db
 fi
 
-# Запуск
-python main.py
-
-# web: bash start.sh
+# Запуск бота
+python3 main.py
