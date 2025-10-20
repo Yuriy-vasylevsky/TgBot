@@ -9,6 +9,8 @@ from menu import actions_menu, main_menu
 from db import has_claimed_gift
 import config
 from games import games_menu as imported_games_menu
+
+
 from aiogram.types import Message
 
 router = Router()
@@ -34,9 +36,21 @@ async def send_providers(message: types.Message):
     await message.answer(f"{config.PROVAIDER}")
 
 
+# @router.message(F.text == "💳 Номер карти")
+# async def send_card(message: types.Message):
+#     await message.answer(config.CARD_NUMBER)
+
+
 @router.message(F.text == "💳 Номер карти")
 async def send_card(message: types.Message):
-    await message.answer(config.CARD_NUMBER)
+    from db import get_cards
+
+    cards = await get_cards()
+    text = "💳 Поточні картки:\n\n" + "\n".join(
+        [f"{bank}: <code>{num}</code>" for bank, num in cards]
+    )
+    text += "\n\n💵 Мінімальний платіж — 200 грн\n💸 Мінімальний вивід — 400 грн\n\n⏰ Касир доступний 9:00–00:00"
+    await message.answer(text, parse_mode="HTML")
 
 
 @router.message(F.text == "💥 Демо гра")

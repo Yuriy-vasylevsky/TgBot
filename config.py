@@ -10,7 +10,7 @@ GROUP_LINK = "https://t.me/+Z2dJLGrGRVdmM2Yy"
 CONTACT_PHONE = "https://t.me/KaSSa_4444"
 
 CARD_NUMBER = """
-💳 Приват : 5169 3600 2817 8204
+💳 Приват : 5457 0825 1854 3470
 💳 Ощад : 4790 7299 2105 9994
 
 💵 Мінімальний платіж — 200 грн

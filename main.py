@@ -22,12 +22,13 @@ from db import (
     get_all_users,
 )
 
-from games import register_game_handlers
+# from games import register_game_handlers
 from stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin import router as admin_router
 from menu import main_menu
-from games import router as games_router
+
+# from games import router as games_router
 from aiogram import F
 from random import choices
 import string, asyncio
@@ -40,6 +41,15 @@ from aiogram.types import (
 from aiogram import types, F
 from aiogram import Bot, Dispatcher
 from middlewares.ban_middleware import BanMiddleware
+
+# from games.one_of_three import register_coupon_game
+# from games import slot_router, one_of_three_router, rewards_router
+from games import slot_router, one_of_three_router, rewards_router, blackjack_router
+from handlers.profile import router as profile_router
+
+
+# усередині main():
+from games import slot
 
 
 # ==========================
@@ -55,7 +65,15 @@ dp = Dispatcher()
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
-dp.include_router(games_router)
+# dp.include_router(games_router)
+dp.include_router(profile_router)
+
+
+dp.include_router(slot_router)
+dp.include_router(one_of_three_router)
+dp.include_router(rewards_router)
+dp.include_router(blackjack_router)
+
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 ADMIN_ID = config.ADMIN_ID
@@ -89,21 +107,6 @@ def generate_promocode(length: int = 8) -> str:
     characters = string.ascii_uppercase + string.digits
     return "".join(random.choices(characters, k=length))
 
-
-# ==========================
-# Хендлери
-# ==========================
-# @dp.message(Command("start"))
-# async def cmd_start(message: types.Message):
-#     user_id = message.from_user.id
-#     is_admin = user_id == ADMIN_ID
-#     gift_claimed = await has_claimed_gift(user_id)
-
-#     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
-
-#     await message.answer(
-#         f"Привіт, {message.from_user.full_name}!", reply_markup=keyboard
-#     )
 
 from aiogram import types
 from aiogram.filters import Command
@@ -195,24 +198,56 @@ async def confirm_reset_gifts(message: types.Message):
 # ==========================
 # Обробка підтвердження
 # ==========================
+# @dp.callback_query(F.data == "confirm_reset_gifts")
+# async def reset_gifts_confirmed(callback: types.CallbackQuery):
+#     await callback.message.edit_text("🔄 Скидаємо подарунки...")
+
+#     await reset_all_gifts()
+#     user_ids = await get_all_users()
+
+#     sent = 0
+#     for uid in user_ids:
+#         try:
+#             kb = main_menu(is_admin=(uid == ADMIN_ID), user_has_gift=False)
+#             await bot.send_message(
+#                 chat_id=uid,
+#                 text="🎁 Подарунки оновлено! Ділитись промокодами не можна. Для гравців хто ще нгіразу не грав (або грав давно) у нас бонус буде нараховуватись до депозиту. Бажаю всім удачі.",
+#                 reply_markup=kb,
+#             )
+#             sent += 1
+#             await asyncio.sleep(0.1)
+#         except Exception:
+#             continue
+
+
+#     await callback.message.edit_text(
+#         f"✅ Усі подарунки скинуто.\n📨 Повідомлення відправлено {sent} користувачам."
+#     )
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
     await callback.message.edit_text("🔄 Скидаємо подарунки...")
-
     await reset_all_gifts()
-    user_ids = await get_all_users()
 
+    user_ids = await get_all_users()
     sent = 0
+
     for uid in user_ids:
         try:
             kb = main_menu(is_admin=(uid == ADMIN_ID), user_has_gift=False)
             await bot.send_message(
                 chat_id=uid,
-                text="🎁 Подарунки оновлено! Тепер ви можете отримати свій подарунок.",
+                text=(
+                    "🎁 <b>Подарунки оновлено!</b>\n\n"
+                    "Ділитись промокодами заборонено ⚠️\n"
+                    "Гравцям, які ще не грали або грали давно, "
+                    "бонус буде нараховано на депозит 💰\n\n"
+                    "Бажаю всім удачі у грі! 🍀"
+                ),
                 reply_markup=kb,
+                parse_mode="HTML",
             )
             sent += 1
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.05)
         except Exception:
             continue
 
@@ -245,7 +280,7 @@ async def set_commands():
 async def main():
     await init_db()
     await set_commands()
-    await register_game_handlers(dp, bot, main_menu, ADMIN_ID)
+    # await register_game_handlers(dp, bot, main_menu, ADMIN_ID)
     logging.info("🚀 Бот запущений!")
     await dp.start_polling(bot)
 

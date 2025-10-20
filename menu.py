@@ -12,24 +12,45 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
         keyboard = [
             ["🎮 Ігри"],
             ["➕ Додати код", "📜 Перегляд кодів"],
-            ["➕ Створити промокод", "🎟 Активні промокоди"],
-            ["🎁 Скинути подарунки"],
-            # ["📊 Статистика"],
-            # ["🎯 Winrate"],
+            ["🤞 Згенерувати промо"],
+            ["🎟 Активні промокоди"],
+            # ["💳 Керування картами"],
+            ["🎯 Winrate", "📊 Статистика"],
             ["⚙️ Адмін панель"],
         ]
     else:
         keyboard = [
             ["🎟 Ввести промокод"],
             ["🔹 Акції"],
+            ["👤 Мій кабінет"],
             ["💳 Номер карти"],
             ["🎲 Група", "💎 Касир"],
             ["💫 КОД в посилання", "🏅 Провайдери"],
-            # [ "💥 Демо гра"],
         ]
         if not user_has_gift:
             keyboard.append(["🎁 Подарунок"])
 
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        resize_keyboard=True,
+    )
+
+
+# ==========================
+# Адмін-меню
+# ==========================
+def admin_menu():
+    keyboard = [
+        ["📢 Розсилка", "👥 Список користувачів"],
+        # ["👥 Список користувачів"],
+        ["🎁 Скинути подарунки"],
+        ["➕ Створити промокод"],
+        # ["📊 Статистика"],
+        ["💳 Керування картами"],
+        ["🚫 Забанити", "🔓 Розбанити"],
+        ["📋 Список банів"],
+        ["🔙 Назад до головного меню"],
+    ]
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
         resize_keyboard=True,
@@ -44,27 +65,6 @@ def actions_menu():
         ["🔙 Назад до головного меню"],
         ["🎮 Бонус на Superomatic", "🎲 Сейф"],
         ["🃏 Cash Back", "🎟 Промокоди"],
-    ]
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
-        resize_keyboard=True,
-    )
-
-
-# ==========================
-# Адмін-меню
-# ==========================
-def admin_menu():
-    keyboard = [
-        ["📢 Розсилка"],
-        ["👥 Список користувачів"],
-        # ["➕ Створити промокод", "🎟 Активні промокоди"],
-        # ["🎟 Активні промокоди"],
-        ["📊 Статистика"],
-        ["🎯 Winrate"],
-        ["🚫 Забанити по ID", "🔓 Розбанити по ID"],
-        ["📋 Список банів"],
-        ["🔙 Назад до головного меню"],
     ]
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
