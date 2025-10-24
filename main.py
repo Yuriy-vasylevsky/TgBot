@@ -1,3 +1,19 @@
+import socket
+import sys
+
+# ===============================
+# Захист від подвійного запуску
+# ===============================
+LOCK_PORT = 9999  # будь-який вільний порт
+_lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+try:
+    _lock_socket.bind(("127.0.0.1", LOCK_PORT))
+except OSError:
+    print("❌ Бот уже запущений! Другий екземпляр заблоковано.")
+    sys.exit(0)
+
+
 import logging
 import asyncio
 import random
@@ -44,13 +60,16 @@ from middlewares.ban_middleware import BanMiddleware
 
 # from games.one_of_three import register_coupon_game
 # from games import slot_router, one_of_three_router, rewards_router
-from games import slot_router, one_of_three_router, rewards_router, blackjack_router, fortune_router
+from games import (
+    slot_router,
+    one_of_three_router,
+    rewards_router,
+    blackjack_router,
+    fortune_router,
+)
 from handlers.profile import router as profile_router
+
 # from fortune import router as fortune_router
-
-
-# усередині main():
-from games import slot
 
 
 # ==========================
