@@ -13,131 +13,6 @@ DB_PATH = BASE_DIR / "users.db"
 # ---------------------- Ініціалізація ----------------------
 
 
-# async def init_db():
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         # ===================== Таблиця користувачів =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS users (
-#                 user_id INTEGER PRIMARY KEY,
-#                 username TEXT,
-#                 full_name TEXT,
-#                 has_access INTEGER DEFAULT 0,
-#                 last_active DATETIME DEFAULT (DATETIME('now', '+3 hours'))
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # ===================== Додаткові колонки подарунків =====================
-#         await add_gift_columns(db)
-
-#         # ===================== Таблиця промокодів =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS promocodes (
-#                 code TEXT PRIMARY KEY,
-#                 active INTEGER DEFAULT 1
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # ===================== Таблиця статистики ігор =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS game_stats (
-#                 game_name TEXT PRIMARY KEY,
-#                 total_games INTEGER DEFAULT 0,
-#                 wins INTEGER DEFAULT 0
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # ===================== Таблиця слот-сесій =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS slot_sessions (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 user_id INTEGER,
-#                 result TEXT,
-#                 final_balance INTEGER,
-#                 ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # ===================== Таблиця кодів казино =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS casino_codes (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 casino_type TEXT,
-#                 code TEXT,
-#                 used INTEGER DEFAULT 0
-#             )
-#             """
-#         )
-
-#         # ===================== Таблиця очікуючих винагород =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS pending_rewards (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 user_id INTEGER,
-#                 code_id INTEGER,
-#                 casino_type TEXT,
-#                 status TEXT DEFAULT 'pending',
-#                 ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # ===================== Таблиця заблокованих користувачів =====================
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS banned_users (
-#                 user_id INTEGER PRIMARY KEY,
-#                 reason TEXT,
-#                 banned_by INTEGER,
-#                 ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
-#             )
-#             """
-#         )
-
-#         # ---------------------- Таблиця номерів карт ----------------------
-#     await db.execute(
-#         """
-#         CREATE TABLE IF NOT EXISTS cards (
-#             id INTEGER PRIMARY KEY AUTOINCREMENT,
-#             bank_name TEXT,
-#             card_number TEXT
-#         )
-#         """
-#     )
-#     await db.commit()
-
-#     # Якщо таблиця пуста — додати дефолтні картки
-#     cursor = await db.execute("SELECT COUNT(*) FROM cards")
-#     count = (await cursor.fetchone())[0]
-#     if count == 0:
-#         await db.executemany(
-#             "INSERT INTO cards (bank_name, card_number) VALUES (?, ?)",
-#             [
-#                 ("Приват", "5457 0825 1854 3470"),
-#                 ("Ощад", "4790 7299 2105 9994"),
-#             ],
-#         )
-
-
-#         await db.commit()
-
-#         await add_profile_columns(db)
-
-
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         # ===================== Таблиця користувачів =====================
@@ -573,13 +448,17 @@ async def set_gift_claimed(user_id: int, claimed: bool):
 import aiosqlite
 from config import DB_PATH
 
+
 async def reset_all_gifts():
     """Скидає статус отриманих подарунків у всіх користувачів."""
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, gift_claimed INTEGER DEFAULT 0)")
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, gift_claimed INTEGER DEFAULT 0)"
+        )
         await db.execute("UPDATE users SET gift_claimed = 0")
         await db.commit()
     print("✅ Подарунки скинуто для всіх користувачів.")
+
 
 # Отримати всіх користувачів
 async def get_all_users() -> list[int]:
@@ -824,6 +703,14 @@ async def increment_games_played(user_id: int):
         await db.commit()
 
 
+async def reset_all_game_stats():
+    """Скидає статистику зіграних ігор для всіх користувачів."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET games_played = 0")
+        await db.commit()
+    print("✅ Статистика ігор успішно очищена!")
+
+
 # ______________________________________________ НОмера карт _______________________________
 async def get_cards():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -838,3 +725,6 @@ async def update_card(bank_name: str, new_number: str):
             (new_number, bank_name),
         )
         await db.commit()
+
+
+# _____________________________________Очистка зіграних ігор _______________________________

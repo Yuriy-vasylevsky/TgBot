@@ -812,3 +812,43 @@ async def save_new_card(message: types.Message, state: FSMContext):
         reply_markup=admin_menu(),
     )
     await state.clear()
+
+from aiogram import Router, F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from config import ADMIN_ID
+from db import reset_all_game_stats
+
+# router = Router()
+
+@router.message(F.text == "🧹 Очистити статистику ігор")
+async def confirm_clear_stats(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Ця команда доступна лише адміну.")
+        return
+
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Так, очистити", callback_data="admin:confirm_clear_stats"),
+                InlineKeyboardButton(text="❌ Ні", callback_data="admin:cancel_clear"),
+            ]
+        ]
+    )
+    await message.answer("⚠️ Ви впевнені, що хочете обнулити статистику всіх користувачів?", reply_markup=keyboard)
+
+
+@router.callback_query(F.data == "admin:confirm_clear_stats")
+async def clear_stats(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        await cb.answer("⛔ Тільки адміністратор може це зробити.")
+        return
+
+    await cb.answer()
+    await reset_all_game_stats()
+    await cb.message.edit_text("✅ Статистика всіх гравців успішно обнулена!")
+
+
+@router.callback_query(F.data == "admin:cancel_clear")
+async def cancel_clear(cb: types.CallbackQuery):
+    await cb.answer("❌ Скасовано.")
+    await cb.message.edit_text("Очищення статистики скасовано.")

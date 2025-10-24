@@ -44,8 +44,9 @@ from middlewares.ban_middleware import BanMiddleware
 
 # from games.one_of_three import register_coupon_game
 # from games import slot_router, one_of_three_router, rewards_router
-from games import slot_router, one_of_three_router, rewards_router, blackjack_router
+from games import slot_router, one_of_three_router, rewards_router, blackjack_router, fortune_router
 from handlers.profile import router as profile_router
+# from fortune import router as fortune_router
 
 
 # усередині main():
@@ -67,7 +68,7 @@ dp.include_router(general_router)
 dp.include_router(admin_router)
 # dp.include_router(games_router)
 dp.include_router(profile_router)
-
+dp.include_router(fortune_router)
 
 dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
