@@ -243,6 +243,111 @@ async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+# ______________________________________________________________________________________________________
+import asyncio
+import aiosqlite
+from aiogram import Router, F, types
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from config import ADMIN_ID
+from menu import main_menu
+
+
+# ---------------- FSM ----------------
+class MenuUpdate(StatesGroup):
+    waiting_for_text = State()
+
+
+# ---------------- Команда для адміна ----------------
+@router.message(F.text == "🛠 Оновити меню")
+async def start_menu_update(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(MenuUpdate.waiting_for_text)
+
+    cancel_kb = InlineKeyboardBuilder()
+    cancel_kb.button(text="❌ Скасувати", callback_data="cancel_menu_update")
+
+    await message.answer(
+        "✍️ Введіть текст, який буде надіслано всім користувачам разом з новим меню.\n\n"
+        "Натисніть «❌ Скасувати», щоб вийти.",
+        reply_markup=cancel_kb.as_markup(),
+    )
+
+
+# ---------------- Отримання тексту ----------------
+@router.message(MenuUpdate.waiting_for_text)
+async def process_menu_update_text(message: types.Message, state: FSMContext):
+    text = message.text
+
+    confirm_kb = InlineKeyboardBuilder()
+    confirm_kb.button(text="✅ Надіслати", callback_data="confirm_menu_update")
+    confirm_kb.button(text="❌ Скасувати", callback_data="cancel_menu_update")
+
+    await state.update_data(update_text=text)
+    await message.answer(
+        f"📨 <b>Підтвердіть оновлення меню</b>\n\n" f"Текст повідомлення:\n\n{text}",
+        parse_mode="HTML",
+        reply_markup=confirm_kb.as_markup(),
+    )
+
+
+# ---------------- Підтвердження ----------------
+@router.callback_query(F.data == "confirm_menu_update")
+async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    text = data.get("update_text", "")
+
+    await callback.message.edit_text("📤 Починаю оновлення меню...")
+    gift_claimed = await has_claimed_gift(user_id)
+    async with aiosqlite.connect("users.db") as conn:
+        async with conn.execute("SELECT user_id FROM users") as cur:
+            rows = await cur.fetchall()
+
+    total = len(rows)
+    success = 0
+    failed = 0
+
+    for (user_id,) in rows:
+        try:
+            await callback.bot.send_message(
+                user_id,
+                text,
+                reply_markup=main_menu(
+                    is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed
+                ),
+                parse_mode="HTML",
+            )
+            success += 1
+            await asyncio.sleep(0.05)
+        except Exception:
+            failed += 1
+            continue
+
+    await callback.message.answer(
+        f"✅ Оновлення меню завершено!\n\n"
+        f"📬 Успішно: <b>{success}</b>\n"
+        f"⚠️ Помилок: <b>{failed}</b>\n"
+        f"👥 Всього користувачів: <b>{total}</b>",
+        parse_mode="HTML",
+    )
+
+    await state.clear()
+    await callback.answer()
+
+
+# ---------------- Скасування ----------------
+@router.callback_query(F.data == "cancel_menu_update")
+async def cancel_menu_update(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Оновлення меню скасовано.")
+    await callback.answer()
+
+
+# ___________________________________________________________________________________________________________________
+
+
 # ---------------- FSM ----------------
 # class PromoFSM(StatesGroup):
 #     waiting_for_count = State()
@@ -813,12 +918,14 @@ async def save_new_card(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
+
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from config import ADMIN_ID
 from db import reset_all_game_stats
 
 # router = Router()
+
 
 @router.message(F.text == "🧹 Очистити статистику ігор")
 async def confirm_clear_stats(message: types.Message):
@@ -829,12 +936,17 @@ async def confirm_clear_stats(message: types.Message):
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Так, очистити", callback_data="admin:confirm_clear_stats"),
+                InlineKeyboardButton(
+                    text="✅ Так, очистити", callback_data="admin:confirm_clear_stats"
+                ),
                 InlineKeyboardButton(text="❌ Ні", callback_data="admin:cancel_clear"),
             ]
         ]
     )
-    await message.answer("⚠️ Ви впевнені, що хочете обнулити статистику всіх користувачів?", reply_markup=keyboard)
+    await message.answer(
+        "⚠️ Ви впевнені, що хочете обнулити статистику всіх користувачів?",
+        reply_markup=keyboard,
+    )
 
 
 @router.callback_query(F.data == "admin:confirm_clear_stats")

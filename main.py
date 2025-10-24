@@ -68,6 +68,8 @@ from games import (
     fortune_router,
 )
 from handlers.profile import router as profile_router
+# from handlers.menu_update import router as menu_update_router
+
 
 # from fortune import router as fortune_router
 
@@ -93,7 +95,7 @@ dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
-
+# dp.include_router(menu_update_router)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 ADMIN_ID = config.ADMIN_ID
