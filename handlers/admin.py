@@ -965,3 +965,32 @@ async def clear_stats(cb: types.CallbackQuery):
 async def cancel_clear(cb: types.CallbackQuery):
     await cb.answer("❌ Скасовано.")
     await cb.message.edit_text("Очищення статистики скасовано.")
+
+
+# _________________________ скачати бд ________________________________________________
+
+from aiogram import Router, F, types
+from aiogram.types import FSInputFile
+from config import ADMIN_ID
+from pathlib import Path
+
+router = Router()
+
+
+@router.message(F.text == "📦 Скачати БД")
+async def download_db(message: types.Message):
+    """Відправляє адміну файл бази даних users.db"""
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Ця команда доступна лише адміну.")
+        return
+
+    db_path = Path(__file__).resolve().parent.parent / "users.db"
+
+    if not db_path.exists():
+        await message.answer("⚠️ Файл бази даних не знайдено.")
+        return
+
+    await message.answer("⏳ Готую базу даних до відправки...")
+    await message.answer_document(
+        FSInputFile(db_path), caption="📦 База даних користувачів"
+    )
