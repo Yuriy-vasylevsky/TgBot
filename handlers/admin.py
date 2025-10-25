@@ -300,7 +300,7 @@ async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
     text = data.get("update_text", "")
 
     await callback.message.edit_text("📤 Починаю оновлення меню...")
-    gift_claimed = await has_claimed_gift(user_id)
+
     async with aiosqlite.connect("users.db") as conn:
         async with conn.execute("SELECT user_id FROM users") as cur:
             rows = await cur.fetchall()
@@ -310,6 +310,7 @@ async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
     failed = 0
 
     for (user_id,) in rows:
+        gift_claimed = await has_claimed_gift(user_id)
         try:
             await callback.bot.send_message(
                 user_id,
