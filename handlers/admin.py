@@ -974,8 +974,6 @@ from aiogram.types import FSInputFile
 from config import ADMIN_ID
 from pathlib import Path
 
-router = Router()
-
 
 @router.message(F.text == "📦 Скачати БД")
 async def download_db(message: types.Message):
