@@ -1,4 +1,3 @@
-
 import asyncio
 import random
 from aiogram import F, types, Router
@@ -249,75 +248,75 @@ async def in_round_handler(message: types.Message, state: FSMContext):
 #     await state.update_data(balance=balance)
 #     await message.answer(result, parse_mode="HTML")
 
-  
-    # --- КІНЕЦЬ ГРИ / ФІНАЛЬНА СЕСІЯ ---
-    # if balance >= 30 or balance <= 0:
-    #     # ✅ Записуємо результат сесії у статистику (як у слотах)
-    #     is_session_win = balance >= 30
-    #     try:
-    #         if message.from_user.id != ADMIN_ID:
-    #             await add_blackjack_session(is_session_win)
-    #     except Exception as e:
-    #         print(f"[DB Error] Не вдалося записати сесію Blackjack: {e}")
 
-    #     # --- Повідомлення адміну про фінал ---
-    #     outcome = "🏆 ВИГРАВ ГРУ" if balance >= 30 else "💀 ПРОГРАВ УСЕ"
-    #     try:
-    #         await message.bot.send_message(
-    #             ADMIN_ID,
-    #             f"🃏 <b>Blackjack фінал</b>\n"
-    #             f"👤 {message.from_user.full_name} (ID: <code>{message.from_user.id}</code>)\n"
-    #             f"🎯 Результат: {outcome}\n"
-    #             f"💵 Остання ставка: {bet}\n"
-    #             f"🏦 Баланс: {balance}",
-    #             parse_mode="HTML",
-    #         )
-    #     except Exception:
-    #         pass
+# --- КІНЕЦЬ ГРИ / ФІНАЛЬНА СЕСІЯ ---
+# if balance >= 30 or balance <= 0:
+#     # ✅ Записуємо результат сесії у статистику (як у слотах)
+#     is_session_win = balance >= 30
+#     try:
+#         if message.from_user.id != ADMIN_ID:
+#             await add_blackjack_session(is_session_win)
+#     except Exception as e:
+#         print(f"[DB Error] Не вдалося записати сесію Blackjack: {e}")
 
-    #     # --- Якщо гравець ВИГРАВ (досяг 30 купонів) ---
-    #     if balance >= 30:
-    #         kb = InlineKeyboardMarkup(
-    #             inline_keyboard=[
-    #                 [
-    #                     InlineKeyboardButton(
-    #                         text="🏆 Champion",
-    #                         callback_data=f"choose_reward:champion:{message.from_user.id}",
-    #                     ),
-    #                     InlineKeyboardButton(
-    #                         text="🎰 Superomatic",
-    #                         callback_data=f"choose_reward:superomatic:{message.from_user.id}",
-    #                     ),
-    #                 ]
-    #             ]
-    #         )
-    #         await message.answer(
-    #             "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
-    #         )
-    #         await state.clear()
-    #         return
+#     # --- Повідомлення адміну про фінал ---
+#     outcome = "🏆 ВИГРАВ ГРУ" if balance >= 30 else "💀 ПРОГРАВ УСЕ"
+#     try:
+#         await message.bot.send_message(
+#             ADMIN_ID,
+#             f"🃏 <b>Blackjack фінал</b>\n"
+#             f"👤 {message.from_user.full_name} (ID: <code>{message.from_user.id}</code>)\n"
+#             f"🎯 Результат: {outcome}\n"
+#             f"💵 Остання ставка: {bet}\n"
+#             f"🏦 Баланс: {balance}",
+#             parse_mode="HTML",
+#         )
+#     except Exception:
+#         pass
 
-    #     # --- Якщо гравець ПРОГРАВ (баланс 0) ---
-    #     if balance <= 0:
-    #         gift_claimed = await has_claimed_gift(message.from_user.id)
-    #         await message.answer(
-    #             "💀 Баланс 0 купонів. Гру завершено.",
-    #             reply_markup=main_menu(
-    #                 is_admin=(message.from_user.id == ADMIN_ID),
-    #                 user_has_gift=gift_claimed,
-    #             ),
-    #         )
-    #         await state.clear()
-    #         return
+#     # --- Якщо гравець ВИГРАВ (досяг 30 купонів) ---
+#     if balance >= 30:
+#         kb = InlineKeyboardMarkup(
+#             inline_keyboard=[
+#                 [
+#                     InlineKeyboardButton(
+#                         text="🏆 Champion",
+#                         callback_data=f"choose_reward:champion:{message.from_user.id}",
+#                     ),
+#                     InlineKeyboardButton(
+#                         text="🎰 Superomatic",
+#                         callback_data=f"choose_reward:superomatic:{message.from_user.id}",
+#                     ),
+#                 ]
+#             ]
+#         )
+#         await message.answer(
+#             "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
+#         )
+#         await state.clear()
+#         return
 
-    # # Після першої гри меню не з'являється
-    # await asyncio.sleep(1)
-    # await message.answer(
-    #     f"Оберіть ставку:",
-    #     reply_markup=bet_keyboard(balance, show_menu_button=False),
-    #     parse_mode="HTML",
-    # )
-    # await state.set_state(BlackjackFSM.choosing_bet)
+#     # --- Якщо гравець ПРОГРАВ (баланс 0) ---
+#     if balance <= 0:
+#         gift_claimed = await has_claimed_gift(message.from_user.id)
+#         await message.answer(
+#             "💀 Баланс 0 купонів. Гру завершено.",
+#             reply_markup=main_menu(
+#                 is_admin=(message.from_user.id == ADMIN_ID),
+#                 user_has_gift=gift_claimed,
+#             ),
+#         )
+#         await state.clear()
+#         return
+
+# # Після першої гри меню не з'являється
+# await asyncio.sleep(1)
+# await message.answer(
+#     f"Оберіть ставку:",
+#     reply_markup=bet_keyboard(balance, show_menu_button=False),
+#     parse_mode="HTML",
+# )
+# await state.set_state(BlackjackFSM.choosing_bet)
 
 
 # ================== FINISH ROUND ==================
@@ -330,45 +329,45 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     balance = data["balance"]
     user_total = calc_total(user_cards)
 
-    # === 1️⃣ Показуємо лише першу карту дилера ===
+    # === 1️⃣ Відображаємо дилера (тільки першу карту) ===
     hidden_card = "❓"
     shown_cards = [dealer_cards[0], hidden_card]
-    dealer_msg = await message.answer(
+    dealer_table = await message.answer(
         f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(shown_cards)}",
         parse_mode="HTML",
     )
-    await asyncio.sleep(1.2)
 
-    # === 2️⃣ Анімація — дилер думає, потім відкриває карту ===
-    for dots in ["•", "• •", "• • •", "• •"]:
-        try:
-            await dealer_msg.edit_text(
-                f"🤵‍♂️ Дилер дивиться на карти {dots}", parse_mode="HTML"
-            )
-            await asyncio.sleep(0.4)
-        except Exception:
-            pass
+    # Анімаційне повідомлення “Дилер думає…”
+    dealer_action = await message.answer("🤵‍♂️ Дилер думає •", parse_mode="HTML")
 
-    await asyncio.sleep(0.4)
+    async def think(text="🤵‍♂️ Дилер думає"):
+        for dots in ["•", "• •", "• • •", "• •"]:
+            try:
+                await dealer_action.edit_text(f"{text} {dots}", parse_mode="HTML")
+                await asyncio.sleep(0.4)
+            except Exception:
+                pass
+
+    # === 2️⃣ Анімація відкриття карт ===
+    await think("🤵‍♂️ Дилер перевіряє карти")
+    await asyncio.sleep(0.6)
+    await dealer_action.edit_text(
+        "🤵‍♂️ Дилер відкриває другу карту...", parse_mode="HTML"
+    )
+    await asyncio.sleep(1)
+
+    # Відкриваємо обидві карти у другому повідомленні
     dealer_total = calc_total(dealer_cards)
-    await dealer_msg.edit_text(
-        f"🤵‍♂️ Дилер відкриває карту...\n\n"
-        f"<b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
+    await dealer_table.edit_text(
+        f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
         parse_mode="HTML",
     )
     await asyncio.sleep(1)
 
-    # === 3️⃣ Якщо дилер добирає — оновлюємо те ж повідомлення ===
+    # === 3️⃣ Дилер добирає карти ===
     while dealer_total < 17:
-        try:
-            await dealer_msg.edit_text("🤵‍♂️ Дилер думає •", parse_mode="HTML")
-            await asyncio.sleep(0.4)
-            await dealer_msg.edit_text("🤵‍♂️ Дилер думає • •", parse_mode="HTML")
-            await asyncio.sleep(0.4)
-            await dealer_msg.edit_text("🤵‍♂️ Дилер думає • • •", parse_mode="HTML")
-            await asyncio.sleep(0.4)
-        except Exception:
-            pass
+        await think("🤵‍♂️ Дилер вирішує взяти ще")
+        await asyncio.sleep(0.4)
 
         if not deck:
             deck = DECK_TEMPLATE.copy()
@@ -378,18 +377,25 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
         dealer_cards.append(new_card)
         dealer_total = calc_total(dealer_cards)
 
+        # Оновлюємо “стіл” дилера (друге повідомлення)
         try:
-            await dealer_msg.edit_text(
-                f"🤵‍♂️ Дилер бере ще карту: {new_card}\n\n"
-                f"<b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
+            await dealer_table.edit_text(
+                f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
                 parse_mode="HTML",
             )
         except Exception:
             pass
-        await asyncio.sleep(1)
 
-    # === 4️⃣ Показуємо фінальні карти обох гравців ===
-    await asyncio.sleep(0.8)
+        await dealer_action.edit_text(
+            f"🤵‍♂️ Дилер бере карту: {new_card}", parse_mode="HTML"
+        )
+        await asyncio.sleep(1.2)
+
+    # === 4️⃣ Завершення анімації ===
+    await dealer_action.edit_text("🤵‍♂️ Дилер закінчив свій хід.", parse_mode="HTML")
+    await asyncio.sleep(0.6)
+
+    # === 5️⃣ Показуємо підсумкові карти гравця ===
     await message.answer(
         f"🧑‍🎓 <b>Твої карти:</b> {show_cards(user_cards)}  =  <b>{user_total}</b>\n"
         f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
@@ -462,7 +468,9 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                     ]
                 ]
             )
-            await message.answer("🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb)
+            await message.answer(
+                "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
+            )
             await state.clear()
             return
 
