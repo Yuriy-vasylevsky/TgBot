@@ -138,7 +138,7 @@ async def promo_cash(message: types.Message):
 @router.callback_query(F.data == "promo_cash_details")
 async def promo_cash_details(callback: types.CallbackQuery):
     await callback.message.answer(config.AK4_DETAILS, parse_mode="Markdown")
-    audio_path = Path(__file__).parent.parent / "audio" / "promo_cash.mp3"
+    audio_path = Path(__file__).parent.parent / "audio" / "promo.mp3"
     await callback.message.answer_audio(
         FSInputFile(audio_path), title="Промокоди — твій ключ до виграшу!"
     )
