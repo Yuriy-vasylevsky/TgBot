@@ -1,3 +1,4 @@
+
 import asyncio
 import random
 from aiogram import F, types, Router
@@ -248,75 +249,75 @@ async def in_round_handler(message: types.Message, state: FSMContext):
 #     await state.update_data(balance=balance)
 #     await message.answer(result, parse_mode="HTML")
 
+  
+    # --- КІНЕЦЬ ГРИ / ФІНАЛЬНА СЕСІЯ ---
+    # if balance >= 30 or balance <= 0:
+    #     # ✅ Записуємо результат сесії у статистику (як у слотах)
+    #     is_session_win = balance >= 30
+    #     try:
+    #         if message.from_user.id != ADMIN_ID:
+    #             await add_blackjack_session(is_session_win)
+    #     except Exception as e:
+    #         print(f"[DB Error] Не вдалося записати сесію Blackjack: {e}")
 
-# --- КІНЕЦЬ ГРИ / ФІНАЛЬНА СЕСІЯ ---
-# if balance >= 30 or balance <= 0:
-#     # ✅ Записуємо результат сесії у статистику (як у слотах)
-#     is_session_win = balance >= 30
-#     try:
-#         if message.from_user.id != ADMIN_ID:
-#             await add_blackjack_session(is_session_win)
-#     except Exception as e:
-#         print(f"[DB Error] Не вдалося записати сесію Blackjack: {e}")
+    #     # --- Повідомлення адміну про фінал ---
+    #     outcome = "🏆 ВИГРАВ ГРУ" if balance >= 30 else "💀 ПРОГРАВ УСЕ"
+    #     try:
+    #         await message.bot.send_message(
+    #             ADMIN_ID,
+    #             f"🃏 <b>Blackjack фінал</b>\n"
+    #             f"👤 {message.from_user.full_name} (ID: <code>{message.from_user.id}</code>)\n"
+    #             f"🎯 Результат: {outcome}\n"
+    #             f"💵 Остання ставка: {bet}\n"
+    #             f"🏦 Баланс: {balance}",
+    #             parse_mode="HTML",
+    #         )
+    #     except Exception:
+    #         pass
 
-#     # --- Повідомлення адміну про фінал ---
-#     outcome = "🏆 ВИГРАВ ГРУ" if balance >= 30 else "💀 ПРОГРАВ УСЕ"
-#     try:
-#         await message.bot.send_message(
-#             ADMIN_ID,
-#             f"🃏 <b>Blackjack фінал</b>\n"
-#             f"👤 {message.from_user.full_name} (ID: <code>{message.from_user.id}</code>)\n"
-#             f"🎯 Результат: {outcome}\n"
-#             f"💵 Остання ставка: {bet}\n"
-#             f"🏦 Баланс: {balance}",
-#             parse_mode="HTML",
-#         )
-#     except Exception:
-#         pass
+    #     # --- Якщо гравець ВИГРАВ (досяг 30 купонів) ---
+    #     if balance >= 30:
+    #         kb = InlineKeyboardMarkup(
+    #             inline_keyboard=[
+    #                 [
+    #                     InlineKeyboardButton(
+    #                         text="🏆 Champion",
+    #                         callback_data=f"choose_reward:champion:{message.from_user.id}",
+    #                     ),
+    #                     InlineKeyboardButton(
+    #                         text="🎰 Superomatic",
+    #                         callback_data=f"choose_reward:superomatic:{message.from_user.id}",
+    #                     ),
+    #                 ]
+    #             ]
+    #         )
+    #         await message.answer(
+    #             "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
+    #         )
+    #         await state.clear()
+    #         return
 
-#     # --- Якщо гравець ВИГРАВ (досяг 30 купонів) ---
-#     if balance >= 30:
-#         kb = InlineKeyboardMarkup(
-#             inline_keyboard=[
-#                 [
-#                     InlineKeyboardButton(
-#                         text="🏆 Champion",
-#                         callback_data=f"choose_reward:champion:{message.from_user.id}",
-#                     ),
-#                     InlineKeyboardButton(
-#                         text="🎰 Superomatic",
-#                         callback_data=f"choose_reward:superomatic:{message.from_user.id}",
-#                     ),
-#                 ]
-#             ]
-#         )
-#         await message.answer(
-#             "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
-#         )
-#         await state.clear()
-#         return
+    #     # --- Якщо гравець ПРОГРАВ (баланс 0) ---
+    #     if balance <= 0:
+    #         gift_claimed = await has_claimed_gift(message.from_user.id)
+    #         await message.answer(
+    #             "💀 Баланс 0 купонів. Гру завершено.",
+    #             reply_markup=main_menu(
+    #                 is_admin=(message.from_user.id == ADMIN_ID),
+    #                 user_has_gift=gift_claimed,
+    #             ),
+    #         )
+    #         await state.clear()
+    #         return
 
-#     # --- Якщо гравець ПРОГРАВ (баланс 0) ---
-#     if balance <= 0:
-#         gift_claimed = await has_claimed_gift(message.from_user.id)
-#         await message.answer(
-#             "💀 Баланс 0 купонів. Гру завершено.",
-#             reply_markup=main_menu(
-#                 is_admin=(message.from_user.id == ADMIN_ID),
-#                 user_has_gift=gift_claimed,
-#             ),
-#         )
-#         await state.clear()
-#         return
-
-# # Після першої гри меню не з'являється
-# await asyncio.sleep(1)
-# await message.answer(
-#     f"Оберіть ставку:",
-#     reply_markup=bet_keyboard(balance, show_menu_button=False),
-#     parse_mode="HTML",
-# )
-# await state.set_state(BlackjackFSM.choosing_bet)
+    # # Після першої гри меню не з'являється
+    # await asyncio.sleep(1)
+    # await message.answer(
+    #     f"Оберіть ставку:",
+    #     reply_markup=bet_keyboard(balance, show_menu_button=False),
+    #     parse_mode="HTML",
+    # )
+    # await state.set_state(BlackjackFSM.choosing_bet)
 
 
 # ================== FINISH ROUND ==================
@@ -329,33 +330,43 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     balance = data["balance"]
     user_total = calc_total(user_cards)
 
-    # === Дилер "думає" ===
-    thinking = await message.answer("🤵‍♂️ Дилер дивиться на карти •", parse_mode="HTML")
+    # === 1️⃣ Показуємо лише першу карту дилера ===
+    hidden_card = "❓"
+    shown_cards = [dealer_cards[0], hidden_card]
+    dealer_msg = await message.answer(
+        f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(shown_cards)}",
+        parse_mode="HTML",
+    )
+    await asyncio.sleep(1.2)
+
+    # === 2️⃣ Анімація — дилер думає, потім відкриває карту ===
     for dots in ["•", "• •", "• • •", "• •"]:
         try:
-            await thinking.edit_text(
+            await dealer_msg.edit_text(
                 f"🤵‍♂️ Дилер дивиться на карти {dots}", parse_mode="HTML"
             )
             await asyncio.sleep(0.4)
         except Exception:
             pass
-    await asyncio.sleep(0.4)
 
-    # === Відкриває карти в одному повідомленні ===
+    await asyncio.sleep(0.4)
     dealer_total = calc_total(dealer_cards)
-    await thinking.edit_text(
-        f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
+    await dealer_msg.edit_text(
+        f"🤵‍♂️ Дилер відкриває карту...\n\n"
+        f"<b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
         parse_mode="HTML",
     )
-    await asyncio.sleep(0.8)
+    await asyncio.sleep(1)
 
-    # === Дилер бере нові карти до 17 ===
+    # === 3️⃣ Якщо дилер добирає — оновлюємо те ж повідомлення ===
     while dealer_total < 17:
         try:
-            await thinking.edit_text("🤵‍♂️ Дилер думає...", parse_mode="HTML")
-            await asyncio.sleep(0.6)
-            await thinking.edit_text("🤵‍♂️ Дилер вирішує взяти ще...", parse_mode="HTML")
-            await asyncio.sleep(0.6)
+            await dealer_msg.edit_text("🤵‍♂️ Дилер думає •", parse_mode="HTML")
+            await asyncio.sleep(0.4)
+            await dealer_msg.edit_text("🤵‍♂️ Дилер думає • •", parse_mode="HTML")
+            await asyncio.sleep(0.4)
+            await dealer_msg.edit_text("🤵‍♂️ Дилер думає • • •", parse_mode="HTML")
+            await asyncio.sleep(0.4)
         except Exception:
             pass
 
@@ -368,23 +379,24 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
         dealer_total = calc_total(dealer_cards)
 
         try:
-            await thinking.edit_text(
-                f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
+            await dealer_msg.edit_text(
+                f"🤵‍♂️ Дилер бере ще карту: {new_card}\n\n"
+                f"<b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
                 parse_mode="HTML",
             )
         except Exception:
             pass
-        await asyncio.sleep(0.8)
+        await asyncio.sleep(1)
 
-    # === Показуємо підсумкові карти ===
-    await asyncio.sleep(0.6)
+    # === 4️⃣ Показуємо фінальні карти обох гравців ===
+    await asyncio.sleep(0.8)
     await message.answer(
         f"🧑‍🎓 <b>Твої карти:</b> {show_cards(user_cards)}  =  <b>{user_total}</b>\n"
         f"🤵‍♂️ <b>Карти дилера:</b> {show_cards(dealer_cards)}  =  <b>{dealer_total}</b>",
         parse_mode="HTML",
     )
 
-    # ======= Визначення результату =======
+    # ======= Визначаємо результат =======
     if busted or user_total > 21:
         is_win = False
     elif dealer_total > 21 or user_total > dealer_total:
@@ -412,7 +424,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     await state.update_data(balance=balance)
     await message.answer(result, parse_mode="HTML")
 
-    # ======= Фінал гри =======
+    # ======= Кінець гри =======
     if balance >= 30 or balance <= 0:
         is_session_win = balance >= 30
         try:
@@ -450,9 +462,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                     ]
                 ]
             )
-            await message.answer(
-                "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
-            )
+            await message.answer("🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb)
             await state.clear()
             return
 
