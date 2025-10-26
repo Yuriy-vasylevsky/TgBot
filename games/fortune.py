@@ -255,7 +255,7 @@ router = Router(name="fortune")
 FORTUNE_BTN = "🎡 Колесо фортуни"
 
 # === Налаштування ===
-REQUIRED_GAMES = 2  # скільки ігор потрібно для доступу
+REQUIRED_GAMES = 7  # скільки ігор потрібно для доступу
 
 PRIZES = [
     {"title": "30 грн", "weight": 24, "code": "COUPON_5", "value": 5},
