@@ -205,7 +205,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     dealer_action = await message.answer("🤵‍♂️ Дилер думає •", parse_mode="HTML")
 
     async def think(text="🤵‍♂️ Дилер думає"):
-        for dots in ["•", "• •", "• • •", "• •", "•"]:
+        for dots in ["•", "• •", "• • •", "• •"]:
             try:
                 await dealer_action.edit_text(f"{text} {dots}", parse_mode="HTML")
                 await asyncio.sleep(0.6)
@@ -213,8 +213,8 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                 pass
 
     # === 2️⃣ Анімація відкриття карт ===
-    # await think("🤵‍♂️ Дилер перевіряє карти")
-    # await asyncio.sleep(0.6)
+    await think("🤵‍♂️ Дилер перевіряє карти")
+    await asyncio.sleep(0.2)
     await dealer_action.edit_text(
         "🤵‍♂️ Дилер відкриває другу карту...", parse_mode="HTML"
     )
