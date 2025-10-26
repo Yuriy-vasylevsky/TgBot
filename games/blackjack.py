@@ -182,6 +182,7 @@ async def in_round_handler(message: types.Message, state: FSMContext):
         await finish_round(message, state, busted=False)
         return
 
+
 # ================== FINISH ROUND ==================
 async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     data = await state.get_data()
@@ -204,10 +205,10 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     dealer_action = await message.answer("🤵‍♂️ Дилер думає •", parse_mode="HTML")
 
     async def think(text="🤵‍♂️ Дилер думає"):
-        for dots in ["•", "• •", "• • •", "• •", "•" ]:
+        for dots in ["•", "• •", "• • •", "• •", "•"]:
             try:
                 await dealer_action.edit_text(f"{text} {dots}", parse_mode="HTML")
-                await asyncio.sleep(0.4)
+                await asyncio.sleep(0.6)
             except Exception:
                 pass
 
@@ -230,7 +231,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     # === 3️⃣ Дилер добирає карти ===
     while dealer_total < 17:
         await think("🤵‍♂️ Дилер вирішує взяти ще")
-        await asyncio.sleep(0.4)
+        await asyncio.sleep(0.6)
 
         if not deck:
             deck = DECK_TEMPLATE.copy()
