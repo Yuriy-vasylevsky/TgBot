@@ -170,7 +170,7 @@ async def save_user(user_id: int, username: str, full_name: str):
     """
     try:
         # Поточний час +3 години (Київ)
-        kyiv_time = datetime.utcnow() + timedelta(hours=3)
+        kyiv_time = datetime.utcnow() + timedelta(hours=2)
         last_active = kyiv_time.strftime("%Y-%m-%d %H:%M:%S")
 
         async with aiosqlite.connect(DB_PATH) as db:
