@@ -108,7 +108,7 @@ class SaveUserMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
         if isinstance(event, types.Message) and event.from_user:
             try:
-                kyiv_time = datetime.now(timezone.utc) + timedelta(hours=3)
+                kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
                 await save_user(
                     event.from_user.id,
                     event.from_user.username or "",
