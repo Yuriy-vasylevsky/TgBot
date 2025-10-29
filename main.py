@@ -124,7 +124,30 @@ ADMIN_ID = config.ADMIN_ID
 # dp.message.middleware(SaveUserMiddleware())
 
 
+from aiogram import types
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
+import logging
+from datetime import datetime, timezone, timedelta
+from db import save_user
 
+
+class SaveUserMiddleware(BaseMiddleware):
+    async def __call__(self, handler, event, data):
+        if isinstance(event, types.Message) and event.from_user:
+            try:
+                action = event.text or "Невідома дія"
+                await save_user(
+                    event.from_user.id,
+                    event.from_user.username or "",
+                    event.from_user.full_name or "",
+                    action=action,
+                )
+            except Exception as e:
+                logging.error(f"Save user error: {e}")
+        return await handler(event, data)
+
+
+dp.message.middleware(SaveUserMiddleware())
 
 
 # ==========================

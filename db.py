@@ -188,27 +188,144 @@ DB_PATH = Path(__file__).parent / "users.db"
 #             await db.commit()
 #     except Exception as e:
 #         logging.error("Save user error: %s", e)
+# import aiosqlite
+# from datetime import datetime, timezone, timedelta
+
+# async def save_user(user_id: int, username: str, full_name: str):
+#     """Створює або оновлює користувача в БД."""
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         now = datetime.now(timezone.utc) + timedelta(hours=2)
+#         await db.execute(
+#             """
+#             INSERT INTO users (user_id, username, full_name, last_active)
+#             VALUES (?, ?, ?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET
+#                 username = excluded.username,
+#                 full_name = excluded.full_name,
+#                 last_active = excluded.last_active
+#             """,
+#             (user_id, username, full_name, now.isoformat()),
+#         )
+#         await db.commit()
+import aiosqlite
+from datetime import datetime, timedelta, timezone
+
+# DB_PATH = "db.sqlite3"  # або твій шлях до бази
+
+
+# async def save_user(user_id: int, username: str, full_name: str, action: str = None):
+#     """Оновлює або додає користувача з останньою активністю та дією"""
+#     kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
+#     now_str = kyiv_time.isoformat(timespec="seconds")
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         # Переконаємось, що всі потрібні колонки є
+#         await db.execute(
+#             """
+#             CREATE TABLE IF NOT EXISTS users (
+#                 user_id INTEGER PRIMARY KEY,
+#                 username TEXT,
+#                 full_name TEXT,
+#                 last_active TEXT,
+#                 last_actions TEXT
+#             )
+#             """
+#         )
+
+#         # Отримуємо попередні дії
+#         cursor = await db.execute(
+#             "SELECT last_actions FROM users WHERE user_id = ?", (user_id,)
+#         )
+#         row = await cursor.fetchone()
+#         old_actions = row[0] if row and row[0] else ""
+#         await cursor.close()
+
+#         # Формуємо новий список останніх 2 дій
+#         if action:
+#             parts = old_actions.split(" | ") if old_actions else []
+#             parts = (parts + [action])[-2:]
+#             new_actions = " | ".join(parts)
+#         else:
+#             new_actions = old_actions
+
+#         # Додаємо або оновлюємо користувача
+#         await db.execute(
+#             """
+#             INSERT INTO users (user_id, username, full_name, last_active, last_actions)
+#             VALUES (?, ?, ?, ?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET
+#                 username=excluded.username,
+#                 full_name=excluded.full_name,
+#                 last_active=excluded.last_active,
+#                 last_actions=excluded.last_actions
+#             """,
+#             (user_id, username, full_name, now_str, new_actions),
+#         )
+
+#         await db.commit()
+
 import aiosqlite
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 
-DB_PATH = "db.sqlite3"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "users.db"
 
 
-async def save_user(user_id: int, username: str, full_name: str):
-    """Створює або оновлює користувача в БД."""
+async def add_user_columns():
+    """Гарантує, що у таблиці users є потрібні колонки"""
     async with aiosqlite.connect(DB_PATH) as db:
-        now = datetime.now(timezone.utc) + timedelta(hours=2)
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            cols = [row[1] for row in await cursor.fetchall()]
+
+        # додаємо, якщо нема
+        if "last_active" not in cols:
+            await db.execute("ALTER TABLE users ADD COLUMN last_active TEXT")
+        if "last_actions" not in cols:
+            await db.execute("ALTER TABLE users ADD COLUMN last_actions TEXT")
+
+        await db.commit()
+
+
+async def save_user(user_id: int, username: str, full_name: str, action: str = None):
+    """Оновлює або додає користувача з останньою активністю та останніми 5 діями"""
+    await add_user_columns()
+
+    # Отримуємо точний київський час
+    kyiv_tz = timezone(timedelta(hours=3))  # UTC+3 (правильний Київський час)
+    now_str = datetime.now(kyiv_tz).isoformat(timespec="seconds")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Отримуємо попередні дії користувача
+        cursor = await db.execute(
+            "SELECT last_actions FROM users WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        old_actions = row[0] if row and row[0] else ""
+        await cursor.close()
+
+        # Формуємо список останніх 5 дій
+        if action:
+            parts = old_actions.split(" | ") if old_actions else []
+            parts = (parts + [action])[-5:]  # тільки 5 останніх
+            new_actions = " | ".join(parts)
+        else:
+            new_actions = old_actions
+
+        # Додаємо або оновлюємо користувача
         await db.execute(
             """
-            INSERT INTO users (user_id, username, full_name, last_active)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO users (user_id, username, full_name, last_active, last_actions)
+            VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 username = excluded.username,
                 full_name = excluded.full_name,
-                last_active = excluded.last_active
+                last_active = excluded.last_active,
+                last_actions = excluded.last_actions
             """,
-            (user_id, username, full_name, now.isoformat()),
+            (user_id, username, full_name, now_str, new_actions),
         )
+
         await db.commit()
 
 
