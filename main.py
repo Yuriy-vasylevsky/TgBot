@@ -36,6 +36,7 @@ from db import (
     set_gift_claimed,
     reset_all_gifts,
     get_all_users,
+    add_user_column_last_actions,
 )
 
 # from games import register_game_handlers
@@ -68,6 +69,7 @@ from games import (
     fortune_router,
 )
 from handlers.profile import router as profile_router
+
 # from handlers.menu_update import router as menu_update_router
 
 
@@ -104,22 +106,25 @@ ADMIN_ID = config.ADMIN_ID
 # ==========================
 # Middleware — автозбереження користувача
 # ==========================
-class SaveUserMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        if isinstance(event, types.Message) and event.from_user:
-            try:
-                kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
-                await save_user(
-                    event.from_user.id,
-                    event.from_user.username or "",
-                    event.from_user.full_name or "",
-                )
-            except Exception as e:
-                logging.error(f"Save user error: {e}")
-        return await handler(event, data)
+# class SaveUserMiddleware(BaseMiddleware):
+#     async def __call__(self, handler, event, data):
+#         if isinstance(event, types.Message) and event.from_user:
+#             try:
+#                 kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
+#                 await save_user(
+#                     event.from_user.id,
+#                     event.from_user.username or "",
+#                     event.from_user.full_name or "",
+#                 )
+#             except Exception as e:
+#                 logging.error(f"Save user error: {e}")
+#         return await handler(event, data)
 
 
-dp.message.middleware(SaveUserMiddleware())
+# dp.message.middleware(SaveUserMiddleware())
+
+
+
 
 
 # ==========================
@@ -300,6 +305,7 @@ async def set_commands():
 # Запуск бота
 # ==========================
 async def main():
+    await add_user_column_last_actions()
     await init_db()
     await set_commands()
     # await register_game_handlers(dp, bot, main_menu, ADMIN_ID)

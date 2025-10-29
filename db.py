@@ -164,30 +164,52 @@ from pathlib import Path
 DB_PATH = Path(__file__).parent / "users.db"
 
 
-async def save_user(user_id: int, username: str, full_name: str):
-    """
-    Зберігає або оновлює користувача у базі з часом по Києву (+3 години).
-    """
-    try:
-        # Поточний час +3 години (Київ)
-        kyiv_time = datetime.utcnow() + timedelta(hours=2)
-        last_active = kyiv_time.strftime("%Y-%m-%d %H:%M:%S")
+# async def save_user(user_id: int, username: str, full_name: str):
+#     """
+#     Зберігає або оновлює користувача у базі з часом по Києву (+3 години).
+#     """
+#     try:
+#         # Поточний час +3 години (Київ)
+#         kyiv_time = datetime.utcnow() + timedelta(hours=2)
+#         last_active = kyiv_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute(
-                """
-                INSERT INTO users (user_id, username, full_name, last_active)
-                VALUES (?, ?, ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET
-                    username=excluded.username,
-                    full_name=excluded.full_name,
-                    last_active=excluded.last_active
-                """,
-                (user_id, username, full_name, last_active),
-            )
-            await db.commit()
-    except Exception as e:
-        logging.error("Save user error: %s", e)
+#         async with aiosqlite.connect(DB_PATH) as db:
+#             await db.execute(
+#                 """
+#                 INSERT INTO users (user_id, username, full_name, last_active)
+#                 VALUES (?, ?, ?, ?)
+#                 ON CONFLICT(user_id) DO UPDATE SET
+#                     username=excluded.username,
+#                     full_name=excluded.full_name,
+#                     last_active=excluded.last_active
+#                 """,
+#                 (user_id, username, full_name, last_active),
+#             )
+#             await db.commit()
+#     except Exception as e:
+#         logging.error("Save user error: %s", e)
+import aiosqlite
+from datetime import datetime, timezone, timedelta
+
+DB_PATH = "db.sqlite3"
+
+
+async def save_user(user_id: int, username: str, full_name: str):
+    """Створює або оновлює користувача в БД."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        now = datetime.now(timezone.utc) + timedelta(hours=2)
+        await db.execute(
+            """
+            INSERT INTO users (user_id, username, full_name, last_active)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                username = excluded.username,
+                full_name = excluded.full_name,
+                last_active = excluded.last_active
+            """,
+            (user_id, username, full_name, now.isoformat()),
+        )
+        await db.commit()
 
 
 async def get_all_users() -> List[int]:
@@ -197,16 +219,34 @@ async def get_all_users() -> List[int]:
             return [r[0] for r in rows]
 
 
-async def get_all_users_info() -> List[Tuple[int, str, str, str]]:
+# async def get_all_users_info() -> List[Tuple[int, str, str, str]]:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         async with db.execute(
+#             """
+#             SELECT user_id, username, full_name, last_active
+#             FROM users ORDER BY last_active ASC
+#         """
+#         ) as cur:
+#             rows = await cur.fetchall()
+#             return rows
+
+
+async def get_all_users_info():
     async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            """
-            SELECT user_id, username, full_name, last_active
-            FROM users ORDER BY last_active ASC
-        """
-        ) as cur:
-            rows = await cur.fetchall()
-            return rows
+        cursor = await db.execute(
+            "SELECT full_name, username, user_id, last_active, last_actions FROM users"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "full_name": row[0],
+                "username": row[1],
+                "user_id": row[2],
+                "last_active": row[3],
+                "last_actions": row[4],
+            }
+            for row in rows
+        ]
 
 
 async def set_user_access(user_id: int, access: bool):
@@ -727,4 +767,42 @@ async def update_card(bank_name: str, new_number: str):
         await db.commit()
 
 
-# _____________________________________Очистка зіграних ігор _______________________________
+# _____________________________________лог останіх дій в боті _______________________________
+
+
+async def add_last_action(user_id: int, action: str):
+    """Додає останню дію користувача (максимум 2 останні)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT last_actions FROM users WHERE user_id = ?", (user_id,)
+        )
+        row = await cur.fetchone()
+        old_actions = []
+        if row and row[0]:
+            old_actions = row[0].split(" | ")
+
+        # Додаємо нову дію в початок
+        old_actions.insert(0, action.strip())
+        old_actions = old_actions[:2]
+        actions_str = " | ".join(old_actions)
+
+        await db.execute(
+            "UPDATE users SET last_actions = ? WHERE user_id = ?",
+            (actions_str, user_id),
+        )
+        await db.commit()
+
+
+async def add_user_column_last_actions():
+    """Додає колонку last_actions у таблицю users, якщо її ще немає."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("PRAGMA table_info(users)")
+        columns = [row[1] for row in await cursor.fetchall()]
+        if "last_actions" not in columns:
+            await db.execute(
+                "ALTER TABLE users ADD COLUMN last_actions TEXT DEFAULT ''"
+            )
+            await db.commit()
+            print("✅ Колонку last_actions додано!")
+        else:
+            print("ℹ️ Колонка last_actions уже існує.")

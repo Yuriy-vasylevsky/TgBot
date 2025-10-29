@@ -126,13 +126,116 @@ async def set_new_winrate(message: types.Message, state: FSMContext):
 # ==========================
 # 👥 Список користувачів
 # ==========================
-async def send_users_page(message_or_query, users, page: int):
-    from datetime import datetime
+# async def send_users_page(message_or_query, users, page: int):
+#     from datetime import datetime
 
-    users.sort(
-        key=lambda x: datetime.fromisoformat(x[3]) if x[3] else datetime.min,
-        reverse=True,
-    )
+#     # users.sort(
+#     #     key=lambda x: datetime.fromisoformat(x[3]) if x[3] else datetime.min,
+#     #     reverse=True,
+#     # )
+#     from datetime import datetime, timezone
+
+#     def parse_dt_safe(dt_str):
+#         try:
+#             # якщо є таймзона — нормально, якщо ні — додаємо UTC
+#             dt = datetime.fromisoformat(dt_str)
+#             if dt.tzinfo is None:
+#                 dt = dt.replace(tzinfo=timezone.utc)
+#             return dt
+#         except Exception:
+#             return datetime.min.replace(tzinfo=timezone.utc)
+
+#     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
+
+#     total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+#     start = (page - 1) * USERS_PER_PAGE
+#     end = start + USERS_PER_PAGE
+#     current_users = users[start:end]
+
+#     text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
+#     for i, (uid, username, full_name, last_active) in enumerate(
+#         current_users, start=start + 1
+#     ):
+#         last_active_str = last_active or "немає даних"
+#         text += f"{i}. 👤 <b>{full_name}</b>\n   🔗 @{username or '—'}\n   🕒 {last_active_str}\n  🔐 {uid}\n\n"
+
+#     kb = InlineKeyboardBuilder()
+#     if page > 1:
+#         kb.button(text="⬅️ Новіші", callback_data=f"users_page:{page - 1}")
+#     if end < len(users):
+#         kb.button(text="➡️ Старіші", callback_data=f"users_page:{page + 1}")
+#     kb.adjust(2)
+
+#     if isinstance(message_or_query, types.CallbackQuery):
+#         await message_or_query.message.edit_text(
+#             text, parse_mode="HTML", reply_markup=kb.as_markup()
+#         )
+#         await message_or_query.answer()
+#     else:
+#         await message_or_query.answer(
+#             text, parse_mode="HTML", reply_markup=kb.as_markup()
+#         )
+
+
+# @router.message(F.text == "👥 Список користувачів")
+# async def list_users(message: types.Message):
+#     if message.from_user.id != ADMIN_ID:
+#         return
+#     users = await get_all_users_info()
+#     if not users:
+#         await message.answer("❌ Користувачів ще немає.")
+#         return
+#     await send_users_page(message, users, page=1)
+
+
+# @router.callback_query(F.data.startswith("users_page:"))
+# async def paginate_users(callback: types.CallbackQuery):
+#     if callback.from_user.id != ADMIN_ID:
+#         await callback.answer("⛔ Лише для адміністратора.", show_alert=True)
+#         return
+#     page = int(callback.data.split(":")[1])
+#     users = await get_all_users_info()
+#     await send_users_page(callback, users, page)
+
+from aiogram import types, F, Router
+from aiogram.utils.keyboard import InlineKeyboardBuilder
+from datetime import datetime, timezone, timedelta
+
+
+from config import ADMIN_ID
+from db import get_all_users_info
+
+# router = Router()
+USERS_PER_PAGE = 10
+
+
+# ===== Сервісна функція для безпечного парсингу дат =====
+def parse_dt_safe(dt_str: str):
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
+
+
+# ===== Форматування часу у вигляді "29.10 о 22:41" =====
+def format_time(dt_str: str):
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ
+        return local.strftime("%d.%m о %H:%M")
+    except Exception:
+        return "немає даних"
+
+
+# ===== Основна функція для відображення списку =====
+async def send_users_page(message_or_query, users, page: int):
+    # Сортуємо користувачів за останньою активністю
+    users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
 
     total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
     start = (page - 1) * USERS_PER_PAGE
@@ -140,19 +243,30 @@ async def send_users_page(message_or_query, users, page: int):
     current_users = users[start:end]
 
     text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
-    for i, (uid, username, full_name, last_active) in enumerate(
-        current_users, start=start + 1
-    ):
-        last_active_str = last_active or "немає даних"
-        text += f"{i}. 👤 <b>{full_name}</b>\n   🔗 @{username or '—'}\n   🕒 {last_active_str}\n  🔐 {uid}\n\n"
+
+    for i, user in enumerate(current_users, start=start + 1):
+        full_name = user.get("full_name") or "—"
+        username = user.get("username") or "—"
+        user_id = user.get("user_id")
+        last_active = format_time(user.get("last_active") or "")
+        last_actions = user.get("last_actions") or "—"
+
+        text += (
+            f"{i}. <b>{full_name}</b>\n"
+            f"🔗 @{username}\n"
+            f"🕒 {last_active}\n"
+            f"📜 {last_actions}\n"
+            f"🔐 <code>{user_id}</code>\n\n"
+        )
 
     kb = InlineKeyboardBuilder()
     if page > 1:
-        kb.button(text="⬅️ Новіші", callback_data=f"users_page:{page - 1}")
+        kb.button(text="⬅️ Назад", callback_data=f"users_page:{page - 1}")
     if end < len(users):
-        kb.button(text="➡️ Старіші", callback_data=f"users_page:{page + 1}")
+        kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
     kb.adjust(2)
 
+    # Оновлюємо або надсилаємо повідомлення
     if isinstance(message_or_query, types.CallbackQuery):
         await message_or_query.message.edit_text(
             text, parse_mode="HTML", reply_markup=kb.as_markup()
@@ -164,6 +278,7 @@ async def send_users_page(message_or_query, users, page: int):
         )
 
 
+# ===== Команда: список користувачів =====
 @router.message(F.text == "👥 Список користувачів")
 async def list_users(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -175,6 +290,7 @@ async def list_users(message: types.Message):
     await send_users_page(message, users, page=1)
 
 
+# ===== Кнопки пагінації =====
 @router.callback_query(F.data.startswith("users_page:"))
 async def paginate_users(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
