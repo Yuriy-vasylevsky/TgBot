@@ -34,13 +34,13 @@ FORTUNE_BTN = "🎡 Колесо фортуни"
 REQUIRED_GAMES = 7  # скільки ігор потрібно для доступу
 
 PRIZES = [
-    {"title": "🤞 30 грн", "weight": 20, "code": "COUPON_5", "value": 5},
-    {"title": "💎 50 грн", "weight": 17, "code": "COUPON_8", "value": 8},
-    {"title": "🔥 60 грн", "weight": 15, "code": "COUPON_10", "value": 10},
-    {"title": "🎉 100 грн", "weight": 5, "code": "COUPON_10", "value": 10},
-    {"title": "🌟 200 грн", "weight": 1, "code": "COUPON_10", "value": 10},
-    {"title": "❌ Нічого", "weight": 7, "code": "NOTHING", "value": 0},
-    {"title": "🥂 Джекпот 500 грн", "weight": 0.1, "code": "NOTHING", "value": 0},
+    {"title": "🤞 30 грн", "weight": 17, "code": "COUPON_5", "value": 30},
+    {"title": "💎 50 грн", "weight": 17, "code": "COUPON_8", "value": 50},
+    {"title": "🔥 60 грн", "weight": 15, "code": "COUPON_10", "value": 60},
+    {"title": "🎉 100 грн", "weight": 5, "code": "COUPON_10", "value": 100},
+    {"title": "🌟 200 грн", "weight": 1, "code": "COUPON_10", "value": 200},
+    {"title": "🎟️ Promo", "weight": 7, "code": "NOTHING", "value": 0},
+    {"title": "🥂 Джекпот 500 грн", "weight": 0.1, "code": "NOTHING", "value": 500},
     {
         "title": "🔁 Додаткове обертання",
         "weight": 10,
@@ -213,8 +213,8 @@ async def spin(cb: CallbackQuery):
     if games_played < REQUIRED_GAMES:
         await cb.answer()
         await cb.message.answer(
-            f"⚠️ Доступ до колеса фортуни відкривається після {REQUIRED_GAMES} зіграних ігор.\n"
-            f"🎮 У вас зараз: <b>{games_played}</b>.\n\n"
+            f"⚠️ Зберіть {REQUIRED_GAMES} 🎟️ щоб відкрити доступ\n"
+            f"🎮 У вас зараз: <b>{games_played} 🎟️</b>\n\n"
             f"🔓 Оновлюється щопонеділка 🔓",
             parse_mode="HTML",
         )
@@ -230,7 +230,7 @@ async def spin(cb: CallbackQuery):
             f"⚠️ Ви вже крутили колесо сьогодні!\n\n"
             f"🕒 Наступна спроба буде доступна <b> після 03:00 нового дня</b>.",
             parse_mode="HTML",
-        ) 
+        )
         return
 
     if user_id in _spinning_users:

@@ -13,7 +13,6 @@ except OSError:
     print("❌ Бот уже запущений! Другий екземпляр заблоковано.")
     sys.exit(0)
 
-
 import logging
 import asyncio
 import random
@@ -39,13 +38,10 @@ from db import (
     add_user_column_last_actions,
 )
 
-# from games import register_game_handlers
 from stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin import router as admin_router
 from menu import main_menu
-
-# from games import router as games_router
 from aiogram import F
 from random import choices
 import string, asyncio
@@ -58,9 +54,6 @@ from aiogram.types import (
 from aiogram import types, F
 from aiogram import Bot, Dispatcher
 from middlewares.ban_middleware import BanMiddleware
-
-# from games.one_of_three import register_coupon_game
-# from games import slot_router, one_of_three_router, rewards_router
 from games import (
     slot_router,
     one_of_three_router,
@@ -69,12 +62,6 @@ from games import (
     fortune_router,
 )
 from handlers.profile import router as profile_router
-
-# from handlers.menu_update import router as menu_update_router
-
-
-# from fortune import router as fortune_router
-
 
 # ==========================
 # Ініціалізація
@@ -106,23 +93,6 @@ ADMIN_ID = config.ADMIN_ID
 # ==========================
 # Middleware — автозбереження користувача
 # ==========================
-# class SaveUserMiddleware(BaseMiddleware):
-#     async def __call__(self, handler, event, data):
-#         if isinstance(event, types.Message) and event.from_user:
-#             try:
-#                 kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
-#                 await save_user(
-#                     event.from_user.id,
-#                     event.from_user.username or "",
-#                     event.from_user.full_name or "",
-#                 )
-#             except Exception as e:
-#                 logging.error(f"Save user error: {e}")
-#         return await handler(event, data)
-
-
-# dp.message.middleware(SaveUserMiddleware())
-
 
 from aiogram import types
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
@@ -248,31 +218,7 @@ async def confirm_reset_gifts(message: types.Message):
 # ==========================
 # Обробка підтвердження
 # ==========================
-# @dp.callback_query(F.data == "confirm_reset_gifts")
-# async def reset_gifts_confirmed(callback: types.CallbackQuery):
-#     await callback.message.edit_text("🔄 Скидаємо подарунки...")
 
-#     await reset_all_gifts()
-#     user_ids = await get_all_users()
-
-#     sent = 0
-#     for uid in user_ids:
-#         try:
-#             kb = main_menu(is_admin=(uid == ADMIN_ID), user_has_gift=False)
-#             await bot.send_message(
-#                 chat_id=uid,
-#                 text="🎁 Подарунки оновлено! Ділитись промокодами не можна. Для гравців хто ще нгіразу не грав (або грав давно) у нас бонус буде нараховуватись до депозиту. Бажаю всім удачі.",
-#                 reply_markup=kb,
-#             )
-#             sent += 1
-#             await asyncio.sleep(0.1)
-#         except Exception:
-#             continue
-
-
-#     await callback.message.edit_text(
-#         f"✅ Усі подарунки скинуто.\n📨 Повідомлення відправлено {sent} користувачам."
-#     )
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
     await callback.message.edit_text("🔄 Скидаємо подарунки...")

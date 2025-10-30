@@ -157,114 +157,8 @@ async def add_gift_columns(db: aiosqlite.Connection):
 
 # ---------------------- Користувачі ----------------------
 import aiosqlite
-from datetime import datetime, timedelta
 import logging
 from pathlib import Path
-
-DB_PATH = Path(__file__).parent / "users.db"
-
-
-# async def save_user(user_id: int, username: str, full_name: str):
-#     """
-#     Зберігає або оновлює користувача у базі з часом по Києву (+3 години).
-#     """
-#     try:
-#         # Поточний час +3 години (Київ)
-#         kyiv_time = datetime.utcnow() + timedelta(hours=2)
-#         last_active = kyiv_time.strftime("%Y-%m-%d %H:%M:%S")
-
-#         async with aiosqlite.connect(DB_PATH) as db:
-#             await db.execute(
-#                 """
-#                 INSERT INTO users (user_id, username, full_name, last_active)
-#                 VALUES (?, ?, ?, ?)
-#                 ON CONFLICT(user_id) DO UPDATE SET
-#                     username=excluded.username,
-#                     full_name=excluded.full_name,
-#                     last_active=excluded.last_active
-#                 """,
-#                 (user_id, username, full_name, last_active),
-#             )
-#             await db.commit()
-#     except Exception as e:
-#         logging.error("Save user error: %s", e)
-# import aiosqlite
-# from datetime import datetime, timezone, timedelta
-
-# async def save_user(user_id: int, username: str, full_name: str):
-#     """Створює або оновлює користувача в БД."""
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         now = datetime.now(timezone.utc) + timedelta(hours=2)
-#         await db.execute(
-#             """
-#             INSERT INTO users (user_id, username, full_name, last_active)
-#             VALUES (?, ?, ?, ?)
-#             ON CONFLICT(user_id) DO UPDATE SET
-#                 username = excluded.username,
-#                 full_name = excluded.full_name,
-#                 last_active = excluded.last_active
-#             """,
-#             (user_id, username, full_name, now.isoformat()),
-#         )
-#         await db.commit()
-import aiosqlite
-from datetime import datetime, timedelta, timezone
-
-# DB_PATH = "db.sqlite3"  # або твій шлях до бази
-
-
-# async def save_user(user_id: int, username: str, full_name: str, action: str = None):
-#     """Оновлює або додає користувача з останньою активністю та дією"""
-#     kyiv_time = datetime.now(timezone.utc) + timedelta(hours=2)
-#     now_str = kyiv_time.isoformat(timespec="seconds")
-
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         # Переконаємось, що всі потрібні колонки є
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS users (
-#                 user_id INTEGER PRIMARY KEY,
-#                 username TEXT,
-#                 full_name TEXT,
-#                 last_active TEXT,
-#                 last_actions TEXT
-#             )
-#             """
-#         )
-
-#         # Отримуємо попередні дії
-#         cursor = await db.execute(
-#             "SELECT last_actions FROM users WHERE user_id = ?", (user_id,)
-#         )
-#         row = await cursor.fetchone()
-#         old_actions = row[0] if row and row[0] else ""
-#         await cursor.close()
-
-#         # Формуємо новий список останніх 2 дій
-#         if action:
-#             parts = old_actions.split(" | ") if old_actions else []
-#             parts = (parts + [action])[-2:]
-#             new_actions = " | ".join(parts)
-#         else:
-#             new_actions = old_actions
-
-#         # Додаємо або оновлюємо користувача
-#         await db.execute(
-#             """
-#             INSERT INTO users (user_id, username, full_name, last_active, last_actions)
-#             VALUES (?, ?, ?, ?, ?)
-#             ON CONFLICT(user_id) DO UPDATE SET
-#                 username=excluded.username,
-#                 full_name=excluded.full_name,
-#                 last_active=excluded.last_active,
-#                 last_actions=excluded.last_actions
-#             """,
-#             (user_id, username, full_name, now_str, new_actions),
-#         )
-
-#         await db.commit()
-
-import aiosqlite
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -335,17 +229,6 @@ async def get_all_users() -> List[int]:
             rows = await cur.fetchall()
             return [r[0] for r in rows]
 
-
-# async def get_all_users_info() -> List[Tuple[int, str, str, str]]:
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         async with db.execute(
-#             """
-#             SELECT user_id, username, full_name, last_active
-#             FROM users ORDER BY last_active ASC
-#         """
-#         ) as cur:
-#             rows = await cur.fetchall()
-#             return rows
 
 
 async def get_all_users_info():

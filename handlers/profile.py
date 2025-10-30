@@ -1,3 +1,6 @@
+
+
+
 import logging
 from aiogram import Router, F, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -27,13 +30,26 @@ async def show_profile(message: types.Message):
         await message.answer("⚠️ Ваш профіль ще не створений. Спробуйте пізніше.")
         return
 
+    # Отримуємо кількість зіграних ігор (умовно — купонів за тиждень)
+    weekly_coupons = user_data["games_played"]
+
+    # Створюємо рядок зі смайликами 🎟️, але обмежимо до 20, щоб не було забагато
+    max_emojis = 20
+    if weekly_coupons > max_emojis:
+        coupons_display = "🎟️" * max_emojis + f" +{weekly_coupons - max_emojis}"
+    elif weekly_coupons > 0:
+        coupons_display = "🎟️" * weekly_coupons
+    else:
+        coupons_display = "—"
+
     # Формування повідомлення
     text = (
         f"👤 <b>Кабінет гравця</b>\n\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
-        f"💬 <b>Ім’я:</b> {user_data['full_name']}\n"
-        f"🏷 <b>Username:</b> @{user_data['username']}\n\n"
-        f"🎮 <b>Ігор зіграно:</b> {user_data['games_played']}\n"
+        f"💬 <b>Ім’я:</b> {user_data['full_name']}\n\n"
+        # f"🏷 <b>Username:</b> @{user_data['username']}\n\n"
+        # f"🎮 <b>Ігор зіграно:</b> {user_data['games_played']}\n"
+        f" <b>Зібрано купонів за тиждень:</b>\n {coupons_display}\n"
     )
 
     keyboard = ReplyKeyboardMarkup(
@@ -43,7 +59,7 @@ async def show_profile(message: types.Message):
         resize_keyboard=True,
     )
 
-    await message.answer(text, reply_markup=keyboard)
+    await message.answer(text, reply_markup=keyboard, parse_mode="HTML")
 
 
 # ===============================
@@ -51,7 +67,6 @@ async def show_profile(message: types.Message):
 # ===============================
 @router.message(F.text == "🏠 Головне меню")
 async def back_to_main_menu(message: types.Message):
-    from_user_id = message.from_user.id
     user_id = message.from_user.id
     gift_claimed = await has_claimed_gift(user_id)
     await message.answer(
