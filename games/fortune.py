@@ -213,7 +213,7 @@ async def spin(cb: CallbackQuery):
     if games_played < REQUIRED_GAMES:
         await cb.answer()
         await cb.message.answer(
-            f"⚠️ Зберіть {REQUIRED_GAMES} 🎟️ щоб відкрити доступ\n"
+            f"⚠️ Зберіть {REQUIRED_GAMES} PROMO 🎟️ щоб відкрити доступ\n"
             f"🎮 У вас зараз: <b>{games_played} 🎟️</b>\n\n"
             f"🔓 Оновлюється щопонеділка 🔓",
             parse_mode="HTML",

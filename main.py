@@ -275,7 +275,7 @@ async def set_commands():
 # ==========================
 async def main():
     await add_user_column_last_actions()
-    await init_db()
+    await init_db(),
     await set_commands()
     # await register_game_handlers(dp, bot, main_menu, ADMIN_ID)
     logging.info("🚀 Бот запущений!")
