@@ -17,6 +17,7 @@ from db import (
     ban_user,
     unban_user,
     increment_games_played,
+    add_weekly_task,
 )
 from menu import admin_menu, main_menu
 from games import games_menu as imported_games_menu
@@ -1045,3 +1046,39 @@ async def download_db(message: types.Message):
     await message.answer_document(
         FSInputFile(db_path), caption="📦 База даних користувачів"
     )
+
+# ________________________________________ тижневі завдання ________________________________________________
+
+from aiogram import F, types
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
+from db import add_weekly_task
+
+class TaskFSM(StatesGroup):
+    waiting_title = State()
+    waiting_description = State()
+    waiting_reward = State()
+
+@router.message(F.text == "🗓 Додати тижневе завдання")
+async def ask_task_title(message: types.Message, state: FSMContext):
+    await message.answer("📝 Введіть назву завдання:")
+    await state.set_state(TaskFSM.waiting_title)
+
+@router.message(TaskFSM.waiting_title)
+async def ask_task_description(message: types.Message, state: FSMContext):
+    await state.update_data(title=message.text)
+    await message.answer("📖 Введіть опис завдання:")
+    await state.set_state(TaskFSM.waiting_description)
+
+@router.message(TaskFSM.waiting_description)
+async def ask_task_reward(message: types.Message, state: FSMContext):
+    await state.update_data(description=message.text)
+    await message.answer("🎁 Введіть нагороду за виконання:")
+    await state.set_state(TaskFSM.waiting_reward)
+
+@router.message(TaskFSM.waiting_reward)
+async def save_task(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    await add_weekly_task(data["title"], data["description"], message.text)
+    await state.clear()
+    await message.answer("✅ Завдання додано!", reply_markup=main_menu(is_admin=True))

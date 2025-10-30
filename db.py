@@ -122,6 +122,7 @@ async def init_db():
         )
         await db.commit()
 
+        
         # Якщо таблиця пуста — додати дефолтні картки
         cursor = await db.execute("SELECT COUNT(*) FROM cards")
         count = (await cursor.fetchone())[0]
@@ -138,8 +139,41 @@ async def init_db():
         # ===================== Додаткові колонки профілю =====================
         await add_profile_columns(db)
 
+        # ===================== Таблиця тижневих завдань =====================
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weekly_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                reward TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+            """
+        )
+        await db.commit()
+
+        # ===================== Таблиця виконаних завдань користувачів =====================
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                is_completed INTEGER DEFAULT 0,
+                completed_at DATETIME,
+                FOREIGN KEY (task_id) REFERENCES weekly_tasks (id)
+            )
+            """
+        )
+        await db.commit()
+        
 
 # _________________________________________________________________________________________________________________
+
+
+
 
 
 async def add_gift_columns(db: aiosqlite.Connection):
@@ -806,3 +840,91 @@ async def add_user_column_last_actions():
             print("✅ Колонку last_actions додано!")
         else:
             print("ℹ️ Колонка last_actions уже існує.")
+
+
+
+# _____________________________тижневі завдання __________________________________
+
+
+# --- Збереження нового тижневого завдання ---
+# async def add_weekly_task(title: str, description: str, reward: str):
+#     async with aiosqlite.connect("bot.db") as db:
+#         await db.execute(
+#             "INSERT INTO weekly_tasks (title, description, reward) VALUES (?, ?, ?)",
+#             (title, description, reward),
+#         )
+#         await db.commit()
+
+import aiosqlite
+
+# --- Додати нове тижневе завдання ---
+async def add_weekly_task(title: str, description: str, reward: str):
+    async with aiosqlite.connect("bot.db") as db:
+        # Перевіряємо, чи є таблиця weekly_tasks
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weekly_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                description TEXT,
+                reward TEXT,
+                is_active INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+            """
+        )
+        await db.commit()
+
+        # Перевіряємо, чи є таблиця user_tasks
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                task_id INTEGER NOT NULL,
+                is_completed INTEGER DEFAULT 0,
+                completed_at DATETIME,
+                FOREIGN KEY (task_id) REFERENCES weekly_tasks (id)
+            )
+            """
+        )
+        await db.commit()
+
+        # Додаємо саме завдання
+        await db.execute(
+            "INSERT INTO weekly_tasks (title, description, reward) VALUES (?, ?, ?)",
+            (title, description, reward),
+        )
+        await db.commit()
+
+
+# --- Отримати всі активні завдання ---
+async def get_active_tasks():
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute(
+            "SELECT id, title, description, reward FROM weekly_tasks WHERE is_active = 1"
+        )
+        rows = await cursor.fetchall()
+        return [
+            {"id": r[0], "title": r[1], "description": r[2], "reward": r[3]} for r in rows
+        ]
+
+# --- Отримати стан виконання користувача ---
+async def get_user_task_progress(user_id: int):
+    async with aiosqlite.connect("bot.db") as db:
+        cursor = await db.execute("""
+            SELECT t.id, t.title, t.description, t.reward, ut.is_completed
+            FROM weekly_tasks t
+            LEFT JOIN user_tasks ut ON t.id = ut.task_id AND ut.user_id = ?
+            WHERE t.is_active = 1
+        """, (user_id,))
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "title": r[1],
+                "description": r[2],
+                "reward": r[3],
+                "is_completed": bool(r[4]) if r[4] is not None else False
+            } for r in rows
+        ]
