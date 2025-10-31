@@ -170,6 +170,16 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
             f"🎁 Приз: <b>{html.escape(prize_title)}</b>"
         )
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+        from db import save_notification
+
+        await save_notification(
+            user.id,
+            user.username or "-",
+            user.full_name or "-",
+            "fortune",
+            f"🎡 Колесо фортуни — {prize_title}",
+        )
+
     except Exception:
         pass
 

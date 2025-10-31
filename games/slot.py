@@ -10,6 +10,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
+from db import save_notification  # додай угорі поруч із іншими імпортами
 
 from db import (
     add_game_result,
@@ -262,6 +263,14 @@ async def slot_spin(message: types.Message, state: FSMContext):
             ADMIN_ID,
             f"💀 @{message.from_user.username or message.from_user.full_name} програв усі купони у слотах.",
         )
+        await save_notification(
+            message.from_user.id,
+            message.from_user.username or "-",
+            message.from_user.full_name or "-",
+            "slots",
+            f"💀 Програв усі купони у слотах",
+        )
+
         await add_slot_session(message.from_user.id, "lose", 0)
         await state.clear()
         return
@@ -286,11 +295,17 @@ async def slot_spin(message: types.Message, state: FSMContext):
             ADMIN_ID,
             f"🏆 @{message.from_user.username or message.from_user.full_name} виграв {coupons} купонів у слотах!",
         )
+        await save_notification(
+            message.from_user.id,
+            message.from_user.username or "-",
+            message.from_user.full_name or "-",
+            "slots",
+            f"🏆 Виграв {coupons} купонів у слотах",
+        )
+
         await add_slot_session(message.from_user.id, "win", coupons)
         await state.clear()
         return
-    # 🧨 Гравець програв усі купони
-    # 💀 Якщо гравець програв усі купони
 
     # --- Повертаємо меню ставок після результату ---
     keyboard = ReplyKeyboardMarkup(
@@ -302,271 +317,3 @@ async def slot_spin(message: types.Message, state: FSMContext):
     )
     await message.answer("🎯 Оберіть наступну ставку:", reply_markup=keyboard)
     await state.set_state(SlotGameFSM.playing)
-
-
-
-# import asyncio
-# import logging
-# import random
-# from aiogram import F, types, Router
-# from aiogram.fsm.context import FSMContext
-# from aiogram.fsm.state import State, StatesGroup
-# from aiogram.types import (
-#     KeyboardButton,
-#     ReplyKeyboardMarkup,
-#     InlineKeyboardMarkup,
-#     InlineKeyboardButton,
-# )
-# from db import (
-#     add_game_result,
-#     add_slot_session,
-#     get_user_access,
-#     get_winrate,
-#     has_claimed_gift,
-# )
-# from menu import main_menu
-# from config import ADMIN_ID
-
-# router = Router()
-# logging.basicConfig(level=logging.INFO)
-
-
-# # ==============================
-# #   FSM стан гри
-# # ==============================
-# class SlotGameFSM(StatesGroup):
-#     playing = State()
-#     spinning = State()
-
-
-# # ==============================
-# #   Меню ігор
-# # ==============================
-# def games_menu():
-#     keyboard = [["🎰 Слоти"], ["🎯 Один з трьох"], ["🃏 Blackjack"]]
-#     return ReplyKeyboardMarkup(
-#         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
-#         resize_keyboard=True,
-#     )
-
-
-# # ==============================
-# #   СТАРТ СЛОТІВ
-# # ==============================
-# @router.message(F.text == "🎰 Слоти")
-# async def start_slots(message: types.Message, state: FSMContext):
-#     if message.from_user.id != ADMIN_ID and not await get_user_access(
-#         message.from_user.id
-#     ):
-#         await message.answer("⛔ У вас немає доступу. Активуйте промокод!")
-#         return
-
-#     await state.set_state(SlotGameFSM.playing)
-#     await state.update_data(coupons=10, first_bet=False)
-
-#     text = (
-#         "🎰 <b>Слот-машина</b>\n\n"
-#         "💎 Мета — набити <b>30 купонів</b>! (1 🎟 = 1 грн)\n\n"
-#         "🎟 Початковий баланс: <b>10 купонів</b>.\n"
-#         "🎯 Обери ставку та крути барабани 🍀"
-#     )
-#     keyboard = ReplyKeyboardMarkup(
-#         keyboard=[
-#             [KeyboardButton(text="▶️ Почати гру")],
-#             [KeyboardButton(text="ℹ️ Правила та комбінації")],
-#             [KeyboardButton(text="🔙 Повернутись до ігор")],
-#         ],
-#         resize_keyboard=True,
-#     )
-#     await message.answer(text, reply_markup=keyboard)
-
-
-# # ==============================
-# #   ПРАВИЛА
-# # ==============================
-# @router.message(F.text == "ℹ️ Правила та комбінації")
-# async def show_slot_rules(message: types.Message):
-#     text = (
-#         "🎰 <b>Правила гри:</b>\n\n"
-#         "• Початковий баланс — 10 купонів.\n"
-#         "• Обери ставку (1–3 купони) та крути барабани.\n\n"
-#         "💥 3 однакових символи — ×20\n"
-#         "🍀 2 сімки — ×7\n"
-#         "🔥 2 однакові символи — ×3\n"
-#         "❌ Без збігів — ставка згорає.\n\n"
-#         "🏆 30 купонів — перемога!\n💀 0 купонів — програш."
-#     )
-#     await message.answer(text, parse_mode="HTML")
-
-
-# # ==============================
-# #   ПОЧАТОК ГРИ
-# # ==============================
-# @router.message(F.text == "▶️ Почати гру")
-# async def enter_slot_game(message: types.Message, state: FSMContext):
-#     await show_slot_menu(message, state)
-
-
-# # ==============================
-# #   МЕНЮ СТАВОК
-# # ==============================
-# async def show_slot_menu(message: types.Message, state: FSMContext):
-#     data = await state.get_data()
-#     coupons = data.get("coupons", 10)
-#     first_bet = data.get("first_bet", False)
-
-#     keyboard = [
-#         [KeyboardButton(text="1 купон"), KeyboardButton(text="2 купони")],
-#         [KeyboardButton(text="3 купони")],
-#     ]
-#     if not first_bet:
-#         keyboard.append([KeyboardButton(text="🔙 Повернутись до ігор")])
-
-#     await message.answer(
-#         f"💰 Баланс: <b>{coupons}</b> 🎟\nОбери суму ставки:",
-#         reply_markup=ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True),
-#         parse_mode="HTML",
-#     )
-
-
-# # ==============================
-# #   ГОЛОВНА ЛОГІКА СПІНУ
-# # ==============================
-# @router.message(SlotGameFSM.playing)
-# async def slot_spin(message: types.Message, state: FSMContext):
-#     # не дозволяємо крутити, поки попередній спін ще йде
-#     if await state.get_state() == SlotGameFSM.spinning.state:
-#         return
-
-#     data = await state.get_data()
-#     coupons = data.get("coupons", 10)
-#     first_bet = data.get("first_bet", False)
-#     text = message.text.strip()
-
-#     if not first_bet and text == "🔙 Повернутись до ігор":
-#         await message.answer("🔹 Повертаємось у меню ігор.", reply_markup=games_menu())
-#         await state.clear()
-#         return
-
-#     try:
-#         bet = int(text.split()[0])
-#     except ValueError:
-#         return await message.answer("⚠️ Оберіть ставку з кнопок.")
-
-#     if bet > coupons:
-#         return await message.answer("⚠️ Недостатньо купонів.")
-
-#     await state.update_data(first_bet=True)
-#     await state.set_state(SlotGameFSM.spinning)
-
-#     # --- Отримання winrate ---
-#     try:
-#         winrate = await get_winrate()
-#         if winrate > 1:
-#             winrate /= 100
-#     except Exception as e:
-#         logging.error(f"get_winrate error: {e}")
-#         winrate = 0.33
-
-#     is_win = random.random() < winrate
-#     symbols = ["🍒", "🍋", "🍊", "🍇", "🍉", "🍓", "🍍", "🥭", "7️⃣"]
-
-#     # --- Формування виграшу ---
-#     if is_win:
-#         roll = random.random()
-#         if roll < 0.03:
-#             sym = random.choice(symbols)
-#             reels = [sym, sym, sym]
-#             multiplier, outcome = 20, f"🎉 ТРИ {sym} — ×20!"
-#         elif roll < 0.07:
-#             reels = ["7️⃣", "7️⃣", random.choice([s for s in symbols if s != "7️⃣"])]
-#             random.shuffle(reels)
-#             multiplier, outcome = 7, "💎 Дві сімки — ×7!"
-#         else:
-#             fruit = random.choice([s for s in symbols if s != "7️⃣"])
-#             reels = [fruit, fruit, random.choice([s for s in symbols if s != fruit])]
-#             random.shuffle(reels)
-#             multiplier, outcome = 3, f"✨ Пара {fruit} — ×3!"
-#     else:
-#         reels = random.sample(symbols[:-1], 3)
-#         multiplier, outcome = 0, "❌ Програш!"
-
-#     # --- Баланс ---
-#     win_amount = bet * multiplier
-#     coupons = coupons - bet + win_amount
-#     await state.update_data(coupons=coupons)
-
-#     # ==============================
-#     #  🎬 Анімація + результат в 1 повідомленні
-#     # ==============================
-#     msg = await message.answer("🎰 Крутимо барабани...")
-#     spin_frames = 4  # кількість кадрів
-#     last_text = None
-
-#     for i in range(spin_frames):
-#         spin = f"| {random.choice(symbols)} | {random.choice(symbols)} | {random.choice(symbols)} |"
-#         anim = f"🎲 {spin}\n<i>Обертання...</i>"
-#         if anim != last_text:
-#             try:
-#                 await msg.edit_text(anim, parse_mode="HTML")
-#                 last_text = anim
-#             except Exception:
-#                 pass
-#         await asyncio.sleep(0.25 if i < spin_frames - 2 else 0.4)
-
-#     # --- Фінальний кадр ---
-#     final_text = (
-#         f"| {reels[0]} | {reels[1]} | {reels[2]} |\n\n"
-#         f"{outcome}\n\n"
-#         f"💵 <b>Ставка:</b> {bet}\n"
-#         f"🏆 <b>Виграш:</b> {win_amount}\n"
-#         f"🎟 <b>Баланс:</b> {coupons}"
-#     )
-#     try:
-#         await msg.edit_text(final_text, parse_mode="HTML")
-#     except Exception:
-#         await message.answer(final_text, parse_mode="HTML")
-
-#     # --- Збереження результату ---
-#     try:
-#         await add_game_result("Слоти", multiplier > 0)
-#     except Exception as e:
-#         logging.error(f"DB error add_game_result: {e}")
-
-#     # --- Кінець гри або продовження ---
-#     if coupons <= 0:
-#         gift_claimed = await has_claimed_gift(message.from_user.id)
-#         await asyncio.sleep(0.5)
-#         await msg.edit_text(
-#             "💀 Ви програли всі купони!",
-#             reply_markup=main_menu(
-#                 is_admin=(message.from_user.id == ADMIN_ID),
-#                 user_has_gift=gift_claimed,
-#             ),
-#         )
-#         await state.clear()
-#         return
-
-#     if coupons >= 30:
-#         kb = InlineKeyboardMarkup(
-#             inline_keyboard=[
-#                 [
-#                     InlineKeyboardButton(
-#                         text="🏆 Champion",
-#                         callback_data=f"choose_reward:champion:{message.from_user.id}",
-#                     ),
-#                     InlineKeyboardButton(
-#                         text="🎰 Superomatic",
-#                         callback_data=f"choose_reward:superomatic:{message.from_user.id}",
-#                     ),
-#                 ]
-#             ]
-#         )
-#         await asyncio.sleep(0.5)
-#         await msg.edit_text("🎉 Вітаю! Ви виграли. Оберіть тип коду:", reply_markup=kb)
-#         await add_slot_session(message.from_user.id, "win", coupons)
-#         await state.clear()
-#         return
-
-#     # --- Повертаємо у стан гри без нового повідомлення ---
-#     await state.set_state(SlotGameFSM.playing)

@@ -10,7 +10,12 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 
-from db import add_game_result, has_claimed_gift, add_blackjack_session
+from db import (
+    add_game_result,
+    has_claimed_gift,
+    add_blackjack_session,
+    save_notification,
+)
 from menu import main_menu
 from config import ADMIN_ID
 
@@ -314,6 +319,15 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                 f"🏦 Баланс: {balance}",
                 parse_mode="HTML",
             )
+
+            await save_notification(
+                message.from_user.id,
+                message.from_user.username or "-",
+                message.from_user.full_name or "-",
+                "blackjack",
+                f"🃏 Blackjack — {outcome}\n💵 Ставка: {bet}, Баланс: {balance}",
+            )
+
         except Exception:
             pass
 

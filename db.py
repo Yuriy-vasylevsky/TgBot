@@ -168,6 +168,24 @@ async def init_db():
         )
         await db.commit()
 
+        # ________________________________________ історія сповіщень__________________________________________________
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    username TEXT,
+                    full_name TEXT,
+                    type TEXT,              -- тип події (game, fortune, bonus, promocode)
+                    message TEXT,           -- текст сповіщення
+                    created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+                )
+            """
+            )
+            await db.commit()
+
 
 # _________________________________________________________________________________________________________________
 
@@ -696,12 +714,26 @@ async def get_all_banned():
 # ==========================
 
 
+# async def add_or_update_user(user_id: int, username: str, full_name: str):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             INSERT INTO users (user_id, username, full_name, last_active)
+#             VALUES (?, ?, ?, DATETIME('now', '+3 hours'))
+#             ON CONFLICT(user_id) DO UPDATE SET
+#                 username=excluded.username,
+#                 full_name=excluded.full_name,
+#                 last_active=excluded.last_active
+#             """,
+#             (user_id, username, full_name),
+#         )
+#         await db.commit()
 async def add_or_update_user(user_id: int, username: str, full_name: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
             INSERT INTO users (user_id, username, full_name, last_active)
-            VALUES (?, ?, ?, DATETIME('now', '+3 hours'))
+            VALUES (?, ?, ?, DATETIME('now'))
             ON CONFLICT(user_id) DO UPDATE SET
                 username=excluded.username,
                 full_name=excluded.full_name,
@@ -1001,3 +1033,59 @@ async def get_user_task_progress(user_id: int):
             }
             for r in rows
         ]
+
+
+# ________________________________________ історія сповіщень__________________________________________________
+
+
+# async def save_notification(
+#     user_id: int, username: str, full_name: str, notif_type: str, message: str
+# ):
+#     """Зберігає сповіщення у базу."""
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             INSERT INTO notifications (user_id, username, full_name, type, message)
+#             VALUES (?, ?, ?, ?, ?)
+#             """,
+#             (user_id, username, full_name, notif_type, message),
+#         )
+#         await db.commit()
+
+
+
+async def save_notification(user_id: int, username: str, full_name: str, type_: str, message: str):
+    """Зберігає сповіщення у таблиці notifications (автоматично додає username у кінець повідомлення)."""
+    try:
+        # Гарантуємо наявність таблиці
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS notifications (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    username TEXT,
+                    full_name TEXT,
+                    type TEXT,              -- тип події (game, fortune, bonus, promocode)
+                    message TEXT,           -- текст сповіщення
+                    created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+                )
+                """
+            )
+
+            # Додаємо username у кінець повідомлення (автоматично)
+            username_display = f"@{username}" if username and username != "-" else "(без username)"
+            formatted_message = f"{message}\n👤 {username_display}"
+
+            await db.execute(
+                """
+                INSERT INTO notifications (user_id, username, full_name, type, message)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (user_id, username, full_name, type_, formatted_message),
+            )
+            await db.commit()
+            print(f"✅ Notification saved for {username_display} ({type_})")
+
+    except Exception as e:
+        print(f"⚠️ Error saving notification: {e}")

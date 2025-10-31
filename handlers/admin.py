@@ -19,7 +19,7 @@ from db import (
     increment_games_played,
     add_weekly_task,
 )
-from menu import admin_menu, main_menu
+from menu import admin_menu, main_menu, admin_menu2
 from games import games_menu as imported_games_menu
 from states import WinrateFSM, Broadcast, PromoFSM, EnterPromoFSM, CodeLinkFSM
 import config
@@ -77,6 +77,17 @@ router = Router()
 async def admin_panel(message: types.Message):
     if message.from_user.id == ADMIN_ID:
         await message.answer("🔐 Адмін панель", reply_markup=admin_menu())
+    else:
+        await message.answer("⛔ У вас немає доступу")
+
+
+# ==========================
+#             ⚙️⚙️⚙️
+# ==========================
+@router.message(F.text == "⚙️⚙️⚙️")
+async def admin_panel(message: types.Message):
+    if message.from_user.id == ADMIN_ID:
+        await message.answer("🔐 Адмін панель", reply_markup=admin_menu2())
     else:
         await message.answer("⛔ У вас немає доступу")
 
@@ -1258,3 +1269,24 @@ async def delete_selected_task(callback: types.CallbackQuery):
         f"✅ Завдання <b>ID {task_id}</b> видалено.", parse_mode="HTML"
     )
     await callback.answer("Завдання видалено!")
+
+
+# ___________________________________ історія сповіщень_______________________________________
+
+@router.message(F.text == "📜 Історія сповіщень")
+async def show_notifications(message: types.Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT full_name, type, message, created_at FROM notifications ORDER BY id DESC LIMIT 20"
+        )
+        rows = await cursor.fetchall()
+
+    if not rows:
+        await message.answer("ℹ️ Немає сповіщень у базі.")
+        return
+
+    text = "📜 <b>Останні сповіщення</b>\n\n"
+    for name, ntype, msg, ts in rows:
+        text += f"👤 <b>{name}</b>\n🕓 {ts}\n📩 {msg}\n\n"
+
+    await message.answer(text, parse_mode="HTML")

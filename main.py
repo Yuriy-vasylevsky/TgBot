@@ -60,8 +60,10 @@ from games import (
     rewards_router,
     blackjack_router,
     fortune_router,
+    daily_bonus_router,
 )
 from handlers.profile import router as profile_router
+
 
 # ==========================
 # Ініціалізація
@@ -76,15 +78,13 @@ dp = Dispatcher()
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
-# dp.include_router(games_router)
+dp.include_router(daily_bonus_router)
 dp.include_router(profile_router)
 dp.include_router(fortune_router)
-
 dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
-# dp.include_router(menu_update_router)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 ADMIN_ID = config.ADMIN_ID
@@ -218,6 +218,7 @@ async def confirm_reset_gifts(message: types.Message):
 # ==========================
 # Обробка підтвердження
 # ==========================
+
 
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
