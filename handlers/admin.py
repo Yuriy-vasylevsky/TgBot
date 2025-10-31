@@ -18,6 +18,7 @@ from db import (
     unban_user,
     increment_games_played,
     add_weekly_task,
+    get_notifications,
 )
 from menu import admin_menu, main_menu, admin_menu2
 from games import games_menu as imported_games_menu
@@ -138,14 +139,11 @@ async def set_new_winrate(message: types.Message, state: FSMContext):
 # ==========================
 # 👥 Список користувачів
 # ==========================
-
-
 from aiogram import types, F, Router
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
 from config import ADMIN_ID
 from db import get_all_users_info
-
 
 USERS_PER_PAGE = 5
 
@@ -161,21 +159,27 @@ def parse_dt_safe(dt_str: str):
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
-# ===== Форматування часу у вигляді "29.10 о 22:41" =====
+# ===== Форматування часу =====
 def format_time(dt_str: str):
+    """Повертає: 'сьогодні о 20:09', 'вчора о 18:30' або '29.10 о 21:55'"""
     try:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ
-        return local.strftime("%d.%m о %H:%M")
+
+        now = datetime.now(timezone(timedelta(hours=2)))
+        if local.date() == now.date():
+            return f"сьогодні о {local.strftime('%H:%M')}"
+        elif local.date() == (now - timedelta(days=1)).date():
+            return f"вчора о {local.strftime('%H:%M')}"
+        else:
+            return local.strftime("%d.%m о %H:%M")
     except Exception:
         return "немає даних"
 
 
 # ===== Основна функція для відображення списку =====
-
-
 async def send_users_page(message_or_query, users, page: int):
     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
 
@@ -218,9 +222,12 @@ async def send_users_page(message_or_query, users, page: int):
 
     # Оновлюємо або надсилаємо повідомлення
     if isinstance(message_or_query, types.CallbackQuery):
-        await message_or_query.message.edit_text(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
+        try:
+            await message_or_query.message.edit_text(
+                text, parse_mode="HTML", reply_markup=kb.as_markup()
+            )
+        except Exception:
+            await message_or_query.answer("⚠️ Не вдалося оновити сторінку.")
         await message_or_query.answer()
     else:
         await message_or_query.answer(
@@ -556,7 +563,7 @@ async def add_promocode(code: str):
 # ___________________________________________________________________________________________________________
 
 
-@router.message(F.text == "🎟 Активні промокоди")
+@router.message(F.text == "🎟 Активні Promo")
 async def show_promocodes(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
@@ -1273,20 +1280,190 @@ async def delete_selected_task(callback: types.CallbackQuery):
 
 # ___________________________________ історія сповіщень_______________________________________
 
+# @router.message(F.text == "📜 Історія сповіщень")
+# async def show_notifications(message: types.Message):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT full_name, type, message, created_at FROM notifications ORDER BY id DESC LIMIT 20"
+#         )
+#         rows = await cursor.fetchall()
+
+#     if not rows:
+#         await message.answer("ℹ️ Немає сповіщень у базі.")
+#         return
+
+#     text = "📜 <b>Останні сповіщення</b>\n\n"
+#     for name, ntype, msg, ts in rows:
+#         text += f"👤 <b>{name}</b>\n🕓 {ts}\n📩 {msg}\n\n"
+
+#     await message.answer(text, parse_mode="HTML")
+
+
+# from db import get_notifications
+# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+
+# @router.message(F.text == "📜 Історія сповіщень")
+# async def show_notifications(message: types.Message):
+#     page = 1
+#     records, total_pages = await get_notifications(page=page)
+
+#     text = "<b>📜 Історія сповіщень</b>\n\n" + "\n\n".join(records)
+#     kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [
+#                 InlineKeyboardButton(
+#                     text="⬅️ Назад", callback_data=f"notif_page:{page-1}"
+#                 ),
+#                 InlineKeyboardButton(
+#                     text=f"{page}/{total_pages}", callback_data="noop"
+#                 ),
+#                 InlineKeyboardButton(
+#                     text="➡️ Далі", callback_data=f"notif_page:{page+1}"
+#                 ),
+#             ],
+#             [
+#                 InlineKeyboardButton(
+#                     text="🎰 Слоти", callback_data="notif_filter:slots"
+#                 ),
+#                 InlineKeyboardButton(
+#                     text="🎯 1 із 3", callback_data="notif_filter:one_of_three"
+#                 ),
+#                 InlineKeyboardButton(
+#                     text="🃏 Blackjack", callback_data="notif_filter:blackjack"
+#                 ),
+#             ],
+#             [
+#                 InlineKeyboardButton(
+#                     text="🎡 Фортуна", callback_data="notif_filter:fortune"
+#                 ),
+#                 InlineKeyboardButton(
+#                     text="🎁 Бонус", callback_data="notif_filter:bonus"
+#                 ),
+#             ],
+#         ]
+#     )
+
+#     await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+from aiogram import Router, F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from db import get_notifications
+from config import ADMIN_ID
+
+# router = Router()
+
+
+# ===============================
+#   📜 ІСТОРІЯ СПОВІЩЕНЬ (АДМІН)
+# ===============================
 @router.message(F.text == "📜 Історія сповіщень")
 async def show_notifications(message: types.Message):
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT full_name, type, message, created_at FROM notifications ORDER BY id DESC LIMIT 20"
-        )
-        rows = await cursor.fetchall()
+    if message.from_user.id != ADMIN_ID:
+        return await message.answer("⛔ Доступ лише для адміністратора.")
 
-    if not rows:
-        await message.answer("ℹ️ Немає сповіщень у базі.")
+    page = 1
+    filter_type = None
+    records, total_pages = await get_notifications(page=page, filter_type=filter_type)
+
+    text = "<b>📜 Історія сповіщень</b>\n\n"
+    if records:
+        text += "\n\n".join(records)
+    else:
+        text += "🔹 Поки немає нових сповіщень."
+
+    kb = build_notifications_kb(page, total_pages, filter_type)
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+# ===============================
+#   ⚙️ ПАГІНАЦІЯ ТА ФІЛЬТРИ
+# ===============================
+@router.callback_query(F.data.startswith("notif_page:"))
+async def paginate_notifications(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return await cb.answer("⛔ Доступ лише для адміністратора.", show_alert=True)
+
+    data = cb.data.split(":")
+    page = int(data[1])
+    filter_type = data[2] if len(data) > 2 and data[2] != "none" else None
+
+    if page < 1:
+        await cb.answer("🚫 Це перша сторінка.")
         return
 
-    text = "📜 <b>Останні сповіщення</b>\n\n"
-    for name, ntype, msg, ts in rows:
-        text += f"👤 <b>{name}</b>\n🕓 {ts}\n📩 {msg}\n\n"
+    records, total_pages = await get_notifications(page=page, filter_type=filter_type)
+    if not records and page > total_pages:
+        await cb.answer("🚫 Це остання сторінка.")
+        return
 
-    await message.answer(text, parse_mode="HTML")
+    text = "<b>📜 Історія сповіщень</b>\n\n"
+    text += "\n\n".join(records) if records else "🔹 Більше немає записів."
+
+    kb = build_notifications_kb(page, total_pages, filter_type)
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("notif_filter:"))
+async def filter_notifications(cb: CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return await cb.answer("⛔ Доступ лише для адміністратора.", show_alert=True)
+
+    filter_type = cb.data.split(":")[1]
+    page = 1
+    records, total_pages = await get_notifications(page=page, filter_type=filter_type)
+
+    text = f"<b>📜 Історія сповіщень</b>\n🔍 Фільтр: <code>{filter_type}</code>\n\n"
+    text += "\n\n".join(records) if records else "🔹 Немає записів для цього типу."
+
+    kb = build_notifications_kb(page, total_pages, filter_type)
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
+    await cb.answer()
+
+
+# ===============================
+#   🧩 ДОПОМІЖНА ФУНКЦІЯ КЛАВІАТУРИ
+# ===============================
+def build_notifications_kb(page: int, total_pages: int, filter_type: str | None):
+    ftype = filter_type or "none"
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⬅️", callback_data=f"notif_page:{page-1}:{ftype}"
+                ),
+                InlineKeyboardButton(
+                    text=f"{page}/{total_pages}", callback_data="noop"
+                ),
+                InlineKeyboardButton(
+                    text="➡️", callback_data=f"notif_page:{page+1}:{ftype}"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎰 Слоти", callback_data="notif_filter:slots"
+                ),
+                InlineKeyboardButton(
+                    text="🎯 1 із 3", callback_data="notif_filter:one_of_three"
+                ),
+                InlineKeyboardButton(
+                    text="🃏 Blackjack", callback_data="notif_filter:blackjack"
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🎡 Фортуна", callback_data="notif_filter:fortune"
+                ),
+                InlineKeyboardButton(
+                    text="🎁 Бонус", callback_data="notif_filter:bonus"
+                ),
+                # InlineKeyboardButton(text="🔑 Промокоди", callback_data="notif_filter:promocode"),
+            ],
+            # [
+            #     InlineKeyboardButton(text="🔄 Усі", callback_data="notif_filter:none")
+            # ]
+        ]
+    )

@@ -1038,19 +1038,6 @@ async def get_user_task_progress(user_id: int):
 # ________________________________________ історія сповіщень__________________________________________________
 
 
-# async def save_notification(
-#     user_id: int, username: str, full_name: str, notif_type: str, message: str
-# ):
-#     """Зберігає сповіщення у базу."""
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute(
-#             """
-#             INSERT INTO notifications (user_id, username, full_name, type, message)
-#             VALUES (?, ?, ?, ?, ?)
-#             """,
-#             (user_id, username, full_name, notif_type, message),
-#         )
-#         await db.commit()
 
 
 
@@ -1089,3 +1076,67 @@ async def save_notification(user_id: int, username: str, full_name: str, type_: 
 
     except Exception as e:
         print(f"⚠️ Error saving notification: {e}")
+
+import aiosqlite
+from pathlib import Path
+from datetime import datetime, timedelta
+
+# DB_PATH = Path(__file__).resolve().parent / "users.db"
+
+
+# 🧹 Автоочищення старих записів
+async def cleanup_old_notifications():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cutoff = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
+        await db.execute("DELETE FROM notifications WHERE created_at < ?", (cutoff,))
+        await db.commit()
+
+
+# 📖 Отримання сторінки історії
+async def get_notifications(page: int = 1, limit: int = 10, filter_type: str | None = None):
+    await cleanup_old_notifications()
+    offset = (page - 1) * limit
+
+    query = "SELECT username, full_name, type, message, created_at FROM notifications"
+    params = []
+    if filter_type:
+        query += " WHERE type = ?"
+        params.append(filter_type)
+    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(query, params)
+        rows = await cursor.fetchall()
+
+    formatted = []
+    for username, full_name, type_, message, created_at in rows:
+        # форматування дати
+        try:
+            dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+            now = datetime.now()
+            if dt.date() == now.date():
+                time_str = f"сьогодні о {dt.strftime('%H:%M')}"
+            elif dt.date() == (now - timedelta(days=1)).date():
+                time_str = f"вчора о {dt.strftime('%H:%M')}"
+            else:
+                time_str = dt.strftime("%d.%m о %H:%M")
+        except Exception:
+            time_str = created_at
+
+        formatted.append(
+            f"{message}\n🕒 {time_str}"
+        )
+
+    # підрахунок загальної кількості для пагінації
+    async with aiosqlite.connect(DB_PATH) as db:
+        count_query = "SELECT COUNT(*) FROM notifications"
+        if filter_type:
+            count_query += " WHERE type = ?"
+            count_cursor = await db.execute(count_query, (filter_type,))
+        else:
+            count_cursor = await db.execute(count_query)
+        total = (await count_cursor.fetchone())[0]
+
+    total_pages = max(1, (total + limit - 1) // limit)
+    return formatted, total_pages
