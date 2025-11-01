@@ -945,7 +945,7 @@ async def auto_generate_links(message: Message, state: FSMContext):
 
     code = message.text.strip().replace("-", "")
     await message.answer(f"🏆 Champion:\nhttps://spinplanet.net/?login_code={code}")
-    await message.answer(f"🎰 Superomatic:\nhttps://code.greenhost.pw/?c={code}")
+    # await message.answer(f"🎰 Superomatic:\nhttps://code.greenhost.pw/?c={code}")
 
 
 # ________________________________________________БАН________________________________________________________________
