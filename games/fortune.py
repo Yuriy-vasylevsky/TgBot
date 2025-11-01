@@ -143,7 +143,7 @@ async def _animate_spin(cb: CallbackQuery) -> None:
         for fr in frames:
             try:
                 await cb.message.edit_text(
-                    f"<b>Коло крутиться...</b>\n<code>{fr}</code>", parse_mode="HTML"
+                    f"<b>Колесо крутиться...</b>\n<code>{fr}</code>", parse_mode="HTML"
                 )
             except Exception:
                 pass
@@ -165,11 +165,12 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
     try:
         text = (
             "🧑‍🎰 <b>Колесо фортуни — виграш</b>\n"
-            f"👤 Користувач: <a href='tg://user?id={user.id}'>{html.escape(user.full_name)}</a>\n"
+            f"👤 {('@'+user.username) if user.username else user.full_name}\n"
             f"🆔 ID: <code>{user.id}</code>\n"
             f"🎁 Приз: <b>{html.escape(prize_title)}</b>"
         )
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+
         from db import save_notification
 
         await save_notification(
@@ -180,8 +181,8 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
             f"🎡 Колесо фортуни — {prize_title}",
         )
 
-    except Exception:
-        pass
+    except Exception as e:
+        print("notify_admin error:", e)
 
 
 # ===============================

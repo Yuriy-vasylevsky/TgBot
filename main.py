@@ -168,15 +168,15 @@ async def gift_command(message: types.Message):
 
     # Видаємо промокоди
     promo1 = generate_promocode()
-    promo2 = generate_promocode()
+    # promo2 = generate_promocode()
     await add_promocode(promo1)
-    await add_promocode(promo2)
+    # await add_promocode(promo2)
 
     # Позначаємо, що користувач отримав подарунок
     await set_gift_claimed(user_id, True)  # <-- тут заміна
 
     await message.answer(
-        f"🎉 Ваші подарункові промокоди:\n\n💎 `{promo1}`\n💎 `{promo2}`\n\nВикористайте їх у боті!",
+        f"🎉 Ваші подарункові промокоди:\n\n💎 `{promo1}`\n💎 \n\nВикористайте їх у боті!",
         parse_mode="Markdown",
     )
 

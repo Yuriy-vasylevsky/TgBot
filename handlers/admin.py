@@ -180,6 +180,47 @@ def format_time(dt_str: str):
 
 
 # ===== Основна функція для відображення списку =====
+# async def send_users_page(message_or_query, users, page: int):
+#     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
+
+#     total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+#     start = (page - 1) * USERS_PER_PAGE
+#     end = start + USERS_PER_PAGE
+#     current_users = users[start:end]
+
+#     text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
+
+#     for i, user in enumerate(current_users, start=start + 1):
+#         full_name = user.get("full_name") or "—"
+#         username = user.get("username") or "—"
+#         user_id = user.get("user_id")
+#         last_active = format_time(user.get("last_active") or "")
+#         last_actions = user.get("last_actions") or "—"
+
+#         # 🔹 форматуємо останні дії в стовпчик
+#         if last_actions and last_actions != "—":
+#             actions_list = last_actions.split(" | ")
+#             actions_text = "\n".join([f"   {a.strip()}" for a in actions_list])
+#             last_actions_str = f"📜 <b>Останні дії:</b>\n{actions_text}"
+#         else:
+#             last_actions_str = "📜 Немає даних"
+
+#         text += (
+#             f"{i}. <b>{full_name}</b>\n"
+#             f"🔗 <a href='tg://user?id={user_id}'>Перейти в профіль</a>\n"
+#             f"🕒 {last_active}\n"
+#             f"{last_actions_str}\n"
+#             f"🔐 <code>{user_id}</code>\n\n"
+#         )
+
+#     kb = InlineKeyboardBuilder()
+#     if page > 1:
+#         kb.button(text="⬅️ Назад", callback_data=f"users_page:{page - 1}")
+#     if end < len(users):
+#         kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
+#     kb.adjust(2)
+
+
 async def send_users_page(message_or_query, users, page: int):
     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
 
@@ -192,12 +233,18 @@ async def send_users_page(message_or_query, users, page: int):
 
     for i, user in enumerate(current_users, start=start + 1):
         full_name = user.get("full_name") or "—"
-        username = user.get("username") or "—"
+        username = user.get("username") or "-"
         user_id = user.get("user_id")
         last_active = format_time(user.get("last_active") or "")
         last_actions = user.get("last_actions") or "—"
 
-        # 🔹 форматуємо останні дії в стовпчик
+        # формуємо профільну лінку
+        if username != "-" and username != "":
+            profile_link = f"@{username}"
+        else:
+            profile_link = f"<a href='tg://user?id={user_id}'>Профіль</a>"
+
+        # 🔹 форматуємо останні дії
         if last_actions and last_actions != "—":
             actions_list = last_actions.split(" | ")
             actions_text = "\n".join([f"   {a.strip()}" for a in actions_list])
@@ -207,7 +254,7 @@ async def send_users_page(message_or_query, users, page: int):
 
         text += (
             f"{i}. <b>{full_name}</b>\n"
-            f"🔗 @{username}\n"
+            f"🔗 {profile_link}\n"
             f"🕒 {last_active}\n"
             f"{last_actions_str}\n"
             f"🔐 <code>{user_id}</code>\n\n"
@@ -219,6 +266,20 @@ async def send_users_page(message_or_query, users, page: int):
     if end < len(users):
         kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
     kb.adjust(2)
+
+    # Оновлюємо або надсилаємо повідомлення
+    if isinstance(message_or_query, types.CallbackQuery):
+        try:
+            await message_or_query.message.edit_text(
+                text, parse_mode="HTML", reply_markup=kb.as_markup()
+            )
+        except Exception:
+            await message_or_query.answer("⚠️ Не вдалося оновити сторінку.")
+        await message_or_query.answer()
+    else:
+        await message_or_query.answer(
+            text, parse_mode="HTML", reply_markup=kb.as_markup()
+        )
 
     # Оновлюємо або надсилаємо повідомлення
     if isinstance(message_or_query, types.CallbackQuery):
@@ -261,16 +322,23 @@ async def paginate_users(callback: types.CallbackQuery):
 # ========================================================================================================
 #                                            📢 Розсилка
 # ========================================================================================================
+
+
 @router.message(F.text == "📢 Розсилка")
 async def start_broadcast(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📄 Створити шаблон", callback_data="create_template")
+    kb.button(text="📂 Шаблони", callback_data="show_templates")
+    kb.button(text="❌ Скасувати", callback_data="cancel_broadcast")
+    kb.adjust(2, 1)
+
     await state.set_state(Broadcast.waiting_for_text)
-    cancel_kb = InlineKeyboardBuilder()
-    cancel_kb.button(text="❌ Скасувати розсилку", callback_data="cancel_broadcast")
     await message.answer(
-        "✍️ Введіть текст розсилки або натисніть «❌ Скасувати розсилку»:",
-        reply_markup=cancel_kb.as_markup(),
+        "✍️ Введіть текст розсилки або використайте шаблон:",
+        reply_markup=kb.as_markup(),
     )
 
 
@@ -314,6 +382,127 @@ async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("❌ Розсилку скасовано.")
     await callback.answer()
+
+
+# ======================= шаблони++++++++++++++++++++++++++++
+
+
+@router.callback_query(F.data == "show_templates")
+async def show_templates(cb: types.CallbackQuery, state: FSMContext):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,title FROM broadcast_templates ORDER BY id DESC"
+        )
+        rows = await cur.fetchall()
+
+    kb = InlineKeyboardBuilder()
+
+    if not rows:
+        kb.button(text="🔙 Назад", callback_data="back_to_broadcast")
+        await cb.message.edit_text("📂 Немає шаблонів.", reply_markup=kb.as_markup())
+        await cb.answer()
+        return
+
+    for tid, title in rows:
+        kb.button(text=title, callback_data=f"use_template:{tid}")
+        kb.button(text="🗑", callback_data=f"delete_template:{tid}")
+
+    kb.button(text="🔙 Назад", callback_data="back_to_broadcast")
+    kb.adjust(2, 1)
+
+    await cb.message.edit_text("📂 Шаблони:", reply_markup=kb.as_markup())
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("use_template:"))
+async def use_template(cb: types.CallbackQuery, state: FSMContext):
+    tid = cb.data.split(":")[1]
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT text FROM broadcast_templates WHERE id=?", (tid,)
+        )
+        row = await cur.fetchone()
+
+    if not row:
+        return await cb.answer("Помилка шаблону", show_alert=True)
+
+    text = row[0]
+    await state.update_data(broadcast_text=text)
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Надіслати", callback_data="confirm_broadcast")
+    kb.button(text="❌ Скасувати", callback_data="cancel_broadcast")
+
+    await cb.message.edit_text(
+        f"📨 Текст розсилки:\n\n{text}\n\nНадіслати?", reply_markup=kb.as_markup()
+    )
+    await cb.answer()
+
+
+class TemplateFSM(StatesGroup):
+    waiting_title = State()
+    waiting_body = State()
+
+
+@router.callback_query(F.data == "create_template")
+async def create_template(cb: types.CallbackQuery, state: FSMContext):
+    await state.set_state(TemplateFSM.waiting_title)
+    await cb.message.edit_text("📄 Введіть назву шаблону:")
+    await cb.answer()
+
+
+@router.message(TemplateFSM.waiting_title)
+async def template_title(message: types.Message, state: FSMContext):
+    await state.update_data(template_title=message.text)
+    await state.set_state(TemplateFSM.waiting_body)
+    await message.answer("✍️ Текст шаблону:")
+
+
+@router.message(TemplateFSM.waiting_body)
+async def template_body(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    title = data["template_title"]
+    text = message.text
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO broadcast_templates (title,text) VALUES (?,?)", (title, text)
+        )
+        await db.commit()
+
+    await state.clear()
+    await message.answer(f"✅ Шаблон <b>{title}</b> збережено.", parse_mode="HTML")
+
+
+@router.callback_query(F.data.startswith("delete_template:"))
+async def ask_delete_template(cb: types.CallbackQuery):
+    tid = cb.data.split(":")[1]
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Так", callback_data=f"confirm_delete_template:{tid}")
+    kb.button(text="❌ Ні", callback_data="show_templates")
+    kb.adjust(2)
+
+    await cb.message.edit_text("Видалити шаблон?", reply_markup=kb.as_markup())
+    await cb.answer()
+
+
+@router.callback_query(F.data.startswith("confirm_delete_template:"))
+async def confirm_delete_template(cb: types.CallbackQuery):
+    tid = cb.data.split(":")[1]
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM broadcast_templates WHERE id=?", (tid,))
+        await db.commit()
+
+    await cb.answer("✅ Видалено.")
+    await show_templates(cb, None)
+
+
+@router.callback_query(F.data == "back_to_broadcast")
+async def back_to_broadcast(cb: types.CallbackQuery, state: FSMContext):
+    await start_broadcast(cb.message, state)
+    await cb.answer()
 
 
 # ______________________________________________________________________________________________________
@@ -422,17 +611,16 @@ async def cancel_menu_update(callback: types.CallbackQuery, state: FSMContext):
 # ___________________________________________________________________________________________________________________
 
 
-# ---------------- FSM ----------------
-# class PromoFSM(StatesGroup):
-#     waiting_for_count = State()
+# ==========================
+# 🎟 Промокоди
+# ==========================
+
+
 class PromoFSM(StatesGroup):
     waiting_for_code = State()  # для ручного вводу промокоду
     waiting_for_count = State()
 
 
-# ==========================
-# 🎟 Промокоди
-# ==========================
 @router.message(F.text == "➕ Створити промокод")
 async def create_promocode(message: types.Message, state: FSMContext):
 
@@ -1069,110 +1257,6 @@ async def download_db(message: types.Message):
 
 # ________________________________________ тижневі завдання ________________________________________________
 
-# from aiogram import F, types
-# from aiogram.fsm.state import State, StatesGroup
-# from aiogram.fsm.context import FSMContext
-# from db import add_weekly_task
-
-
-# class TaskFSM(StatesGroup):
-#     waiting_title = State()
-#     waiting_description = State()
-#     waiting_reward = State()
-
-
-# @router.message(F.text == "🗓 Додати тижневе завдання")
-# async def ask_task_title(message: types.Message, state: FSMContext):
-#     await message.answer("📝 Введіть назву завдання:")
-#     await state.set_state(TaskFSM.waiting_title)
-
-
-# @router.message(TaskFSM.waiting_title)
-# async def ask_task_description(message: types.Message, state: FSMContext):
-#     await state.update_data(title=message.text)
-#     await message.answer("📖 Введіть опис завдання:")
-#     await state.set_state(TaskFSM.waiting_description)
-
-
-# @router.message(TaskFSM.waiting_description)
-# async def ask_task_reward(message: types.Message, state: FSMContext):
-#     await state.update_data(description=message.text)
-#     await message.answer("🎁 Введіть нагороду за виконання:")
-#     await state.set_state(TaskFSM.waiting_reward)
-
-
-# @router.message(TaskFSM.waiting_reward)
-# async def save_task(message: types.Message, state: FSMContext):
-#     data = await state.get_data()
-#     await add_weekly_task(data["title"], data["description"], message.text)
-#     await state.clear()
-#     await message.answer("✅ Завдання додано!", reply_markup=main_menu(is_admin=True))
-
-
-# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# from db import get_active_tasks
-# from menu import main_menu
-
-# # ===============================
-# #   Перегляд і видалення завдань
-# # ===============================
-
-# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# import aiosqlite
-# from db import get_active_tasks
-# from menu import main_menu
-
-
-# # ===============================
-# #   Перегляд і видалення завдань
-# # ===============================
-
-
-# @router.message(F.text == "🗑 Видалити завдання")
-# async def show_tasks_to_delete(message: types.Message):
-#     """Показує всі активні завдання для вибору, щоб видалити."""
-#     tasks = await get_active_tasks()
-
-#     if not tasks:
-#         await message.answer("ℹ️ Немає активних тижневих завдань для видалення.")
-#         return
-
-#     # Формуємо інлайн-кнопки для кожного завдання
-#     keyboard = InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [
-#                 InlineKeyboardButton(
-#                     text=f"{t['title'][:40]} 🗑", callback_data=f"delete_task:{t['id']}"
-#                 )
-#             ]
-#             for t in tasks
-#         ]
-#     )
-
-#     await message.answer(
-#         "🗓 <b>Активні тижневі завдання:</b>\n"
-#         "Натисніть на завдання, щоб <b>видалити</b> його.",
-#         reply_markup=keyboard,
-#         parse_mode="HTML",
-#     )
-
-
-# @router.callback_query(F.data.startswith("delete_task:"))
-# async def delete_selected_task(callback: types.CallbackQuery):
-#     """Видаляє вибране завдання з бази."""
-#     task_id = int(callback.data.split(":")[1])
-
-#     async with aiosqlite.connect("bot.db") as db:
-#         # Безпечне видалення із таблиці weekly_tasks
-#         await db.execute("DELETE FROM weekly_tasks WHERE id = ?", (task_id,))
-#         # Також очищаємо зв’язані записи у user_tasks
-#         await db.execute("DELETE FROM user_tasks WHERE task_id = ?", (task_id,))
-#         await db.commit()
-
-#     await callback.message.edit_text(
-#         f"✅ Завдання <b>ID {task_id}</b> успішно видалено.", parse_mode="HTML"
-#     )
-#     await callback.answer("Завдання видалено!")
 from aiogram import F, types
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
@@ -1279,73 +1363,6 @@ async def delete_selected_task(callback: types.CallbackQuery):
 
 
 # ___________________________________ історія сповіщень_______________________________________
-
-# @router.message(F.text == "📜 Історія сповіщень")
-# async def show_notifications(message: types.Message):
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             "SELECT full_name, type, message, created_at FROM notifications ORDER BY id DESC LIMIT 20"
-#         )
-#         rows = await cursor.fetchall()
-
-#     if not rows:
-#         await message.answer("ℹ️ Немає сповіщень у базі.")
-#         return
-
-#     text = "📜 <b>Останні сповіщення</b>\n\n"
-#     for name, ntype, msg, ts in rows:
-#         text += f"👤 <b>{name}</b>\n🕓 {ts}\n📩 {msg}\n\n"
-
-#     await message.answer(text, parse_mode="HTML")
-
-
-# from db import get_notifications
-# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-
-# @router.message(F.text == "📜 Історія сповіщень")
-# async def show_notifications(message: types.Message):
-#     page = 1
-#     records, total_pages = await get_notifications(page=page)
-
-#     text = "<b>📜 Історія сповіщень</b>\n\n" + "\n\n".join(records)
-#     kb = InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [
-#                 InlineKeyboardButton(
-#                     text="⬅️ Назад", callback_data=f"notif_page:{page-1}"
-#                 ),
-#                 InlineKeyboardButton(
-#                     text=f"{page}/{total_pages}", callback_data="noop"
-#                 ),
-#                 InlineKeyboardButton(
-#                     text="➡️ Далі", callback_data=f"notif_page:{page+1}"
-#                 ),
-#             ],
-#             [
-#                 InlineKeyboardButton(
-#                     text="🎰 Слоти", callback_data="notif_filter:slots"
-#                 ),
-#                 InlineKeyboardButton(
-#                     text="🎯 1 із 3", callback_data="notif_filter:one_of_three"
-#                 ),
-#                 InlineKeyboardButton(
-#                     text="🃏 Blackjack", callback_data="notif_filter:blackjack"
-#                 ),
-#             ],
-#             [
-#                 InlineKeyboardButton(
-#                     text="🎡 Фортуна", callback_data="notif_filter:fortune"
-#                 ),
-#                 InlineKeyboardButton(
-#                     text="🎁 Бонус", callback_data="notif_filter:bonus"
-#                 ),
-#             ],
-#         ]
-#     )
-
-#     await message.answer(text, parse_mode="HTML", reply_markup=kb)
-
 
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery

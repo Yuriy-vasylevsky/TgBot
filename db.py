@@ -186,6 +186,23 @@ async def init_db():
             )
             await db.commit()
 
+        # ________________________________________ щблон розсилки__________________________________________________
+
+        async def ensure_broadcast_templates_table():
+            async with aiosqlite.connect(DB_PATH) as db:
+                await db.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS broadcast_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        title TEXT,
+                        text TEXT
+                    )
+                """
+                )
+                await db.commit()
+
+        await ensure_broadcast_templates_table()
+
 
 # _________________________________________________________________________________________________________________
 
@@ -870,78 +887,6 @@ async def add_user_column_last_actions():
 
 
 # _____________________________тижневі завдання __________________________________
-
-# # --- Додати нове тижневе завдання ---
-# async def add_weekly_task(title: str, description: str, reward: str):
-#     async with aiosqlite.connect("bot.db") as db:
-#         # Перевіряємо, чи є таблиця weekly_tasks
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS weekly_tasks (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 title TEXT NOT NULL,
-#                 description TEXT,
-#                 reward TEXT,
-#                 is_active INTEGER DEFAULT 1,
-#                 created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # Перевіряємо, чи є таблиця user_tasks
-#         await db.execute(
-#             """
-#             CREATE TABLE IF NOT EXISTS user_tasks (
-#                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-#                 user_id INTEGER NOT NULL,
-#                 task_id INTEGER NOT NULL,
-#                 is_completed INTEGER DEFAULT 0,
-#                 completed_at DATETIME,
-#                 FOREIGN KEY (task_id) REFERENCES weekly_tasks (id)
-#             )
-#             """
-#         )
-#         await db.commit()
-
-#         # Додаємо саме завдання
-#         await db.execute(
-#             "INSERT INTO weekly_tasks (title, description, reward) VALUES (?, ?, ?)",
-#             (title, description, reward),
-#         )
-#         await db.commit()
-
-
-# # --- Отримати всі активні завдання ---
-# async def get_active_tasks():
-#     async with aiosqlite.connect("bot.db") as db:
-#         cursor = await db.execute(
-#             "SELECT id, title, description, reward FROM weekly_tasks WHERE is_active = 1"
-#         )
-#         rows = await cursor.fetchall()
-#         return [
-#             {"id": r[0], "title": r[1], "description": r[2], "reward": r[3]} for r in rows
-#         ]
-
-# # --- Отримати стан виконання користувача ---
-# async def get_user_task_progress(user_id: int):
-#     async with aiosqlite.connect("bot.db") as db:
-#         cursor = await db.execute("""
-#             SELECT t.id, t.title, t.description, t.reward, ut.is_completed
-#             FROM weekly_tasks t
-#             LEFT JOIN user_tasks ut ON t.id = ut.task_id AND ut.user_id = ?
-#             WHERE t.is_active = 1
-#         """, (user_id,))
-#         rows = await cursor.fetchall()
-#         return [
-#             {
-#                 "id": r[0],
-#                 "title": r[1],
-#                 "description": r[2],
-#                 "reward": r[3],
-#                 "is_completed": bool(r[4]) if r[4] is not None else False
-#             } for r in rows
-#         ]
 import aiosqlite
 from pathlib import Path
 
@@ -1038,10 +983,9 @@ async def get_user_task_progress(user_id: int):
 # ________________________________________ історія сповіщень__________________________________________________
 
 
-
-
-
-async def save_notification(user_id: int, username: str, full_name: str, type_: str, message: str):
+async def save_notification(
+    user_id: int, username: str, full_name: str, type_: str, message: str
+):
     """Зберігає сповіщення у таблиці notifications (автоматично додає username у кінець повідомлення)."""
     try:
         # Гарантуємо наявність таблиці
@@ -1061,7 +1005,9 @@ async def save_notification(user_id: int, username: str, full_name: str, type_: 
             )
 
             # Додаємо username у кінець повідомлення (автоматично)
-            username_display = f"@{username}" if username and username != "-" else "(без username)"
+            username_display = (
+                f"@{username}" if username and username != "-" else f"{full_name}"
+            )
             formatted_message = f"{message}\n👤 {username_display}"
 
             await db.execute(
@@ -1076,6 +1022,7 @@ async def save_notification(user_id: int, username: str, full_name: str, type_: 
 
     except Exception as e:
         print(f"⚠️ Error saving notification: {e}")
+
 
 import aiosqlite
 from pathlib import Path
@@ -1093,7 +1040,9 @@ async def cleanup_old_notifications():
 
 
 # 📖 Отримання сторінки історії
-async def get_notifications(page: int = 1, limit: int = 10, filter_type: str | None = None):
+async def get_notifications(
+    page: int = 1, limit: int = 10, filter_type: str | None = None
+):
     await cleanup_old_notifications()
     offset = (page - 1) * limit
 
@@ -1124,9 +1073,7 @@ async def get_notifications(page: int = 1, limit: int = 10, filter_type: str | N
         except Exception:
             time_str = created_at
 
-        formatted.append(
-            f"{message}\n🕒 {time_str}"
-        )
+        formatted.append(f"{message}\n🕒 {time_str}")
 
     # підрахунок загальної кількості для пагінації
     async with aiosqlite.connect(DB_PATH) as db:
