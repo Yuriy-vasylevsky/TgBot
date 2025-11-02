@@ -180,46 +180,6 @@ def format_time(dt_str: str):
 
 
 # ===== Основна функція для відображення списку =====
-# async def send_users_page(message_or_query, users, page: int):
-#     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
-
-#     total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
-#     start = (page - 1) * USERS_PER_PAGE
-#     end = start + USERS_PER_PAGE
-#     current_users = users[start:end]
-
-#     text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
-
-#     for i, user in enumerate(current_users, start=start + 1):
-#         full_name = user.get("full_name") or "—"
-#         username = user.get("username") or "—"
-#         user_id = user.get("user_id")
-#         last_active = format_time(user.get("last_active") or "")
-#         last_actions = user.get("last_actions") or "—"
-
-#         # 🔹 форматуємо останні дії в стовпчик
-#         if last_actions and last_actions != "—":
-#             actions_list = last_actions.split(" | ")
-#             actions_text = "\n".join([f"   {a.strip()}" for a in actions_list])
-#             last_actions_str = f"📜 <b>Останні дії:</b>\n{actions_text}"
-#         else:
-#             last_actions_str = "📜 Немає даних"
-
-#         text += (
-#             f"{i}. <b>{full_name}</b>\n"
-#             f"🔗 <a href='tg://user?id={user_id}'>Перейти в профіль</a>\n"
-#             f"🕒 {last_active}\n"
-#             f"{last_actions_str}\n"
-#             f"🔐 <code>{user_id}</code>\n\n"
-#         )
-
-#     kb = InlineKeyboardBuilder()
-#     if page > 1:
-#         kb.button(text="⬅️ Назад", callback_data=f"users_page:{page - 1}")
-#     if end < len(users):
-#         kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
-#     kb.adjust(2)
-
 
 async def send_users_page(message_or_query, users, page: int):
     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
@@ -932,7 +892,7 @@ class AddCodeFSM(StatesGroup):
     waiting_for_code = State()
 
 
-# ++++++++++++++++++                  код в посилання            +++++++++++++++++++++++++++++++++
+# ++++++++++++++++++             код в посилання            +++++++++++++++++++++++++++++++++
 
 
 @router.message(F.text.regexp(r"^\d{2}(?:-\d{2}){6}$"))

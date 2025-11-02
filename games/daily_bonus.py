@@ -27,6 +27,7 @@ DB_PATH = Path(__file__).resolve().parent.parent / "users.db"
 router = Router(name="daily_bonus")
 
 BONUS_BTN = "🎁 Щоденний бонус"
+REQUIRED_GAMES = 1  # мінімум 1 гра для доступу до щоденного бонусу
 
 # --- нагороди ---
 PRIZES = [
@@ -186,6 +187,25 @@ async def show_bonus_list(cb: CallbackQuery):
 async def spin_bonus(cb: CallbackQuery):
     user_id = cb.from_user.id
     await ensure_bonus_column()
+
+    # === Перевірка доступу — потрібно зіграти хоча б 1 гру ===
+    try:
+        from db import get_user_data
+
+        user_data = await get_user_data(user_id)
+        games_played = user_data.get("games_played", 0) if user_data else 0
+    except:
+        games_played = 0
+
+    if games_played < REQUIRED_GAMES:
+        await cb.answer()
+        await cb.message.answer(
+            f"🔒 Потрібно зіграти хоча б 1 гру, щоб отримати бонус!\n"
+            f"🎮 У вас зараз: {games_played} ігор\n\n"
+            f"🔓 Оновлюється щопонеділка 🔓",
+            parse_mode="HTML",
+        )
+        return
 
     last_date = await get_last_bonus_date(user_id)
     today = datetime.date.today().isoformat()
