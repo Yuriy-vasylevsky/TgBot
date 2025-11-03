@@ -136,9 +136,10 @@ async def set_new_winrate(message: types.Message, state: FSMContext):
     await state.clear()
 
 
-# ==========================
-# 👥 Список користувачів
-# ==========================
+# ==============================================================================
+#                          Список користувачів
+# ==============================================================================
+
 from aiogram import types, F, Router
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
@@ -181,6 +182,7 @@ def format_time(dt_str: str):
 
 # ===== Основна функція для відображення списку =====
 
+
 async def send_users_page(message_or_query, users, page: int):
     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
 
@@ -195,8 +197,15 @@ async def send_users_page(message_or_query, users, page: int):
         full_name = user.get("full_name") or "—"
         username = user.get("username") or "-"
         user_id = user.get("user_id")
+        games_played = user.get("games_played", 0)
+        games_won = user.get("games_won", 0)
         last_active = format_time(user.get("last_active") or "")
         last_actions = user.get("last_actions") or "—"
+
+        if games_played > 0:
+            winrate = round((games_won / games_played) * 100)
+        else:
+            winrate = 0
 
         # формуємо профільну лінку
         if username != "-" and username != "":
@@ -217,7 +226,8 @@ async def send_users_page(message_or_query, users, page: int):
             f"🔗 {profile_link}\n"
             f"🕒 {last_active}\n"
             f"{last_actions_str}\n"
-            f"🔐 <code>{user_id}</code>\n\n"
+            f"🔐 <code>{user_id}</code>\n"
+            f"🎮 Зіграно: <b>{games_played}</b> | 🏆 Виграно: <b>{games_won} \n 🍀 {winrate}%</b>\n\n"
         )
 
     kb = InlineKeyboardBuilder()
@@ -241,22 +251,8 @@ async def send_users_page(message_or_query, users, page: int):
             text, parse_mode="HTML", reply_markup=kb.as_markup()
         )
 
-    # Оновлюємо або надсилаємо повідомлення
-    if isinstance(message_or_query, types.CallbackQuery):
-        try:
-            await message_or_query.message.edit_text(
-                text, parse_mode="HTML", reply_markup=kb.as_markup()
-            )
-        except Exception:
-            await message_or_query.answer("⚠️ Не вдалося оновити сторінку.")
-        await message_or_query.answer()
-    else:
-        await message_or_query.answer(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
-        )
 
-
-# ===== Команда: список користувачів =====
+# # ===== Команда: список користувачів =====
 @router.message(F.text == "👥 Список користувачів")
 async def list_users(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -1322,19 +1318,16 @@ async def delete_selected_task(callback: types.CallbackQuery):
     await callback.answer("Завдання видалено!")
 
 
-# ___________________________________ історія сповіщень_______________________________________
+# =============================================================================================
+#                              📜 ІСТОРІЯ СПОВІЩЕНЬ (АДМІН)
+# =============================================================================================
 
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from db import get_notifications
 from config import ADMIN_ID
 
-# router = Router()
 
-
-# ===============================
-#   📜 ІСТОРІЯ СПОВІЩЕНЬ (АДМІН)
-# ===============================
 @router.message(F.text == "📜 Історія сповіщень")
 async def show_notifications(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -1354,9 +1347,9 @@ async def show_notifications(message: types.Message):
     await message.answer(text, parse_mode="HTML", reply_markup=kb)
 
 
-# ===============================
-#   ⚙️ ПАГІНАЦІЯ ТА ФІЛЬТРИ
-# ===============================
+# ===============================  ⚙️ ПАГІНАЦІЯ ТА ФІЛЬТРИ   ===============================
+
+
 @router.callback_query(F.data.startswith("notif_page:"))
 async def paginate_notifications(cb: CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
@@ -1400,9 +1393,9 @@ async def filter_notifications(cb: CallbackQuery):
     await cb.answer()
 
 
-# ===============================
-#   🧩 ДОПОМІЖНА ФУНКЦІЯ КЛАВІАТУРИ
-# ===============================
+# ===============================   🧩 ДОПОМІЖНА ФУНКЦІЯ КЛАВІАТУРИ   ===============================
+
+
 def build_notifications_kb(page: int, total_pages: int, filter_type: str | None):
     ftype = filter_type or "none"
 

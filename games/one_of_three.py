@@ -2,7 +2,13 @@ import asyncio
 import random
 from aiogram import F, types, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from db import add_game_result, get_winrate, has_claimed_gift, save_notification
+from db import (
+    add_game_result,
+    get_winrate,
+    has_claimed_gift,
+    save_notification,
+    add_game_win,
+)
 from menu import main_menu
 from config import ADMIN_ID
 
@@ -114,6 +120,7 @@ async def open_boxes(cb: CallbackQuery):
             parse_mode="HTML",
             reply_markup=kb,
         )
+        await add_game_win(cb.from_user.id)
         outcome = "✅ ВИГРАВ"
     else:
         result_text = (

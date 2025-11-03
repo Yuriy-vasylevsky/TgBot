@@ -32,6 +32,14 @@ async def init_db():
         # ===================== Додаткові колонки подарунків =====================
         await add_gift_columns(db)
 
+        # ===================== Колонка скільки виграв ігор =====================
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN games_won INTEGER DEFAULT 0")
+            await db.commit()
+            print("✅ Колонка games_won додана")
+        except:
+            print("ℹ️ Колонка games_won вже існує")
+
         # ===================== Таблиця промокодів =====================
         await db.execute(
             """
@@ -295,22 +303,54 @@ async def get_all_users() -> List[int]:
             return [r[0] for r in rows]
 
 
+# async def get_all_users_info():
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             """
+#             SELECT user_id, full_name, username, last_active, last_actions, games_played
+#             FROM users
+#         """
+#         )
+#         rows = await cursor.fetchall()
+
+
+#     result = []
+#     for r in rows:
+#         result.append(
+#             {
+#                 "user_id": r[0],
+#                 "full_name": r[1],
+#                 "username": r[2],
+#                 "last_active": r[3],
+#                 "last_actions": r[4],
+#                 "games_played": r[5],  # ← ДОДАЙ ОБОВʼЯЗКОВО
+#             }
+#         )
+#     return result
 async def get_all_users_info():
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            "SELECT full_name, username, user_id, last_active, last_actions FROM users"
+        cur = await db.execute(
+            """
+            SELECT user_id, full_name, username, last_active, last_actions, games_played, games_won
+            FROM users
+        """
         )
-        rows = await cursor.fetchall()
-        return [
+        rows = await cur.fetchall()
+
+    result = []
+    for r in rows:
+        result.append(
             {
-                "full_name": row[0],
-                "username": row[1],
-                "user_id": row[2],
-                "last_active": row[3],
-                "last_actions": row[4],
+                "user_id": r[0],
+                "full_name": r[1],
+                "username": r[2],
+                "last_active": r[3],
+                "last_actions": r[4],
+                "games_played": r[5],
+                "games_won": r[6],  # ←←← ЛЕЖИТЬ ТУТ
             }
-            for row in rows
-        ]
+        )
+    return result
 
 
 async def set_user_access(user_id: int, access: bool):
@@ -461,20 +501,6 @@ async def clear_game_stats():
         await db.commit()
 
 
-# async def clear_game_stats():
-#     async with aiosqlite.connect("database.db") as db:
-#         # --- Статистика усіх ігор (universal stats table)
-#         await db.execute("DELETE FROM game_results")
-
-#         # --- Сесії слотів
-#         await db.execute("DELETE FROM slot_sessions")
-
-#         # --- Сесії Blackjack 🃏
-#         await db.execute("DELETE FROM blackjack_sessions")
-
-#         await db.commit()
-
-
 # ---------------------- Очистка промокодів ----------------------
 async def clear_promocodes():
     async with aiosqlite.connect(DB_PATH) as db:
@@ -538,16 +564,6 @@ async def set_gift_claimed(user_id: int, claimed: bool):
         )
         await db.commit()
 
-
-# Скидання подарунків для всіх
-# def reset_all_gifts():
-#     import sqlite3
-
-#     conn = sqlite3.connect(DB_PATH)
-#     c = conn.cursor()
-#     c.execute("UPDATE users SET has_claimed_gift = 0")
-#     conn.commit()
-#     conn.close()
 
 import aiosqlite
 from config import DB_PATH
@@ -726,25 +742,8 @@ async def get_all_banned():
 
 
 # ___________________________________________________ОСОБИСТИЙ КАБІНЕТ_________________________________________________________________
-# ==========================
-# Кабінет користувача
-# ==========================
 
 
-# async def add_or_update_user(user_id: int, username: str, full_name: str):
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute(
-#             """
-#             INSERT INTO users (user_id, username, full_name, last_active)
-#             VALUES (?, ?, ?, DATETIME('now', '+3 hours'))
-#             ON CONFLICT(user_id) DO UPDATE SET
-#                 username=excluded.username,
-#                 full_name=excluded.full_name,
-#                 last_active=excluded.last_active
-#             """,
-#             (user_id, username, full_name),
-#         )
-#         await db.commit()
 async def add_or_update_user(user_id: int, username: str, full_name: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -764,14 +763,25 @@ async def add_or_update_user(user_id: int, username: str, full_name: str):
 async def get_user_data(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT username, full_name, games_played FROM users WHERE user_id = ?",
+            """
+            SELECT username, full_name, games_played, games_won
+            FROM users
+            WHERE user_id = ?
+            """,
             (user_id,),
         )
         row = await cursor.fetchone()
         await cursor.close()
+
         if not row:
             return None
-        return {"username": row[0], "full_name": row[1], "games_played": row[2]}
+
+        return {
+            "username": row[0],
+            "full_name": row[1],
+            "games_played": row[2],
+            "games_won": row[3],  # ← додано
+        }
 
 
 async def increment_games_played(user_id: int):
@@ -1034,33 +1044,101 @@ from datetime import datetime, timedelta
 # 🧹 Автоочищення старих записів
 async def cleanup_old_notifications():
     async with aiosqlite.connect(DB_PATH) as db:
-        cutoff = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d %H:%M:%S")
-        await db.execute("DELETE FROM notifications WHERE created_at < ?", (cutoff,))
+        await db.execute(
+            """
+            DELETE FROM notifications
+            WHERE created_at < DATETIME('now', '-2 days', 'localtime')
+        """
+        )
         await db.commit()
 
 
 # 📖 Отримання сторінки історії
+# async def get_notifications(
+#     page: int = 1, limit: int = 10, filter_type: str | None = None
+# ):
+#     await cleanup_old_notifications()
+#     offset = (page - 1) * limit
+
+#     query = "SELECT username, full_name, type, message, created_at FROM notifications"
+#     params = []
+#     if filter_type:
+#         query += " WHERE type = ?"
+#         params.append(filter_type)
+#     query += " ORDER BY id DESC LIMIT ? OFFSET ?"
+#     params.extend([limit, offset])
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(query, params)
+#         rows = await cursor.fetchall()
+
+#     formatted = []
+#     for username, full_name, type_, message, created_at in rows:
+#         # форматування дати
+#         try:
+#             dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
+#             now = datetime.now()
+#             if dt.date() == now.date():
+#                 time_str = f"сьогодні о {dt.strftime('%H:%M')}"
+#             elif dt.date() == (now - timedelta(days=1)).date():
+#                 time_str = f"вчора о {dt.strftime('%H:%M')}"
+#             else:
+#                 time_str = dt.strftime("%d.%m о %H:%M")
+#         except Exception:
+#             time_str = created_at
+
+#         formatted.append(f"{message}\n🕒 {time_str}")
+
+#     # підрахунок загальної кількості для пагінації
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         count_query = "SELECT COUNT(*) FROM notifications"
+#         if filter_type:
+#             count_query += " WHERE type = ?"
+#             count_cursor = await db.execute(count_query, (filter_type,))
+#         else:
+#             count_cursor = await db.execute(count_query)
+#         total = (await count_cursor.fetchone())[0]
+
+#     total_pages = max(1, (total + limit - 1) // limit)
+#     return formatted, total_pages
+
+
 async def get_notifications(
     page: int = 1, limit: int = 10, filter_type: str | None = None
 ):
+    # автоочищення
     await cleanup_old_notifications()
+
     offset = (page - 1) * limit
 
-    query = "SELECT username, full_name, type, message, created_at FROM notifications"
+    # базовий FROM
+    base_query = "FROM notifications"
     params = []
-    if filter_type:
-        query += " WHERE type = ?"
-        params.append(filter_type)
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
 
+    if filter_type:
+        base_query += " WHERE type = ?"
+        params.append(filter_type)
+
+    # основні записи
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(query, params)
+        cursor = await db.execute(
+            f"""
+            SELECT username, full_name, type, message, created_at
+            {base_query}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            params + [limit, offset],
+        )
         rows = await cursor.fetchall()
 
+        # total count
+        cursor = await db.execute(f"SELECT COUNT(*) {base_query}", params)
+        total = (await cursor.fetchone())[0]
+
+    # формат
     formatted = []
     for username, full_name, type_, message, created_at in rows:
-        # форматування дати
         try:
             dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S")
             now = datetime.now()
@@ -1070,20 +1148,21 @@ async def get_notifications(
                 time_str = f"вчора о {dt.strftime('%H:%M')}"
             else:
                 time_str = dt.strftime("%d.%m о %H:%M")
-        except Exception:
+        except:
             time_str = created_at
 
         formatted.append(f"{message}\n🕒 {time_str}")
 
-    # підрахунок загальної кількості для пагінації
-    async with aiosqlite.connect(DB_PATH) as db:
-        count_query = "SELECT COUNT(*) FROM notifications"
-        if filter_type:
-            count_query += " WHERE type = ?"
-            count_cursor = await db.execute(count_query, (filter_type,))
-        else:
-            count_cursor = await db.execute(count_query)
-        total = (await count_cursor.fetchone())[0]
-
     total_pages = max(1, (total + limit - 1) // limit)
     return formatted, total_pages
+
+
+# _________________________________ збереження кількості виграшів __________________________________
+
+
+async def add_game_win(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET games_won = games_won + 1 WHERE user_id = ?", (user_id,)
+        )
+        await db.commit()

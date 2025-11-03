@@ -34,7 +34,7 @@ FORTUNE_BTN = "🎡 Колесо фортуни"
 REQUIRED_GAMES = 7  # скільки ігор потрібно для доступу
 
 PRIZES = [
-    {"title": "🤞 30 грн", "weight": 17, "code": "COUPON_5", "value": 30},
+    {"title": "🤞 30 грн", "weight": 30, "code": "COUPON_5", "value": 30},
     {"title": "💎 50 грн", "weight": 17, "code": "COUPON_8", "value": 50},
     {"title": "🔥 60 грн", "weight": 15, "code": "COUPON_10", "value": 60},
     {"title": "🎉 100 грн", "weight": 5, "code": "COUPON_10", "value": 100},
@@ -43,7 +43,7 @@ PRIZES = [
     {"title": "🥂 Джекпот 500 грн", "weight": 0.1, "code": "NOTHING", "value": 500},
     {
         "title": "🔁 Додаткове обертання",
-        "weight": 10,
+        "weight": 3,
         "code": "EXTRA_SPIN",
         "value": None,
     },
@@ -164,11 +164,12 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
         return
     try:
         text = (
-            "🧑‍🎰 <b>Колесо фортуни — виграш</b>\n"
+            "🎡 <b>Колесо фортуни — 🍀</b>\n"
             f"👤 {('@'+user.username) if user.username else user.full_name}\n"
-            f"🆔 ID: <code>{user.id}</code>\n"
+            f"🔗 <a href='tg://user?id={user.id}'> Профіль: <code>{user.full_name}</code></a>\n"
             f"🎁 Приз: <b>{html.escape(prize_title)}</b>"
         )
+
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
 
         from db import save_notification
@@ -178,7 +179,7 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
             user.username or "-",
             user.full_name or "-",
             "fortune",
-            f"🎡 Колесо фортуни — {prize_title}",
+            f"🎡 Колесо фортуни — {prize_title}\n 🔗 <a href='tg://user?id={user.id}'>Профіль: <code>{user.full_name}</code></a>",
         )
 
     except Exception as e:

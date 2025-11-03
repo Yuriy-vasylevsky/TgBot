@@ -15,6 +15,7 @@ from db import (
     has_claimed_gift,
     add_blackjack_session,
     save_notification,
+    add_game_win,
 )
 from menu import main_menu
 from config import ADMIN_ID
@@ -349,6 +350,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
             await message.answer(
                 "🎁 Ви досягли 30 купонів! Оберіть тип коду:", reply_markup=kb
             )
+            await add_game_win(message.from_user.id)
             await state.clear()
             return
 

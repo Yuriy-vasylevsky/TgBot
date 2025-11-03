@@ -32,7 +32,7 @@ REQUIRED_GAMES = 1  # мінімум 1 гра для доступу до щод�
 # --- нагороди ---
 PRIZES = [
     {"title": "🎟️ 1 промо", "weight": 5, "value": 1},
-    {"title": "💰 10 грн", "weight": 20, "value": 10},
+    {"title": "💰 10 грн", "weight": 25, "value": 10},
     {"title": "✨10% до депозиту", "weight": 20, "value": 25},
     {"title": "✨15% до депозиту", "weight": 15, "value": 50},
     {"title": "✨20% до депозиту", "weight": 10, "value": 100},
@@ -133,18 +133,46 @@ async def _animate(cb: CallbackQuery):
             await asyncio.sleep(0.2)
 
 
+# async def _notify_admin(user: types.User, prize_title: str, bot):
+#     """Надсилає адміну про отриманий бонус."""
+#     if not ADMIN_ID:
+#         return
+#     try:
+#         text = (
+#             "🎁 <b>Щоденний бонус отримано</b>\n"
+#             f"👤 <a href='tg://user?id={user.id}'>{html.escape(user.full_name)}</a>\n"
+#             f"🆔 ID: <code>{user.id}</code>\n"
+#             f"🏅 Бонус: <b>{html.escape(prize_title)}</b>"
+#         )
+#         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+#         from db import save_notification
+
+#         await save_notification(
+#             user.id,
+#             user.username or "-",
+#             user.full_name or "-",
+#             "bonus",
+#             f"🎁 Щоденний бонус — {prize_title}",
+#         )
+
+
+#     except Exception:
+#         pass
 async def _notify_admin(user: types.User, prize_title: str, bot):
     """Надсилає адміну про отриманий бонус."""
     if not ADMIN_ID:
         return
+
     try:
         text = (
             "🎁 <b>Щоденний бонус отримано</b>\n"
-            f"👤 <a href='tg://user?id={user.id}'>{html.escape(user.full_name)}</a>\n"
-            f"🆔 ID: <code>{user.id}</code>\n"
+            f"👤 {('@'+user.username) if user.username else html.escape(user.full_name)}\n"
+            f"🔗 <a href='tg://user?id={user.id}'>Профіль: <code>{html.escape(user.full_name)}</code></a>\n"
             f"🏅 Бонус: <b>{html.escape(prize_title)}</b>"
         )
+
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
+
         from db import save_notification
 
         await save_notification(
@@ -152,11 +180,11 @@ async def _notify_admin(user: types.User, prize_title: str, bot):
             user.username or "-",
             user.full_name or "-",
             "bonus",
-            f"🎁 Щоденний бонус — {prize_title}",
+            f"🎁 Щоденний бонус — {html.escape(prize_title)}\n🔗 <a href='tg://user?id={user.id}'>Профіль: <code>{html.escape(user.full_name)}</code></a>",
         )
 
-    except Exception:
-        pass
+    except Exception as e:
+        print("notify_admin daily bonus error:", e)
 
 
 # ===============================
@@ -200,8 +228,8 @@ async def spin_bonus(cb: CallbackQuery):
     if games_played < REQUIRED_GAMES:
         await cb.answer()
         await cb.message.answer(
-            f"🔒 Потрібно зіграти хоча б 1 гру, щоб отримати бонус!\n"
-            f"🎮 У вас зараз: {games_played} ігор\n\n"
+            f"⚠️ Зберіть {REQUIRED_GAMES} PROMO 🎟️ щоб відкрити доступ\n"
+            f"🎮 У вас зараз: {games_played} PROMO\n\n"
             f"🔓 Оновлюється щопонеділка 🔓",
             parse_mode="HTML",
         )

@@ -1,5 +1,3 @@
-
-
 import logging
 from aiogram import Router, F, types
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -30,12 +28,22 @@ async def show_profile(message: types.Message):
         await message.answer("⚠️ Ваш профіль ще не створений. Спробуйте пізніше.")
         return
 
+    games_won = user_data.get("games_won", 0)
+    visual = "🏆" * min(games_won, 20)  # максимум 20 елементів щоб не зламало телеграм
+    if games_won == 0:
+        visual = "—"
+
     weekly_coupons = user_data["games_played"]
     coupons_display = "🎟️" * min(weekly_coupons, 20)
     if weekly_coupons > 20:
         coupons_display += f" +{weekly_coupons - 20}"
     if not coupons_display:
         coupons_display = "—"
+
+    if weekly_coupons > 0:
+        winrate = round((games_won / weekly_coupons) * 100)
+    else:
+        winrate = 0
 
     tasks = await get_user_task_progress(user_id)
     if tasks:
@@ -55,7 +63,10 @@ async def show_profile(message: types.Message):
         f"👤 <b>Кабінет гравця</b>\n\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
         f"💬 <b>Ім’я:</b> {user_data['full_name']}\n"
-        f"<b>Зібрано PROMO за тиждень:</b>\n {coupons_display}\n\n"
+        f"🍀 <b>WinRate:</b> <code>{winrate}%</code>\n\n"
+        f"<b>Зібрано PROMO за тиждень: {weekly_coupons}</b>\n {coupons_display}\n\n"
+        f"<b>Виграно ігор за тиждень: </b> <code>{games_won}</code>\n"
+        f"{visual}\n\n"  # ← ВІЗУАЛІЗАЦІЯ
         f"📅 <b>Тижневі завдання:</b>\n{tasks_text}"
     )
 

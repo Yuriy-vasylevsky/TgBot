@@ -18,6 +18,7 @@ from db import (
     get_user_access,
     get_winrate,
     has_claimed_gift,
+    add_game_win,
 )
 from menu import main_menu
 from config import ADMIN_ID
@@ -291,10 +292,12 @@ async def slot_spin(message: types.Message, state: FSMContext):
             ]
         )
         await message.answer("🎉 Вітаю! Ви виграли. Оберіть тип коду:", reply_markup=kb)
+
         await message.bot.send_message(
             ADMIN_ID,
             f"🏆 @{message.from_user.username or message.from_user.full_name} виграв {coupons} купонів у слотах!",
         )
+        await add_game_win(message.from_user.id)
         await save_notification(
             message.from_user.id,
             message.from_user.username or "-",
