@@ -190,7 +190,7 @@ async def slot_spin(message: types.Message, state: FSMContext):
     # --- Формування комбінації ---
     if is_win:
         roll = random.random()
-        if roll < 0.03:
+        if roll < 0.01:
             sym = random.choice(symbols)
             reels = [sym, sym, sym]
             multiplier = 20

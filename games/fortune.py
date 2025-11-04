@@ -34,13 +34,13 @@ FORTUNE_BTN = "🎡 Колесо фортуни"
 REQUIRED_GAMES = 7  # скільки ігор потрібно для доступу
 
 PRIZES = [
-    {"title": "🤞 30 грн", "weight": 30, "code": "COUPON_5", "value": 30},
+    {"title": "🤞 30 грн", "weight": 20, "code": "COUPON_5", "value": 30},
     {"title": "💎 50 грн", "weight": 17, "code": "COUPON_8", "value": 50},
-    {"title": "🔥 60 грн", "weight": 15, "code": "COUPON_10", "value": 60},
+    {"title": "🔥 60 грн", "weight": 14, "code": "COUPON_10", "value": 60},
     {"title": "🎉 100 грн", "weight": 5, "code": "COUPON_10", "value": 100},
     {"title": "🌟 200 грн", "weight": 1, "code": "COUPON_10", "value": 200},
-    {"title": "🎟️ Promo", "weight": 7, "code": "NOTHING", "value": 0},
-    {"title": "🥂 Джекпот 500 грн", "weight": 0.1, "code": "NOTHING", "value": 500},
+    {"title": "🎟️ Promo", "weight": 14, "code": "NOTHING", "value": 0},
+    {"title": "🥂 Джекпот 500 грн", "weight": 0.5, "code": "NOTHING", "value": 500},
     {
         "title": "🔁 Додаткове обертання",
         "weight": 3,
