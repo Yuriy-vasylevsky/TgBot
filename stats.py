@@ -10,6 +10,7 @@ from db import (
 )
 
 import config
+from db import get_total_money_won  # зверху
 
 router = Router()
 ADMIN_ID = config.ADMIN_ID
@@ -80,12 +81,18 @@ async def show_stats(message: types.Message):
         # 💰 --- ФІНАНСОВА СТАТИСТИКА ---
         total_paid = total_wins * 30
         price_per_coupon = total_paid / total_sessions if total_sessions > 0 else 0
-
+        total_money_won = await get_total_money_won()
+        earned_money = (
+            total_sessions * 0.8 * 200 - total_money_won - total_paid
+        )  # зароблено
         text += (
             "💰 <b>Фінансова статистика</b>\n"
-            f"🔹 Заплачено грошей: <b>{total_paid:,}</b>\n"
-            f"🔹 Ціна за купон: <b>{price_per_coupon:.2f}</b>\n"
+            f"🔹 Витрачено на PROMO: <b>{total_paid:,}</b>\n"
+            f"🔹 Виграно в 🎡: <b>{total_money_won:,}</b>\n"
+            f"🔹 Ціна за 1 PROMO: <b>{price_per_coupon:.2f}</b>\n\n"
+            f"🔹 Зароблено грошей: <b>{earned_money:,}</b>\n"
         )
+
     else:
         text += "Немає даних для відображення."
 

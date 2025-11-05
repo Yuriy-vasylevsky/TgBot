@@ -211,6 +211,15 @@ async def init_db():
 
         await ensure_broadcast_templates_table()
 
+        # ___________________________________________________________ колонка з виграшами від колеса фортуни ___________________________________________________________
+
+        try:
+            await db.execute("ALTER TABLE users ADD COLUMN money_won INTEGER DEFAULT 0")
+            await db.commit()
+            print("✅ money_won додано")
+        except:
+            pass
+
 
 # _________________________________________________________________________________________________________________
 
@@ -498,6 +507,7 @@ async def clear_game_stats():
         await db.execute("DELETE FROM game_stats")
         await db.execute("DELETE FROM slot_sessions")
         await db.execute("DELETE FROM blackjack_sessions")
+        await db.execute("UPDATE users SET money_won = 0")
         await db.commit()
 
 
@@ -1030,6 +1040,7 @@ async def get_user_task_progress(user_id: int):
 #             await db.commit()
 #             print(f"✅ Notification saved for {username_display} ({type_})")
 
+
 #     except Exception as e:
 #         print(f"⚠️ Error saving notification: {e}")
 async def save_notification(
@@ -1059,9 +1070,7 @@ async def save_notification(
             profile_link = f"<a href='tg://user?id={user_id}'>Профіль</a>"
 
             formatted_message = (
-                f"{message}\n"
-                f"👤 {username_display}\n"
-                f"🔗 {profile_link}"
+                f"{message}\n" f"👤 {username_display}\n" f"🔗 {profile_link}"
             )
 
             await db.execute(
@@ -1076,7 +1085,6 @@ async def save_notification(
 
     except Exception as e:
         print(f"⚠️ Error saving notification: {e}")
-
 
 
 import aiosqlite
@@ -1209,5 +1217,24 @@ async def add_game_win(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE users SET games_won = games_won + 1 WHERE user_id = ?", (user_id,)
+        )
+        await db.commit()
+
+
+# ___________________________________________________________ колонка з виграшами від колеса фортуни ___________________________________________________________
+
+
+async def get_total_money_won():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT SUM(money_won) FROM users")
+        row = await cur.fetchone()
+        return row[0] or 0
+
+
+async def add_money_win(user_id: int, amount: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET money_won = money_won + ? WHERE user_id = ?",
+            (amount, user_id),
         )
         await db.commit()

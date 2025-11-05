@@ -23,7 +23,7 @@ try:
 except Exception:
     main_menu = None
 
-from db import get_user_data  # імпорт даних користувача
+from db import get_user_data, add_money_win  # імпорт даних користувача
 
 DB_PATH = Path(__file__).resolve().parent.parent / "users.db"
 router = Router(name="fortune")
@@ -265,6 +265,9 @@ async def spin(cb: CallbackQuery):
         await cb.message.edit_text(result_text, parse_mode="HTML")
 
         await _notify_admin(cb.from_user, prize_title, cb.message.bot)
+        # якщо є реальна сума — додаємо в money_won
+        if prize.get("value") and prize["value"] > 0:
+            await add_money_win(user_id, prize["value"])
 
         if prize["code"] == "EXTRA_SPIN":
             await asyncio.sleep(0.5)
@@ -287,5 +290,10 @@ async def spin_again(cb: CallbackQuery):
         )
         await cb.message.edit_text(result_text, parse_mode="HTML")
         await _notify_admin(cb.from_user, prize_title, cb.message.bot)
+        # якщо є реальна сума — додаємо в money_won
+        if prize.get("value") and prize["value"] > 0:
+
+            await add_money_win(user_id, prize["value"])
+
     finally:
         _spinning_users.discard(user_id)

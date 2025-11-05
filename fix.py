@@ -1,27 +1,21 @@
-import aiosqlite
 import asyncio
+import aiosqlite
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent / "users.db"
 
-async def fix_notifications():
+async def main():
     async with aiosqlite.connect(DB_PATH) as db:
-        # видаляємо стару таблицю
-        await db.execute("DROP TABLE IF EXISTS notifications")
-        # створюємо заново з локальним часом
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                username TEXT,
-                full_name TEXT,
-                type TEXT,
-                message TEXT,
-                created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
-            )
-        """)
-        await db.commit()
-        print("✅ Таблицю notifications оновлено (тепер localtime)")
+        # перевіряємо чи вже є така колонка
+        cur = await db.execute("PRAGMA table_info(users)")
+        cols = [row[1] for row in await cur.fetchall()]
 
-asyncio.run(fix_notifications())
+        if "money_won" not in cols:
+            print("🔧 Додаю колонку money_won...")
+            await db.execute("ALTER TABLE users ADD COLUMN money_won INTEGER DEFAULT 0;")
+            await db.commit()
+            print("✅ Готово! колонка money_won створена.")
+        else:
+            print("ℹ️ Колонка money_won вже існує — нічого робити не треба.")
 
+asyncio.run(main())
