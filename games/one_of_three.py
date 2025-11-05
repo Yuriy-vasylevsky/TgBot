@@ -136,16 +136,21 @@ async def open_boxes(cb: CallbackQuery):
         outcome = "❌ ПРОГРАВ"
 
     # === 4️⃣ Статистика ===
+    profile_link = f"<a href='tg://user?id={cb.from_user.id}'>Профіль</a>"
+    username_display = (
+        f"@{cb.from_user.username}" if cb.from_user.username else profile_link
+    )
     try:
         await add_game_result("Один з трьох", is_win)
     except Exception as e:
         print(f"❌ DB Error: {e}")
 
     try:
+
         await cb.message.bot.send_message(
             ADMIN_ID,
             f"🎯 <b>Гравець зіграв у 'Один із трьох'</b>\n"
-            f"👤 {cb.from_user.full_name} (@{cb.from_user.username or 'немає'})\n"
+            f"👤 {cb.from_user.full_name} ({username_display})\n"
             f"🏁 Результат: {outcome}\n"
             f"📊 Winrate: {winrate * 100:.1f}%",
             parse_mode="HTML",

@@ -309,15 +309,16 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
         except Exception as e:
             print(f"[DB Error] Не вдалося записати сесію Blackjack: {e}")
 
-        outcome = "🏆 ВИГРАВ ГРУ" if balance >= 30 else "💀 ПРОГРАВ УСЕ"
+        outcome = "✅ ВИГРАВ" if balance >= 30 else "❌ ПРОГРАВ"
         try:
             await message.bot.send_message(
                 ADMIN_ID,
                 f"🃏 <b>Blackjack фінал</b>\n"
-                f"👤 {message.from_user.full_name} (ID: <code>{message.from_user.id}</code>)\n"
-                f"🎯 Результат: {outcome}\n"
-                f"💵 Остання ставка: {bet}\n"
-                f"🏦 Баланс: {balance}",
+                f"👤 {message.from_user.full_name} (🔗: <a href='tg://user?id={message.from_user.id}'>Профіль</a>)\n"
+                # f"<a href='tg://user?id={message.from_user.id}'>Профіль</a>"
+                f"🎯 Результат: {outcome}\n",
+                # f"💵 Остання ставка: {bet}\n"
+                # f"🏦 Баланс: {balance}",
                 parse_mode="HTML",
             )
 
@@ -326,7 +327,8 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                 message.from_user.username or "-",
                 message.from_user.full_name or "-",
                 "blackjack",
-                f"🃏 Blackjack — {outcome}\n💵 Ставка: {bet}, Баланс: {balance}",
+                # f"🃏 Blackjack — {outcome}\n💵 Ставка: {bet}, Баланс: {balance}",
+                f"🃏 Blackjack — {outcome}",
             )
 
         except Exception:

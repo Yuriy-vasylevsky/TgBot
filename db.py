@@ -993,12 +993,50 @@ async def get_user_task_progress(user_id: int):
 # ________________________________________ історія сповіщень__________________________________________________
 
 
+# async def save_notification(
+#     user_id: int, username: str, full_name: str, type_: str, message: str
+# ):
+#     """Зберігає сповіщення у таблиці notifications (автоматично додає username у кінець повідомлення)."""
+#     try:
+#         # Гарантуємо наявність таблиці
+#         async with aiosqlite.connect(DB_PATH) as db:
+#             await db.execute(
+#                 """
+#                 CREATE TABLE IF NOT EXISTS notifications (
+#                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+#                     user_id INTEGER,
+#                     username TEXT,
+#                     full_name TEXT,
+#                     type TEXT,              -- тип події (game, fortune, bonus, promocode)
+#                     message TEXT,           -- текст сповіщення
+#                     created_at DATETIME DEFAULT (DATETIME('now', 'localtime'))
+#                 )
+#                 """
+#             )
+
+#             # Додаємо username у кінець повідомлення (автоматично)
+#             username_display = (
+#                 f"@{username}" if username and username != "-" else f"{full_name}"
+#             )
+#             formatted_message = f"{message}\n👤 {username_display}"
+
+#             await db.execute(
+#                 """
+#                 INSERT INTO notifications (user_id, username, full_name, type, message)
+#                 VALUES (?, ?, ?, ?, ?)
+#                 """,
+#                 (user_id, username, full_name, type_, formatted_message),
+#             )
+#             await db.commit()
+#             print(f"✅ Notification saved for {username_display} ({type_})")
+
+#     except Exception as e:
+#         print(f"⚠️ Error saving notification: {e}")
 async def save_notification(
     user_id: int, username: str, full_name: str, type_: str, message: str
 ):
-    """Зберігає сповіщення у таблиці notifications (автоматично додає username у кінець повідомлення)."""
+    """Зберігає сповіщення у таблиці notifications (автоматично додає username і лінк на профіль у кінець повідомлення)."""
     try:
-        # Гарантуємо наявність таблиці
         async with aiosqlite.connect(DB_PATH) as db:
             await db.execute(
                 """
@@ -1014,11 +1052,17 @@ async def save_notification(
                 """
             )
 
-            # Додаємо username у кінець повідомлення (автоматично)
             username_display = (
                 f"@{username}" if username and username != "-" else f"{full_name}"
             )
-            formatted_message = f"{message}\n👤 {username_display}"
+
+            profile_link = f"<a href='tg://user?id={user_id}'>Профіль</a>"
+
+            formatted_message = (
+                f"{message}\n"
+                f"👤 {username_display}\n"
+                f"🔗 {profile_link}"
+            )
 
             await db.execute(
                 """
@@ -1032,6 +1076,7 @@ async def save_notification(
 
     except Exception as e:
         print(f"⚠️ Error saving notification: {e}")
+
 
 
 import aiosqlite

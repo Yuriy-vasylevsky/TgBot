@@ -74,8 +74,9 @@ async def on_choose_reward(cb: CallbackQuery):
         ADMIN_ID,
         f"🔔 <b>Гравець просить код для {casino_type}</b>\n\n"
         f"👤 Ім’я: <b>{user_name}</b>\n"
-        f"🆔 ID: <code>{user_id}</code>\n"
-        f"🔑 Код (зарезервовано): <code>{code_text}</code>",
+        f"🔗 <a href='tg://user?id={user_id}'>{user_name}</a>\n"
+        f"🆔 ID: <code>{user_id}</code>\n",
+        # f"🔑 Код (зарезервовано): <code>{code_text}</code>",
         parse_mode="HTML",
         reply_markup=kb_admin,
     )
@@ -117,7 +118,7 @@ async def handle_reward_confirm(cb: CallbackQuery):
     user_id = pending["user_id"]
     code_text = (pending.get("code") or "").replace("-", "")
     casino_type = pending.get("casino_type")
-
+    user_name = cb.from_user.full_name
     if action == "confirm":
         if not code_text:
             free_code = await get_free_code(casino_type)
@@ -139,7 +140,9 @@ async def handle_reward_confirm(cb: CallbackQuery):
             url = f"https://code.greenhost.pw/?c={code_text}"
 
         await cb.message.edit_text(
-            f"✅ Виграш підтверджено.\nКод: {casino_type} - {code_text}"
+            f"✅ Виграш підтверджено.\n🎁 Код: {casino_type} - {code_text}\n"
+            # f"<a href='tg://user?id={user_id}'>Профіль</a>"
+            f"🔗 <a href='tg://user?id={user_id}'>{user_name}</a>\n"
         )
 
         try:

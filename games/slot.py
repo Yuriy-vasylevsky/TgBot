@@ -10,7 +10,7 @@ from aiogram.types import (
     InlineKeyboardMarkup,
     InlineKeyboardButton,
 )
-from db import save_notification  # додай угорі поруч із іншими імпортами
+from db import save_notification
 
 from db import (
     add_game_result,
@@ -48,6 +48,38 @@ def games_menu():
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
         resize_keyboard=True,
     )
+
+
+from aiogram import types
+from datetime import datetime
+from config import ADMIN_ID
+
+
+async def notify_admin_slots(user: types.User, coupons: int, bot):
+    """Універсальне повідомлення адміну про результат у слотах."""
+    if not ADMIN_ID:
+        return
+
+    user_display = f"@{user.username}" if user.username else user.full_name
+    profile_link = f"<a href='tg://user?id={user.id}'>Профіль</a>"
+
+    # формат часу
+    now = datetime.now()
+    time_str = f"сьогодні о {now.strftime('%H:%M')}"
+
+    if coupons > 0:
+        result = f"✅ ВИГРАВ <b>{coupons}</b> купонів"
+    else:
+        result = "❌ ПРОГРАВ"
+
+    text = (
+        f"🎰 Слоти — {result}\n"
+        f"👤 {user_display}\n"
+        f"🔗 {profile_link}\n"
+        f"🕒 {time_str}"
+    )
+
+    await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
 
 
 # ==============================
@@ -269,7 +301,7 @@ async def slot_spin(message: types.Message, state: FSMContext):
             message.from_user.username or "-",
             message.from_user.full_name or "-",
             "slots",
-            f"💀 Програв усі купони у слотах",
+            f"СЛОТИ - ❌ Програв ",
         )
 
         await add_slot_session(message.from_user.id, "lose", 0)
@@ -293,17 +325,19 @@ async def slot_spin(message: types.Message, state: FSMContext):
         )
         await message.answer("🎉 Вітаю! Ви виграли. Оберіть тип коду:", reply_markup=kb)
 
-        await message.bot.send_message(
-            ADMIN_ID,
-            f"🏆 @{message.from_user.username or message.from_user.full_name} виграв {coupons} купонів у слотах!",
-        )
+        # await message.bot.send_message(
+        #     ADMIN_ID,
+        #     f"🏆 @{message.from_user.username or message.from_user.full_name} виграв {coupons} купонів у слотах!",
+        # )
+        await notify_admin_slots(message.from_user, coupons, message.bot)
+
         await add_game_win(message.from_user.id)
         await save_notification(
             message.from_user.id,
             message.from_user.username or "-",
             message.from_user.full_name or "-",
             "slots",
-            f"🏆 Виграв {coupons} купонів у слотах",
+            f"🎰 СЛОТИ - ✅ Виграв {coupons} купонів! ",
         )
 
         await add_slot_session(message.from_user.id, "win", coupons)
