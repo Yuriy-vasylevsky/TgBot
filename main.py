@@ -475,22 +475,37 @@ from aiohttp import web
 async def safe_api(request):
     from handlers.group_safe import load_state
     state = load_state()
-    return web.json_response({
+    
+    data = {
         "opened": state.get("opened", []),
         "total": 250,
         "win_cell": state.get("win_cell")
-    })
+    }
+    
+    response = web.json_response(data)
+    
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    # Ці рядки виправляють CORS помилку
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+    response.headers['Access-Control-Allow-Headers'] = '*'
+    response.headers['Access-Control-Max-Age'] = '3600'
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    
+    return response
+
 
 async def run_api():
     app = web.Application()
     app.router.add_get('/api/safe', safe_api)
+    app.router.add_options('/api/safe', safe_api)   # для preflight-запитів
     
-    port = int(os.environ.get("PORT", 3000))   # ← 3000 — безконфліктний
+    port = int(os.environ.get("PORT", 3000))
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"🌐 Safe API запущено на порту {port}")
+    print(f"🌐 Safe API запущено на порту {port} з CORS")
 
 # ==========================
 # Middleware — автозбереження користувача
