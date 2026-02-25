@@ -37,7 +37,7 @@ from db import (
     get_all_users,
     add_user_column_last_actions,
 )
-
+from aiogram.types import BotCommandScopeAllGroupChats
 from stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin import router as admin_router
@@ -50,6 +50,7 @@ from aiogram.types import (
     BotCommandScopeDefault,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    BotCommandScopeAllPrivateChats,
 )
 from aiogram import types, F
 from aiogram import Bot, Dispatcher
@@ -63,7 +64,12 @@ from games import (
     daily_bonus_router,
 )
 from handlers.profile import router as profile_router
-
+from handlers.admin_group import router as admin_group_router
+from handlers.group_bowling import router as bowling_router   
+from handlers.group_basketball import router as basketball_router
+from handlers.football_router import router as football_router
+from handlers.group_antispam import router as antispam_router
+from aiogram.types import BotCommand, BotCommandScopeAllChatAdministrators, BotCommandScopeAllGroupChats
 
 # ==========================
 # Ініціалізація
@@ -75,6 +81,11 @@ logging.basicConfig(level=logging.INFO)
 bot = Bot(token=config.TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 
+dp.include_router(admin_group_router)
+dp.include_router(bowling_router)
+dp.include_router(basketball_router)
+dp.include_router(football_router)
+dp.include_router(antispam_router)
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
@@ -85,6 +96,8 @@ dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
+
+
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 ADMIN_ID = config.ADMIN_ID
@@ -133,7 +146,7 @@ from aiogram.filters import Command
 from aiogram.types import FSInputFile
 
 
-@dp.message(Command("start"))
+@dp.message(Command("start"), F.chat.type == "private")
 async def cmd_start(message: types.Message):
     user_id = message.from_user.id
     is_admin = user_id == ADMIN_ID
@@ -265,9 +278,10 @@ async def cancel_reset_gifts(callback: types.CallbackQuery):
 # Встановлення команд
 # ==========================
 async def set_commands():
+    # /start — тільки в приватних чатах (для всіх)
     await bot.set_my_commands(
         [BotCommand(command="start", description="🔄 Рестарт бота")],
-        scope=BotCommandScopeDefault(),
+        scope=BotCommandScopeAllPrivateChats()
     )
 
 
@@ -276,9 +290,31 @@ async def set_commands():
 # ==========================
 async def main():
     await add_user_column_last_actions()
-    await init_db(),
+    await init_db()
     await set_commands()
-    # await register_game_handlers(dp, bot, main_menu, ADMIN_ID)
+
+    # ─── ПОВНІСТЮ ПРИБИРАЄМО МЕНЮ ДЛЯ ЗВИЧАЙНИХ КОРИСТУВАЧІВ У ГРУПАХ ───
+    await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+    
+    # Примусово ставимо ПОРОЖНЄ меню для всіх звичайних учасників
+    await bot.set_my_commands(
+        commands=[],   # ← порожній список = кнопка / нічого не показує
+        scope=BotCommandScopeAllGroupChats()
+    )
+
+    # Показуємо меню ТІЛЬКИ тобі (адміну)
+    admin_commands = [
+        BotCommand(command="bowling", description="🎳 Запустити Боулінг"),
+        BotCommand(command="basketball", description="🏀 Запустити Баскетбол"),
+        BotCommand(command="football", description="⚽ Футбол"),
+        # BotCommand(command="clearmenu", description="🧹 Очистити меню в групі"),
+    ]
+
+    await bot.set_my_commands(
+        commands=admin_commands,
+        scope=BotCommandScopeAllChatAdministrators()
+    )
+
     logging.info("🚀 Бот запущений!")
     await dp.start_polling(bot)
 
