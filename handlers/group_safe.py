@@ -3,38 +3,26 @@ from aiogram.filters import Command
 from aiogram.types import Message
 import json
 from pathlib import Path
-import random
-import string
 
 from config import ADMIN_ID
-from db import add_promocode
 
 router = Router(name="group_safe")
 
 # ==================== НАЛАШТУВАННЯ ====================
-WIN_CELL = 7  # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-TOTAL_CELLS = 250  # Міняй тут вручну для нового раунду
+WIN_CELL = 137          # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+TOTAL_CELLS = 250
 # =====================================================
 
 STATE_FILE = Path("safe_state.json")
-
 
 def load_state():
     if STATE_FILE.exists():
         return json.loads(STATE_FILE.read_text(encoding="utf-8"))
     return {"opened": [], "win_cell": WIN_CELL}
 
-
-def save_state(opened):
-    data = {"opened": list(opened), "win_cell": WIN_CELL}
-    STATE_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-
-
-def generate_promocode(length: int = 8) -> str:
-    chars = string.ascii_uppercase + string.digits
-    return "".join(random.choices(chars, k=length))
+def save_state(opened, win_cell):
+    data = {"opened": list(opened), "win_cell": win_cell}
+    STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 # ==========================
@@ -46,25 +34,36 @@ async def show_safe(message: Message):
     await message.answer(
         f"🔒 <b>СЕЙФ 250 АКТИВНИЙ</b>\n\n"
         f"Відкрито: <b>{len(state['opened'])}</b> / {TOTAL_CELLS}\n"
-        f"Виграшна клітинка: <b>прихована</b>\n\n"
+        f"Виграшна клітинка: прихована\n\n"
         f"🔗 <a href='https://safe-250-web-production.up.railway.app'>Відкрити Сейф 250</a>",
         parse_mode="HTML",
-        disable_web_page_preview=True,
+        disable_web_page_preview=True
     )
 
 
 # ==========================
-# НОВИЙ РАУНД (скинути всі клітинки)
+# НОВИЙ СЕЙФ З ВКАЗАНИМ ЧИСЛОМ
 # ==========================
 @router.message(Command("new_safe"))
 async def new_safe(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-    save_state([])
+
+    try:
+        new_win = int(message.text.split()[1])
+        if not 1 <= new_win <= TOTAL_CELLS:
+            await message.answer("❌ Число має бути від 1 до 250")
+            return
+    except:
+        await message.answer("❌ Використання: <code>/new_safe 197</code>", parse_mode="HTML")
+        return
+
+    save_state([], new_win)
     await message.answer(
-        f"✅ <b>Новий раунд запущено!</b>\n\n"
-        f"Виграшна клітинка: <b>{WIN_CELL}</b> (прихована для гравців)",
-        parse_mode="HTML",
+        f"✅ <b>Новий сейф запущено!</b>\n\n"
+        f"Виграшна клітинка: <b>{new_win}</b> (прихована для гравців)\n"
+        f"Всі клітинки скинуто.",
+        parse_mode="HTML"
     )
 
 
@@ -88,35 +87,26 @@ async def admin_open_cell(message: Message):
 
     state = load_state()
     opened = set(state["opened"])
+    win_cell = state["win_cell"]
 
     if cell in opened:
         await message.answer(f"⚠️ Клітинка {cell} вже відкрита!")
         return
 
     opened.add(cell)
-    save_state(opened)
 
-    if cell == WIN_CELL:
-        promo = generate_promocode()
-        await add_promocode(promo)
-
-        await message.bot.send_message(
-            ADMIN_ID,
-            f"🎉 <b>СЕЙФ ЗЛОМАНО!</b>\n\n"
-            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
-            f"Промокод:\n<code>{promo}</code>",
-            parse_mode="HTML",
-        )
+    if cell == win_cell:
+        # === ВИГРАШ ===
+        save_state([], win_cell)   # не скидаємо win_cell, тільки очищаємо відкриті
 
         await message.answer(
-            f"✅ <b>ВІДКРИТО! ВИГРАШ!</b> 🏆\n\n"
-            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
-            f"Промокод: <code>{promo}</code>\n\n"
-            f"Використовуй /new_safe щоб почати новий раунд",
-            parse_mode="HTML",
+            f"🎉 <b>ВІТАЮ! ВИ ВИГРАЛИ 2000 грн!</b> 🏆\n\n"
+            f"Клітинка <b>{cell}</b> була виграшною!",
+            parse_mode="HTML"
         )
     else:
+        save_state(opened, win_cell)
         await message.answer(
             f"❌ <b>Не вгадали</b>\nКлітинка <b>{cell}</b> — порожньо",
-            parse_mode="HTML",
+            parse_mode="HTML"
         )
