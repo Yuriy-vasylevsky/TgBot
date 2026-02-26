@@ -122,40 +122,76 @@ from aiohttp import web
 #     return response
 
 
+# async def safe_api(request):
+#     print("🔥 [SAFE API] Запит отримано з веб-апу!")
+    
+#     from handlers.group_safe import load_state   # ← бере реальні відкриті клітинки
+#     state = load_state()
+    
+#     data = {
+#         "opened": state.get("opened", []),
+#         "total": 250,
+#         "win_cell": state.get("win_cell")
+#     }
+    
+#     response = web.json_response(data)
+    
+#     # CORS для локального файлу
+#     response.headers['Access-Control-Allow-Origin'] = '*'
+#     response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+#     response.headers['Access-Control-Allow-Headers'] = '*'
+    
+#     return response
+
+
+# async def run_api():
+#     app = web.Application()
+#     app.router.add_get('/api/safe', safe_api)
+#     # app.router.add_get('/api/safe', sse_handler)
+#     app.router.add_options('/api/safe', safe_api)   # для preflight-запитів
+    
+#     port = int(os.environ.get("PORT", 3000))
+#     runner = web.AppRunner(app)
+#     await runner.setup()
+#     site = web.TCPSite(runner, '0.0.0.0', port)
+#     await site.start()
+#     print(f"🌐 Safe API запущено на порту {port} з CORS")
+
+
+
+# ── Вставити в main.py замість поточного safe_api ──
+
 async def safe_api(request):
-    print("🔥 [SAFE API] Запит отримано з веб-апу!")
-    
-    from handlers.group_safe import load_state   # ← бере реальні відкриті клітинки
+    from handlers.group_safe import load_state
     state = load_state()
-    
-    data = {
+
+    response = web.json_response({
         "opened": state.get("opened", []),
         "total": 250,
-        "win_cell": state.get("win_cell")
-    }
-    
-    response = web.json_response(data)
-    
-    # CORS для локального файлу
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
-    response.headers['Access-Control-Allow-Headers'] = '*'
-    
+    })
+
+    # CORS — дозволяємо Railway сайту робити запити
+    origin = request.headers.get("Origin", "*")
+    response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Max-Age"] = "3600"
+
     return response
 
 
 async def run_api():
     app = web.Application()
-    app.router.add_get('/api/safe', safe_api)
-    # app.router.add_get('/api/safe', sse_handler)
-    app.router.add_options('/api/safe', safe_api)   # для preflight-запитів
-    
+    app.router.add_get("/api/safe", safe_api)
+    app.router.add_options("/api/safe", safe_api)
+
     port = int(os.environ.get("PORT", 3000))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', port)
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Safe API запущено на порту {port} з CORS")
+    print(f"🌐 Safe API запущено на порту {port}")
+
 
 # ==========================
 # Middleware — автозбереження користувача
