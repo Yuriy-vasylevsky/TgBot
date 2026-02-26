@@ -6,17 +6,13 @@ import json
 from pathlib import Path
 import random
 import string
-import asyncio
-
 from config import ADMIN_ID
-from db import add_promocode
 
 router = Router(name="group_safe")
 
 WIN_CELL = 198
 TOTAL_CELLS = 250
 STATE_FILE = Path("safe_state.json")
-
 
 def load_state():
     if STATE_FILE.exists():
@@ -49,10 +45,10 @@ def generate_promocode(length: int = 8) -> str:
 async def show_safe(message: Message):
     state = load_state()
     await message.answer(
-        f"🔒 <b>СЕЙФ 250 АКТИВНИЙ</b>\n\n"
-        f"Відкрито: <b>{len(state['opened'])}</b> / {TOTAL_CELLS}\n"
-        f"Виграшна клітинка: <b>прихована</b>\n\n"
-        f"🔗 <a href='https://safe-250-web-production.up.railway.app'>Відкрити Сейф 250</a>",
+        f"🔒 <b>СЕЙФ 250</b> 🔒\n\n"
+        f"🔓 Відкрито: <b>{len(state['opened'])}</b> / {TOTAL_CELLS}\n"
+        f"🏆 Виграшний номер: <b>❓❓❓</b>\n\n"
+        f"🔗 <a href='https://safe-250-web-production.up.railway.app'>Переглянути Сейф</a>",
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -67,15 +63,26 @@ async def admin_open_cell(message: Message):
         await message.answer("❌ Формат: <code>/o 123</code> або <code>/o 1-10</code>", parse_mode="HTML")
         return
 
-    # Визначаємо діапазон або одне число
     try:
-        if "-" in args[1]:
-            start, end = map(int, args[1].split("-"))
+        arg = args[1]
+        if "," in arg:
+            # /open 1,2,3,4
+            cells_to_open = [int(x.strip()) for x in arg.split(",")]
+        elif "-" in arg:
+            # /open 1-10
+            start, end = map(int, arg.split("-"))
             cells_to_open = list(range(start, end + 1))
         else:
-            cells_to_open = [int(args[1])]
+            # /open 123
+            cells_to_open = [int(arg)]
     except:
-        await message.answer("❌ Формат: <code>/o 123</code> або <code>/o 1-10</code>", parse_mode="HTML")
+        await message.answer(
+            "❌ Формат:\n"
+            "<code>/open 123</code> — одна клітинка\n"
+            "<code>/open 1-10</code> — діапазон\n"
+            "<code>/open 1,5,9,12</code> — декілька",
+            parse_mode="HTML"
+        )
         return
 
     # Перевірка діапазону
@@ -120,8 +127,8 @@ async def admin_open_cell(message: Message):
     else:
         skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
         await message.answer(
-            f"❌ <b>Не вгадали!</b>\n\n"
-            f"Відкрито клітинок: <b>{', '.join(map(str, sorted(new_cells)))}</b>"
+            f"❌ <b>Не вгадали!</b> ❌\n\n"
+            f"Відкрито номер №: <b>{', '.join(map(str, sorted(new_cells)))}</b>"
             f"{skipped}",
             parse_mode="HTML",
         )
