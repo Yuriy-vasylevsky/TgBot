@@ -3,8 +3,11 @@ import os
 from pathlib import Path
 # DB_PATH = Path(__file__).parent / "users.db"
 
-DATA_DIR = Path(os.environ.get("DATA_DIR", "."))
-DB_PATH = DATA_DIR / "users.db"
+# DATA_DIR = Path(os.environ.get("DATA_DIR", "."))
+# DB_PATH = DATA_DIR / "users.db"
+
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
 
 TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
 ADMIN_ID = 6335987620
