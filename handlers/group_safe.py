@@ -1,21 +1,20 @@
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+from aiohttp import web
 import json
 from pathlib import Path
 import random
 import string
+import asyncio
 
 from config import ADMIN_ID
 from db import add_promocode
 
 router = Router(name="group_safe")
 
-# ==================== НАЛАШТУВАННЯ ====================
-WIN_CELL = 198  # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-TOTAL_CELLS = 250  # Міняй тут вручну для нового раунду
-# =====================================================
-
+WIN_CELL = 198
+TOTAL_CELLS = 250
 STATE_FILE = Path("safe_state.json")
 
 
@@ -25,11 +24,17 @@ def load_state():
     return {"opened": [], "win_cell": WIN_CELL}
 
 
-def save_state(opened):
-    data = {"opened": list(opened), "win_cell": WIN_CELL}
-    STATE_FILE.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def save_state(opened, win_cell=None):
+    current = load_state()
+    data = {
+        "opened": list(opened),
+        "win_cell": win_cell if win_cell is not None else current.get("win_cell", WIN_CELL)
+    }
+    STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def get_win_cell() -> int:
+    return load_state().get("win_cell", WIN_CELL)
 
 
 def generate_promocode(length: int = 8) -> str:
@@ -38,7 +43,7 @@ def generate_promocode(length: int = 8) -> str:
 
 
 # ==========================
-# ПОКАЗАТИ СЕЙФ
+# ПОКАЗАТИ СЕЙФ (група)
 # ==========================
 @router.message(Command("safe"))
 async def show_safe(message: Message):
@@ -52,71 +57,71 @@ async def show_safe(message: Message):
         disable_web_page_preview=True,
     )
 
-
-# ==========================
-# НОВИЙ РАУНД (скинути всі клітинки)
-# ==========================
-@router.message(Command("new_safe"))
-async def new_safe(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    save_state([])
-    await message.answer(
-        f"✅ <b>Новий раунд запущено!</b>\n\n"
-        f"Виграшна клітинка: <b>{WIN_CELL}</b> (прихована для гравців)",
-        parse_mode="HTML",
-    )
-
-
-# ==========================
-# АДМІН ВІДКРИВАЄ КЛІТИНКУ
-# ==========================
-@router.message(Command("o"))
+@router.message(Command("open"))
 async def admin_open_cell(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
-    try:
-        cell = int(message.text.split()[1])
-    except:
-        await message.answer("❌ Формат: <code>/o 123</code>", parse_mode="HTML")
+    args = message.text.split()
+    if len(args) < 2:
+        await message.answer("❌ Формат: <code>/o 123</code> або <code>/o 1-10</code>", parse_mode="HTML")
         return
 
-    if cell < 1 or cell > TOTAL_CELLS:
-        await message.answer(f"❌ Клітинка від 1 до {TOTAL_CELLS}")
+    # Визначаємо діапазон або одне число
+    try:
+        if "-" in args[1]:
+            start, end = map(int, args[1].split("-"))
+            cells_to_open = list(range(start, end + 1))
+        else:
+            cells_to_open = [int(args[1])]
+    except:
+        await message.answer("❌ Формат: <code>/o 123</code> або <code>/o 1-10</code>", parse_mode="HTML")
+        return
+
+    # Перевірка діапазону
+    if any(c < 1 or c > TOTAL_CELLS for c in cells_to_open):
+        await message.answer(f"❌ Клітинки від 1 до {TOTAL_CELLS}")
+        return
+
+    if len(cells_to_open) > 50:
+        await message.answer("❌ Максимум 50 клітинок за раз")
         return
 
     state = load_state()
     opened = set(state["opened"])
+    win_cell = state.get("win_cell", WIN_CELL)
 
-    if cell in opened:
-        await message.answer(f"⚠️ Клітинка {cell} вже відкрита!")
+    already_opened = [c for c in cells_to_open if c in opened]
+    new_cells = [c for c in cells_to_open if c not in opened]
+
+    if not new_cells:
+        await message.answer(f"⚠️ Всі ці клітинки вже відкриті!")
         return
 
-    opened.add(cell)
+    opened.update(new_cells)
     save_state(opened)
 
-    if cell == WIN_CELL:
-        promo = generate_promocode()
-        await add_promocode(promo)
-
+    # Перевіряємо чи є виграшна серед нових
+    if win_cell in new_cells:
+        # promo = generate_promocode()
+        # await add_promocode(promo)
         await message.bot.send_message(
             ADMIN_ID,
-            f"🎉 <b>СЕЙФ ЗЛОМАНО!</b>\n\n"
-            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
-            f"Промокод:\n<code>{promo}</code>",
+            f"🎉 <b>СЕЙФ ЗЛОМАНО!</b>\n\nКлітинка <b>{win_cell}</b> — ВИГРАШНА!",
             parse_mode="HTML",
         )
-
         await message.answer(
-            f"✅ <b>ВІДКРИТО! ВИГРАШ!</b> 🏆\n\n"
-            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
-            f"Промокод: <code>{promo}</code>\n\n"
-            f"Використовуй /new_safe щоб почати новий раунд",
+            f"🎉 <b>ВІТАЄМО! ВИ ВИГРАЛИ 2000 ГРН!</b> 🏆\n\n"
+            f"🔓 Клітинка <b>{win_cell}</b> відкрила сейф!\n\n"
+            f"💰 Ваш виграш: <b>2000 грн</b>\n",
+            # f"🎟 Промокод для отримання:\n<code>{promo}</code>",
             parse_mode="HTML",
         )
     else:
+        skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
         await message.answer(
-            f"❌ <b>Не вгадали</b>\nКлітинка <b>{cell}</b> — порожньо",
+            f"❌ <b>Не вгадали!</b>\n\n"
+            f"Відкрито клітинок: <b>{', '.join(map(str, sorted(new_cells)))}</b>"
+            f"{skipped}",
             parse_mode="HTML",
         )

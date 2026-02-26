@@ -1437,3 +1437,136 @@ def build_notifications_kb(page: int, total_pages: int, filter_type: str | None)
             # ]
         ]
     )
+
+
+# =============================================================================================
+#                              🔒 КЕРУВАННЯ СЕЙФОМ (АДМІН)
+# =============================================================================================
+from handlers.group_safe import load_state, save_state, get_win_cell, TOTAL_CELLS
+
+class SafeFSM(StatesGroup):
+    waiting_for_win_cell = State()
+
+
+def safe_admin_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑 Очистити сейф", callback_data="safe:clear")],
+        [InlineKeyboardButton(text="🔢 Встановити виграшне число", callback_data="safe:set_win")],
+        [InlineKeyboardButton(text="👁 Поточне виграшне число", callback_data="safe:view_win")],
+        [InlineKeyboardButton(text="📊 Стан сейфа", callback_data="safe:status")],
+    ])
+
+
+@router.message(F.text == "🔒 Сейф")
+async def safe_admin_panel(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await message.answer("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
+
+
+# --- Очистити сейф ---
+@router.callback_query(F.data == "safe:clear")
+async def safe_clear_confirm(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Так, очистити", callback_data="safe:clear_confirm"),
+            InlineKeyboardButton(text="❌ Скасувати", callback_data="safe:back"),
+        ]
+    ])
+    await cb.message.edit_text("⚠️ Очистити всі відкриті клітинки та почати новий раунд?", reply_markup=kb)
+    await cb.answer()
+
+
+@router.callback_query(F.data == "safe:clear_confirm")
+async def safe_clear_do(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    win_cell = get_win_cell()
+    save_state([], win_cell=win_cell)
+    await cb.message.edit_text(
+        f"✅ <b>Сейф очищено!</b>\nНовий раунд розпочато.\nВиграшна клітинка залишається: <b>{win_cell}</b>",
+        parse_mode="HTML",
+        reply_markup=safe_admin_keyboard()
+    )
+    await cb.answer("✅ Сейф очищено!")
+
+
+# --- Встановити виграшне число ---
+@router.callback_query(F.data == "safe:set_win")
+async def safe_set_win_ask(cb: types.CallbackQuery, state: FSMContext):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    await state.set_state(SafeFSM.waiting_for_win_cell)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Скасувати", callback_data="safe:cancel_fsm")]
+    ])
+    await cb.message.edit_text(
+        f"🔢 Введіть нове виграшне число (від 1 до {TOTAL_CELLS}):",
+        reply_markup=kb
+    )
+    await cb.answer()
+
+
+@router.message(SafeFSM.waiting_for_win_cell)
+async def safe_set_win_save(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    try:
+        cell = int(message.text.strip())
+        if cell < 1 or cell > TOTAL_CELLS:
+            raise ValueError
+    except ValueError:
+        await message.answer(f"❌ Введіть число від 1 до {TOTAL_CELLS}")
+        return
+
+    state_data = load_state()
+    save_state(state_data.get("opened", []), win_cell=cell)
+    await state.clear()
+    await message.answer(
+        f"✅ <b>Виграшну клітинку встановлено: {cell}</b>",
+        parse_mode="HTML",
+        reply_markup=safe_admin_keyboard()
+    )
+
+
+@router.callback_query(F.data == "safe:cancel_fsm")
+async def safe_cancel_fsm(cb: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await cb.message.edit_text("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
+    await cb.answer("❌ Скасовано")
+
+
+# --- Переглянути виграшне число ---
+@router.callback_query(F.data == "safe:view_win")
+async def safe_view_win(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    win_cell = get_win_cell()
+    await cb.answer(f"🏆 Виграшна клітинка: {win_cell}", show_alert=True)
+
+
+# --- Стан сейфа ---
+@router.callback_query(F.data == "safe:status")
+async def safe_status(cb: types.CallbackQuery):
+    if cb.from_user.id != ADMIN_ID:
+        return
+    state = load_state()
+    opened = state.get("opened", [])
+    win_cell = state.get("win_cell", "?")
+    text = (
+        f"📊 <b>Стан сейфа</b>\n\n"
+        f"Відкрито: <b>{len(opened)}</b> / {TOTAL_CELLS}\n"
+        f"Виграшна клітинка: <b>{win_cell}</b>\n"
+        f"Залишилось: <b>{TOTAL_CELLS - len(opened)}</b>"
+    )
+    await cb.message.edit_text(text, parse_mode="HTML", reply_markup=safe_admin_keyboard())
+    await cb.answer()
+
+
+# --- Назад ---
+@router.callback_query(F.data == "safe:back")
+async def safe_back(cb: types.CallbackQuery):
+    await cb.message.edit_text("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
+    await cb.answer()
