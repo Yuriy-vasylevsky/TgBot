@@ -1,15 +1,35 @@
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message
+import json
+from pathlib import Path
 import random
 import string
 
 from config import ADMIN_ID
-from db import add_promocode, get_safe_win_cell, set_safe_win_cell
+from db import add_promocode
 
 router = Router(name="group_safe")
 
-TOTAL_CELLS = 250
+# ==================== НАЛАШТУВАННЯ ====================
+WIN_CELL = 198  # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+TOTAL_CELLS = 250  # Міняй тут вручну для нового раунду
+# =====================================================
+
+STATE_FILE = Path("safe_state.json")
+
+
+def load_state():
+    if STATE_FILE.exists():
+        return json.loads(STATE_FILE.read_text(encoding="utf-8"))
+    return {"opened": [], "win_cell": WIN_CELL}
+
+
+def save_state(opened):
+    data = {"opened": list(opened), "win_cell": WIN_CELL}
+    STATE_FILE.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def generate_promocode(length: int = 8) -> str:
@@ -22,64 +42,34 @@ def generate_promocode(length: int = 8) -> str:
 # ==========================
 @router.message(Command("safe"))
 async def show_safe(message: Message):
-    win_cell = await get_safe_win_cell()
-    opened_count = 0  # поки що не зберігаємо кількість в БД, можна додати пізніше
-
+    state = load_state()
     await message.answer(
         f"🔒 <b>СЕЙФ 250 АКТИВНИЙ</b>\n\n"
-        f"Відкрито: <b>{opened_count}</b> / {TOTAL_CELLS}\n"
-        f"Виграшна клітинка: прихована\n\n"
+        f"Відкрито: <b>{len(state['opened'])}</b> / {TOTAL_CELLS}\n"
+        f"Виграшна клітинка: <b>прихована</b>\n\n"
         f"🔗 <a href='https://safe-250-web-production.up.railway.app'>Відкрити Сейф 250</a>",
         parse_mode="HTML",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
     )
 
 
 # ==========================
-# ЗМІНИТИ ВИГРАШНЕ ЧИСЛО
-# ==========================
-@router.message(Command("set_win"))
-async def set_win_cell(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    try:
-        new_win = int(message.text.split()[1])
-        if not 1 <= new_win <= TOTAL_CELLS:
-            raise ValueError
-    except:
-        await message.answer("❌ Використання: <code>/set_win 197</code>", parse_mode="HTML")
-        return
-
-    await set_safe_win_cell(new_win)
-    await message.answer(
-        f"✅ <b>Виграшне число змінено!</b>\n\n"
-        f"Нове виграшне: <b>{new_win}</b>",
-        parse_mode="HTML"
-    )
-
-
-# ==========================
-# СКИНУТИ ВІДКРИТІ КЛІТИНКИ (новий раунд)
+# НОВИЙ РАУНД (скинути всі клітинки)
 # ==========================
 @router.message(Command("new_safe"))
 async def new_safe(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-
-    # Просто очищуємо список відкритих (win_cell лишається)
-    # Якщо хочеш зберігати opened в БД — можемо додати, зараз для простоти скидаємо через JSON або додамо пізніше
-    # Поки що просто повідомлення
+    save_state([])
     await message.answer(
-        f"✅ <b>Сейф скинуто!</b>\n\n"
-        f"Всі відкриті клітинки очищено.\n"
-        f"Виграшне число залишилось те саме.",
-        parse_mode="HTML"
+        f"✅ <b>Новий раунд запущено!</b>\n\n"
+        f"Виграшна клітинка: <b>{WIN_CELL}</b> (прихована для гравців)",
+        parse_mode="HTML",
     )
 
 
 # ==========================
-# ВІДКРИТИ КЛІТИНКУ
+# АДМІН ВІДКРИВАЄ КЛІТИНКУ
 # ==========================
 @router.message(Command("o"))
 async def admin_open_cell(message: Message):
@@ -96,38 +86,37 @@ async def admin_open_cell(message: Message):
         await message.answer(f"❌ Клітинка від 1 до {TOTAL_CELLS}")
         return
 
-    win_cell = await get_safe_win_cell()
+    state = load_state()
+    opened = set(state["opened"])
 
-    if cell == win_cell:
-        promo = generate_promocode()   # можна залишити для адміна в ЛС
+    if cell in opened:
+        await message.answer(f"⚠️ Клітинка {cell} вже відкрита!")
+        return
+
+    opened.add(cell)
+    save_state(opened)
+
+    if cell == WIN_CELL:
+        promo = generate_promocode()
         await add_promocode(promo)
 
         await message.bot.send_message(
             ADMIN_ID,
-            f"🎉 Промокод згенеровано: <code>{promo}</code>",
-            parse_mode="HTML"
+            f"🎉 <b>СЕЙФ ЗЛОМАНО!</b>\n\n"
+            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
+            f"Промокод:\n<code>{promo}</code>",
+            parse_mode="HTML",
         )
 
         await message.answer(
-            f"🎉 <b>ВІТАЮ! ВИ ВИГРАЛИ 2000 грн!</b> 🏆\n\n"
-            f"Клітинка <b>{cell}</b> була виграшною!\n\n"
-            f"Сейф скинуто (всі клітинки знову вільні)",
-            parse_mode="HTML"
+            f"✅ <b>ВІДКРИТО! ВИГРАШ!</b> 🏆\n\n"
+            f"Клітинка <b>{cell}</b> — ВИГРАШНА!\n"
+            f"Промокод: <code>{promo}</code>\n\n"
+            f"Використовуй /new_safe щоб почати новий раунд",
+            parse_mode="HTML",
         )
-
-        # Тут можна додати очищення opened в БД якщо зберігатимеш
     else:
         await message.answer(
             f"❌ <b>Не вгадали</b>\nКлітинка <b>{cell}</b> — порожньо",
-            parse_mode="HTML"
+            parse_mode="HTML",
         )
-
-# ==================== ДЛЯ ВЕБ-АПУ ====================
-async def get_safe_state_for_api():
-    win_cell = await get_safe_win_cell()
-    # Поки що повертаємо порожній список (щоб API не падав)
-    # Пізніше додамо збереження відкритих клітинок в БД
-    return {
-        "opened": [],           # тимчасово порожньо
-        "win_cell": win_cell
-    }

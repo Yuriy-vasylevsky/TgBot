@@ -1130,26 +1130,3 @@ async def add_money_win(user_id: int, amount: int):
         await db.commit()
 
 
-# ==========================
-# СЕЙФ — виграшне число в БД
-# ==========================
-async def get_safe_win_cell() -> int:
-    async with aiosqlite.connect(DB_PATH) as db:   # ← заміни на свій шлях до БД якщо інший
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value INTEGER
-            )
-        """)
-        async with db.execute("SELECT value FROM settings WHERE key = 'safe_win_cell'") as cursor:
-            row = await cursor.fetchone()
-            if row:
-                return int(row[0])
-            # Перший запуск — ставимо 137
-            await set_safe_win_cell(137)
-            return 137
-
-async def set_safe_win_cell(cell: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('safe_win_cell', ?)", (cell,))
-        await db.commit()
