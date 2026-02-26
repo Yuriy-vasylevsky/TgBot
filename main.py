@@ -473,25 +473,19 @@ ADMIN_ID = config.ADMIN_ID
 from aiohttp import web
 
 async def safe_api(request):
-    from handlers.group_safe import load_state
-    state = load_state()
+    from handlers.group_safe import get_safe_state_for_api
+    state = await get_safe_state_for_api()
     
-    data = {
-        "opened": state.get("opened", []),
+    response = web.json_response({
+        "opened": state["opened"],
         "total": 250,
-        "win_cell": state.get("win_cell")
-    }
+        "win_cell": state["win_cell"]
+    })
     
-    response = web.json_response(data)
-    
-    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-    # Ці рядки виправляють CORS помилку
+    # CORS (щоб Railway веб-ап міг підключитися)
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
     response.headers['Access-Control-Allow-Headers'] = '*'
-    response.headers['Access-Control-Max-Age'] = '3600'
-    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-    
     return response
 
 

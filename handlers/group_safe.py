@@ -121,3 +121,13 @@ async def admin_open_cell(message: Message):
             f"❌ <b>Не вгадали</b>\nКлітинка <b>{cell}</b> — порожньо",
             parse_mode="HTML"
         )
+
+# ==================== ДЛЯ ВЕБ-АПУ ====================
+async def get_safe_state_for_api():
+    win_cell = await get_safe_win_cell()
+    # Поки що повертаємо порожній список (щоб API не падав)
+    # Пізніше додамо збереження відкритих клітинок в БД
+    return {
+        "opened": [],           # тимчасово порожньо
+        "win_cell": win_cell
+    }
