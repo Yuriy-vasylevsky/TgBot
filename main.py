@@ -1,5 +1,4 @@
 
-
 import socket
 import sys
 
@@ -101,7 +100,7 @@ from aiohttp import web
 
 async def safe_api(request):
     from handlers.group_safe import load_state
-    state = load_state()
+    state = await load_state()
 
     response = web.json_response({
         "opened": state.get("opened", []),

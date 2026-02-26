@@ -176,6 +176,17 @@ async def init_db():
         )
         await db.commit()
 
+        # ===================== Таблиця стану сейфа =====================
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS safe_state (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+            """
+        )
+        await db.commit()
+
         # ________________________________________ історія сповіщень__________________________________________________
 
         async with aiosqlite.connect(DB_PATH) as db:
@@ -1130,3 +1141,25 @@ async def add_money_win(user_id: int, amount: int):
         await db.commit()
 
 
+# _________________________________ стан сейфа _______________________________
+
+import json
+
+async def get_safe_state() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT value FROM safe_state WHERE key='state'"
+        )
+        row = await cursor.fetchone()
+        if row:
+            return json.loads(row[0])
+        return {"opened": [], "win_cell": 198}
+
+
+async def save_safe_state(data: dict):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO safe_state (key, value) VALUES ('state', ?)",
+            (json.dumps(data),)
+        )
+        await db.commit()

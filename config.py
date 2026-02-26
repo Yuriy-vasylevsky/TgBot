@@ -1,11 +1,13 @@
 from pathlib import Path
+import os
+from pathlib import Path
+# DB_PATH = Path(__file__).parent / "users.db"
 
-DB_PATH = Path(__file__).parent / "users.db"
-
+DATA_DIR = Path(os.environ.get("DATA_DIR", "."))
+DB_PATH = DATA_DIR / "users.db"
 
 TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
 ADMIN_ID = 6335987620
-# ADMIN_IDS = [6335987620, 752963390]
 GROUP_LINK = "https://t.me/+Z2dJLGrGRVdmM2Yy"
 CONTACT_PHONE = "https://t.me/KaSSa_4444"
 
