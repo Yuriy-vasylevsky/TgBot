@@ -1342,6 +1342,14 @@ async def get_all_users_info():
     ]
 
 
+async def reset_all_game_stats():
+    """Скидає статистику зіграних та виграних ігор для всіх користувачів."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE users SET games_played = 0, games_won = 0")
+        await db.commit()
+    print("✅ Статистика ігор успішно очищена (played + won)!")
+
+
 async def set_user_access(user_id: int, access: bool):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("UPDATE users SET has_access=? WHERE user_id=?", (1 if access else 0, user_id))
@@ -1693,6 +1701,9 @@ async def get_safe_state() -> dict:
         cursor = await db.execute("SELECT value FROM safe_state WHERE key='state'")
         row = await cursor.fetchone()
         return json.loads(row[0]) if row else {"opened": [], "win_cell": 198}
+
+
+
 
 
 async def save_safe_state(data: dict):
