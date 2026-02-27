@@ -3,22 +3,17 @@ from aiogram.filters import Command
 from aiogram.types import Message
 import logging
 import random
-from datetime import datetime, timedelta
 
 from config import ADMIN_ID
 
 router = Router(name="group_wordle")
 
-# Працюємо тільки в групах
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
-# chat_id → секретне слово
+# chat_id → {"secret": "банан", "revealed": ["❓", "❓", "❓", "❓", "❓"]}
 active_wordle_games = {}
 
-# Коoldown переможців: user_id → час останньої перемоги
-wordle_winner_cooldown = {}
-
-# === РОЗШИРЕНИЙ СПИСОК 352 СЛОВА ===
+# === 352 слова ===
 WORDLE_WORDS = [
     "аарон", "аахен", "абаза", "абазь", "абака", "аббас", "абвер", "абзац", "абиде", "абияк",
     "аборт", "абощо", "абрек", "абрис", "абхаз", "аваль", "аванс", "авдій", "авеню", "аврал",
@@ -51,7 +46,7 @@ WORDLE_WORDS = [
     "потяг", "проза", "просо", "пшоно", "пупок", "рабин", "ранок", "ринок", "річка", "робот",
     "роман", "рукав", "садок", "серце", "силач", "скоба", "скала", "слива", "слово", "сніг",
     "сонце", "сонях", "сорок", "сорома", "стадо", "стіна", "сходи", "такса", "татко", "театр",
-    "теніс", "тісто", "трава", "тукан", "тумба", "фільм", "флора", "фразa", "хата", "хобот",
+    "теніс", "тісто", "трава", "тукан", "тумба", "фільм", "флора", "фраза", "хата", "хобот",
     "хмара", "цапля", "цегла", "цокіт", "цукор", "чашка", "чобіт", "човен", "школа", "шкіра",
     "штука", "щітка", "явище", "яблук", "ялина", "ялина", "банка", "буква", "вікно", "гілка",
     "гірка", "дочка", "думка", "земля", "зерно", "казка", "карти", "книжка", "кошка", "листя",
@@ -67,21 +62,18 @@ WORDLE_WORDS = [
     "чашка", "шафа", "яблук"
 ]
 
-# Українські літери для перевірки
 UKRAINIAN_LETTERS = set("абвгґдеєжзиіїйклмнопрстуфхцчшщьюя")
 
+
 def get_wordle_feedback(guess: str, secret: str) -> str:
-    """Повертає рядок з емодзі 🟩🟨⬛"""
     result = ['⬛'] * 5
     secret_list = list(secret)
 
-    # Точні збіги (зелені)
     for i in range(5):
         if guess[i] == secret_list[i]:
             result[i] = '🟩'
             secret_list[i] = None
 
-    # Жовті букви
     for i in range(5):
         if result[i] == '⬛' and guess[i] in secret_list:
             result[i] = '🟨'
@@ -91,22 +83,24 @@ def get_wordle_feedback(guess: str, secret: str) -> str:
 
 
 # ==========================
-# ЗАПУСК ГРИ (тільки адмін)
+# ЗАПУСК ГРИ
 # ==========================
 @router.message(Command("wordle"))
 async def start_wordle(message: Message):
     if message.from_user.id != ADMIN_ID:
-        try:
-            await message.delete()
-        except:
-            pass
+        try: await message.delete()
+        except: pass
         return
 
     chat_id = message.chat.id
     secret_word = random.choice(WORDLE_WORDS)
-    active_wordle_games[chat_id] = secret_word
 
-    logging.info(f"🧠 WORDLE ЗАПУЩЕНО в чаті {chat_id} | Слово: {secret_word}")
+    active_wordle_games[chat_id] = {
+        "secret": secret_word,
+        "revealed": ["❓"] * 5
+    }
+
+    logging.info(f"🧠 WORDLE ЗАПУЩЕНО | Слово: {secret_word}")
 
     await message.answer(
         "🧠 <b>WORDLE СТАРТУВАВ!</b> 🎯\n\n"
@@ -115,68 +109,75 @@ async def start_wordle(message: Message):
         "🟩 — буква на правильному місці\n"
         "🟨 — буква є, але не там\n"
         "⬛ — такої букви немає\n\n"
-        "Перший, хто вгадає слово — переможець!\n"
-        "⚠️ Після перемоги — 12 годин кулдауну ⚠️",
+        "Правильно вгадані букви **зберігаються** назавжди!\n\n"
+        "Перший, хто вгадає слово — переможець! 🏆",
         parse_mode="HTML"
     )
 
 
 # ==========================
-# ОБРОБКА ВІДГАДОК
+# ОБРОБКА ПРАВИЛЬНИХ СЛІВ (5 букв)
 # ==========================
-@router.message(F.text)
+@router.message(
+    F.text,
+    lambda m: len(m.text.strip()) == 5 and all(c in UKRAINIAN_LETTERS for c in m.text.strip().lower())
+)
 async def handle_wordle_guess(message: Message):
     chat_id = message.chat.id
     user = message.from_user
-    user_id = user.id
     guess = message.text.strip().lower()
 
     if chat_id not in active_wordle_games:
         return
 
-    # Перевірка: рівно 5 українських літер
-    if len(guess) != 5 or not all(c in UKRAINIAN_LETTERS for c in guess):
-        return  # тихо ігноруємо
-
-    secret = active_wordle_games[chat_id]
-
-    # Перевірка кулдауну
-    if user_id in wordle_winner_cooldown:
-        time_passed = datetime.now() - wordle_winner_cooldown[user_id]
-        if time_passed < timedelta(hours=12):
-            return  # тихо ігноруємо
+    game = active_wordle_games[chat_id]
+    secret = game["secret"]
+    revealed = game["revealed"]          # накопичувана підказка
 
     feedback = get_wordle_feedback(guess, secret)
 
+    # Фіксуємо правильно вгадані букви
+    for i in range(5):
+        if feedback[i] == '🟩' and revealed[i] == "❓":
+            revealed[i] = guess[i].upper()
+
     if guess == secret:  # ПЕРЕМОГА!
-        if user_id in wordle_winner_cooldown:
-            time_passed = datetime.now() - wordle_winner_cooldown[user_id]
-            if time_passed < timedelta(hours=12):
-                minutes_left = 720 - int(time_passed.total_seconds() // 60)
-                hours_left = minutes_left // 60
-                mins_left = minutes_left % 60
-                await message.answer(
-                    f"⏳ {user.mention_html()}, ти вже вигравав у Wordle!\n"
-                    f"Наступна перемога доступна через <b>{hours_left} год {mins_left} хв</b>",
-                    parse_mode="HTML"
-                )
-                return
-
-        wordle_winner_cooldown[user_id] = datetime.now()
         del active_wordle_games[chat_id]
-
         await message.answer(
             f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
             f"{user.mention_html()} вгадав слово!\n"
             f"Загадане слово: <b>{secret.upper()}</b>\n\n"
-            f"Вітаємо! Ви виграли 🎁\n",
-            # f"Наступна перемога — через 12 годин",
+            f"Вітаємо! Ви виграли  🎁",
             parse_mode="HTML"
         )
         return
 
-    # Звичайна підказка
+    feedback_spaced = ' '.join(feedback)
+    current_revealed = ' '.join(revealed)
+
     await message.answer(
-        f"{user.mention_html()} → <code>{guess.upper()}</code>\n{feedback}",
+        f"{user.mention_html()} → <b>{guess.upper()}</b>\n"
+        f"{feedback_spaced}\n"
+        f"{current_revealed}",
         parse_mode="HTML"
     )
+
+
+# ==========================
+# ОБРОБКА НЕПРАВИЛЬНОЇ ДОВЖИНИ
+# ==========================
+@router.message(F.text)
+async def handle_wrong_length(message: Message):
+    chat_id = message.chat.id
+    user = message.from_user
+    text = message.text.strip()
+
+    if chat_id not in active_wordle_games:
+        return
+
+    # Якщо це не 5 українських букв
+    if len(text) != 5 or not all(c in UKRAINIAN_LETTERS for c in text.lower()):
+        await message.answer(
+            f"❌ {user.mention_html()}, слово має бути **рівно 5 українських букв**!",
+            parse_mode="HTML"
+        )

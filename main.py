@@ -48,6 +48,7 @@ from handlers.group_basketball import router as basketball_router
 from handlers.football_router import router as football_router
 from handlers.group_antispam import router as antispam_router
 from handlers.group_night_mode import router as night_mode_router
+from handlers.group_numbers import router as numbers_router
 
 from stats import router as stats_router
 from handlers.general import router as general_router
@@ -74,12 +75,14 @@ bot = Bot(
 dp = Dispatcher()
 
 # Підключаємо роутери
+dp.include_router(numbers_router)
 dp.include_router(safe_router)
 dp.include_router(admin_group_router)
 dp.include_router(bowling_router)
 dp.include_router(basketball_router)
 dp.include_router(football_router)
 dp.include_router(wordle_router)
+
 dp.include_router(antispam_router)
 dp.include_router(night_mode_router)
 dp.include_router(stats_router)
@@ -243,6 +246,7 @@ async def set_commands():
         BotCommand(command="basketball", description="🏀 Баскетбол"),
         BotCommand(command="football", description="⚽ Футбол"),
         BotCommand(command="wordle", description="Вгадай слово"),
+        BotCommand(command="numbers", description="Вгадай код"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,

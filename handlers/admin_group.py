@@ -13,7 +13,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # ЗАХИСТ: видалення + попередження в ЛС
 # ==========================
 @router.message(
-    Command(commands=["start", "bowling", "start@Kassa_4444_bot", "basketball", "football", "open", "safe", "wordle",]),
+    Command(commands=["start", "bowling", "start@Kassa_4444_bot", "basketball", "football", "open", "safe", "wordle", "numbers",]),
     F.from_user.id != ADMIN_ID
 )
 async def delete_and_warn(message: Message):
