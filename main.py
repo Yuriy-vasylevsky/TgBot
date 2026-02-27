@@ -59,6 +59,10 @@ from games import (
 )
 from menu import main_menu
 from handlers.group_safe import router as safe_router
+
+from db import DB_PATH
+print(f"📁 DB_PATH = {DB_PATH}")
+
 # ==========================
 # Ініціалізація
 # ==========================
