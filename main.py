@@ -59,6 +59,7 @@ from games import (
 )
 from menu import main_menu
 from handlers.group_safe import router as safe_router
+from handlers.group_wordle import router as wordle_router
 
 from db import DB_PATH
 print(f"📁 DB_PATH = {DB_PATH}")
@@ -78,6 +79,7 @@ dp.include_router(admin_group_router)
 dp.include_router(bowling_router)
 dp.include_router(basketball_router)
 dp.include_router(football_router)
+dp.include_router(wordle_router)
 dp.include_router(antispam_router)
 dp.include_router(night_mode_router)
 dp.include_router(stats_router)
@@ -240,6 +242,7 @@ async def set_commands():
         BotCommand(command="bowling", description="🎳 Боулінг"),
         BotCommand(command="basketball", description="🏀 Баскетбол"),
         BotCommand(command="football", description="⚽ Футбол"),
+        BotCommand(command="wordle", description="Вгадай слово"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
