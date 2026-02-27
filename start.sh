@@ -12,28 +12,23 @@ else
     pip install -r requirements.txt
 fi
 
-# ========== ДІАГНОСТИКА VOLUME ==========
 mkdir -p /data
-echo "📁 Volume /data contents BEFORE start:"
-ls -la /data
+chmod 777 /data
 
 DB_PATH="/data/users.db"
-echo "💾 Database path: $DB_PATH"
 
-if [ -f "$DB_PATH" ]; then
-    echo "✅ DB file exists! Size: $(du -sh "$DB_PATH" | cut -f1)"
-else
+# 🔥 НОВЕ: якщо база порожня — видаляємо її, щоб бот створив з таблицями
+if [ -f "$DB_PATH" ] && [ ! -s "$DB_PATH" ]; then
+    echo "🗑️  DB file is empty (0 bytes) - removing to recreate with tables"
+    rm -f "$DB_PATH"
+fi
+
+if [ ! -f "$DB_PATH" ]; then
     echo "📦 Creating NEW users.db..."
     touch "$DB_PATH"
 fi
 
-# Права (дуже важливо!)
-chmod 777 /data 2>/dev/null || true
-chmod 666 "$DB_PATH" 2>/dev/null || true
-echo "🔐 Permissions set to 666/777"
-
-echo "📁 Volume /data contents AFTER chmod:"
-ls -la /data
-# =======================================
+echo "💾 Database: $DB_PATH (size: $(du -sh "$DB_PATH" 2>/dev/null || echo '0B'))"
+chmod 666 "$DB_PATH"
 
 python3 main.py
