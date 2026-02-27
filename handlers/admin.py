@@ -112,27 +112,48 @@ async def show_winrate(message: types.Message, state: FSMContext):
     await state.set_state(WinrateFSM.waiting_for_value)
 
 
+# @router.message(WinrateFSM.waiting_for_value)
+# async def set_new_winrate(message: types.Message, state: FSMContext):
+
+#     if message.from_user.id != ADMIN_ID:
+#         return
+#     try:
+#         val = int(message.text.strip())
+#         if not (0 <= val <= 100):
+#             raise ValueError
+#         await set_winrate(val / 100)
+#         user_id = message.from_user.id
+#         await message.answer(
+#             f"✅ Новий winrate збережено: {val}%",
+#             reply_markup=main_menu(is_admin=(user_id == ADMIN_ID)),
+#         )
+#     except ValueError:
+#         await message.answer(
+#             "❌ Введіть число від 0 до 100.",
+#             reply_markup=(main_menu(is_admin=(user_id == ADMIN_ID)),),
+#         )
+
+#     await state.clear()
+
 @router.message(WinrateFSM.waiting_for_value)
 async def set_new_winrate(message: types.Message, state: FSMContext):
-
     if message.from_user.id != ADMIN_ID:
         return
+    user_id = message.from_user.id  # ← винести сюди
     try:
         val = int(message.text.strip())
         if not (0 <= val <= 100):
             raise ValueError
         await set_winrate(val / 100)
-        user_id = message.from_user.id
         await message.answer(
             f"✅ Новий winrate збережено: {val}%",
-            reply_markup=main_menu(is_admin=(user_id == ADMIN_ID)),
+            reply_markup=main_menu(is_admin=True),
         )
     except ValueError:
         await message.answer(
             "❌ Введіть число від 0 до 100.",
-            reply_markup=(main_menu(is_admin=(user_id == ADMIN_ID)),),
+            reply_markup=main_menu(is_admin=True),
         )
-
     await state.clear()
 
 
