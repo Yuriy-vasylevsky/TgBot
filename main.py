@@ -247,8 +247,8 @@ async def set_commands():
 # ЗАПУСК
 # ==========================
 async def main():
-    await add_user_column_last_actions()
     await init_db()
+    await add_user_column_last_actions()
     await set_commands()
 
     logging.info("🚀 Бот запущений!")
