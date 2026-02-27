@@ -1,32 +1,10 @@
-# #!/bin/bash
-# echo "🚀 Starting Telegram Bot on Railway..."
-
-# # Активуємо віртуальне середовище Railway
-# if [ -f "/app/.venv/bin/activate" ]; then
-#     source /app/.venv/bin/activate
-#     echo "✅ Virtual environment activated"
-# else
-#     echo "⚠️ Virtual environment not found, creating new one..."
-#     python3 -m venv /app/.venv
-#     source /app/.venv/bin/activate
-#     pip install -r requirements.txt
-# fi
-
-# # Перевіримо чи існує база
-# if [ ! -f "users.db" ]; then
-#   echo "📦 Creating users.db..."
-#   touch users.db
-# fi
-
-# # Запуск бота
-# python3 main.py
 #!/bin/bash
 echo "🚀 Starting Telegram Bot on Railway..."
 
-# Активуємо venv
+# venv
 if [ -f "/app/.venv/bin/activate" ]; then
     source /app/.venv/bin/activate
-    echo "✅ Virtual environment activated"
+    echo "✅ Venv activated"
 else
     echo "⚠️ Creating venv..."
     python3 -m venv /app/.venv
@@ -34,19 +12,28 @@ else
     pip install -r requirements.txt
 fi
 
-# Створюємо папку volume (Railway її монтує, але mkdir безпечніше)
-mkdir -p /app/data
-chmod 777 /app/data
+# ========== ДІАГНОСТИКА VOLUME ==========
+mkdir -p /data
+echo "📁 Volume /data contents BEFORE start:"
+ls -la /data
 
-DB_PATH="/app/data/users.db"
+DB_PATH="/data/users.db"
+echo "💾 Database path: $DB_PATH"
 
-if [ ! -f "$DB_PATH" ]; then
-  echo "📦 Creating persistent users.db in /app/data..."
-  touch "$DB_PATH"
-  chmod 666 "$DB_PATH"
+if [ -f "$DB_PATH" ]; then
+    echo "✅ DB file exists! Size: $(du -sh "$DB_PATH" | cut -f1)"
+else
+    echo "📦 Creating NEW users.db..."
+    touch "$DB_PATH"
 fi
 
-echo "💾 Database: $DB_PATH"
+# Права (дуже важливо!)
+chmod 777 /data 2>/dev/null || true
+chmod 666 "$DB_PATH" 2>/dev/null || true
+echo "🔐 Permissions set to 666/777"
 
-# Запуск
+echo "📁 Volume /data contents AFTER chmod:"
+ls -la /data
+# =======================================
+
 python3 main.py

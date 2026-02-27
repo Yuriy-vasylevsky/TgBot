@@ -6,8 +6,16 @@ from pathlib import Path
 # DATA_DIR = Path(os.environ.get("DATA_DIR", "."))
 # DB_PATH = DATA_DIR / "users.db"
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+# BASE_DIR = Path(__file__).resolve().parent
+# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+
+import os
+from pathlib import Path
+
+DATA_DIR = os.environ.get("DATA_DIR", "/data")   # ← було BASE_DIR, тепер /data
+DB_PATH = Path(DATA_DIR) / "users.db"
+
+# print(f"💾 Final DB path: {DB_PATH}")
 
 TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
 ADMIN_ID = 6335987620

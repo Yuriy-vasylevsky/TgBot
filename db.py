@@ -11,11 +11,19 @@ from pathlib import Path
 
 # BASE_DIR = Path(__file__).resolve().parent
 # DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+# import os
+# from pathlib import Path
+
+# BASE_DIR = Path(__file__).resolve().parent
+# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+
 import os
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+DATA_DIR = os.environ.get("DATA_DIR", "/data")   # ← було BASE_DIR, тепер /data
+DB_PATH = Path(DATA_DIR) / "users.db"
+
+print(f"💾 Final DB path: {DB_PATH}")
 
 # ---------------------- Ініціалізація ----------------------
 
