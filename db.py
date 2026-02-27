@@ -164,6 +164,14 @@ async def init_db():
         )
         await db.commit()
 
+        # ===================== Міграція: додати duration до weekly_tasks =====================
+        try:
+            await db.execute("ALTER TABLE weekly_tasks ADD COLUMN duration TEXT")
+            await db.commit()
+            print("✅ Колонка duration додана до weekly_tasks")
+        except:
+            pass  # вже існує
+
         # ===================== Таблиця виконаних завдань користувачів =====================
         await db.execute(
             """
@@ -976,11 +984,13 @@ async def get_user_task_progress(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT t.id, t.title, t.description, t.reward, t.duration, ut.is_completed
+            SELECT t.id, t.title, t.description, t.reward, 
+                   COALESCE(t.duration, '') as duration,
+                   ut.is_completed
             FROM weekly_tasks t
             LEFT JOIN user_tasks ut ON t.id = ut.task_id AND ut.user_id = ?
             WHERE t.is_active = 1
-        """,
+            """,
             (user_id,),
         )
         rows = await cursor.fetchall()
