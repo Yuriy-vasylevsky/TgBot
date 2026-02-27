@@ -1,5 +1,4 @@
 
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ContentType
@@ -46,10 +45,10 @@ async def start_football(message: Message):
     logging.info(f"⚽ ФУТБОЛ ЗАПУЩЕНО в чаті {chat_id}")
 
     await message.answer(
-        "⚽ <b>ФУТБОЛ СТАРТУВАВ!</b> 🏆\n\n"
-        "Кидайте ⚽ в чат!\n"
-        "Перший, хто заб'є <b>4 голи</b> — отримує промокод!\n"
-        "⚠️ Після перемоги — 1 година кулдауну ⚠️"
+        "⚽ <b>ФУТБОЛ СТАРТУВАВ!</b>⚽\n\n"
+        "Кидайте ⚽ в чат!\n\n"
+        "🏆Перший, хто заб'є <b>5 голів</b> — отримує 🎟️ промокод!\n"
+        "⚠️ Для всіх гравців ⚠️"
     )
 
     await message.bot.send_dice(chat_id=chat_id, emoji="⚽")
@@ -82,7 +81,7 @@ async def handle_football_dice(message: Message):
         game[user_id] += 1
         goals = game[user_id]
 
-        if goals >= 4:      # 4 голи = перемога
+        if goals >= 5:      # 5 голів = перемога
             # === ПЕРЕВІРКА КУЛДАУНУ ===
             if user_id in winner_cooldown:
                 time_passed = datetime.now() - winner_cooldown[user_id]
@@ -122,9 +121,8 @@ async def handle_football_dice(message: Message):
             # Повідомлення в групі
             await message.answer(
                 f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
-                f"{user.mention_html()} забив <b>4 голи</b>!\n"
-                f"Приз надіслано в особисті повідомлення 🎁\n"
-                f"Наступна перемога — через 1 годину",
+                f"{user.mention_html()} забив <b>5 голів</b>!\n"
+                f"Приз надіслано в особисті повідомлення 🎁\n",
                 parse_mode="HTML"
             )
 
@@ -133,6 +131,6 @@ async def handle_football_dice(message: Message):
 
         # Прогрес
         await message.answer(
-            f"⚽ {user.mention_html()} — <b>{goals}/4 голів</b>",
+            f"⚽ {user.mention_html()} — <b>{goals}/5 голів</b>",
             parse_mode="HTML"
         )

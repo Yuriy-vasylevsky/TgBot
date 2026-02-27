@@ -80,7 +80,6 @@ dp.include_router(basketball_router)
 dp.include_router(football_router)
 dp.include_router(antispam_router)
 dp.include_router(night_mode_router)
-
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)

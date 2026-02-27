@@ -26,8 +26,8 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
             ["🎲 Група", "💎 Касир"],
             ["💫 КОД в посилання", "🏅 Провайдери"],
         ]
-        if not user_has_gift:
-            keyboard.append(["🎁 Подарунок"])
+        # if not user_has_gift:
+        #     keyboard.append(["🎁 Подарунок"])
 
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],

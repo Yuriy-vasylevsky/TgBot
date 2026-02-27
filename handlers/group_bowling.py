@@ -2,6 +2,8 @@
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ContentType
+import logging
+from datetime import datetime, timedelta
 
 from config import ADMIN_ID
 
@@ -12,6 +14,9 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
 # chat_id → {user_id: кількість_страйків}
 active_bowling_games = {}
+
+# Коoldown: user_id → час останньої перемоги
+bowling_winner_cooldown = {}
 
 
 # ==========================
@@ -29,10 +34,14 @@ async def start_bowling(message: Message):
     chat_id = message.chat.id
     active_bowling_games[chat_id] = {}   # скидаємо гру
 
+    logging.info(f"🎳 БОУЛІНГ ЗАПУЩЕНО в чаті {chat_id}")
+
     await message.answer(
-        "🎳 <b>БОУЛІНГ СТАРТУВАВ!</b> 🏆\n\n"
-        "Кидайте 🎳 в чат!\n"
-        "<b>Перший, хто виб’є ДВА СТРАЙКИ </b> — переможець!"
+        "🎳 <b>БОУЛІНГ СТАРТУВАВ!</b> 🎳\n\n"
+        "Кидайте 🎳 в чат!\n\n"
+        "🏆<b>Перший, хто виб’є ДВА СТРАЙКИ</b> — отримає 50 грн!\n"
+        "❗ Лише для гравців хто робив депозит протягом 24 годин\n",
+        parse_mode="HTML"
     )
 
     # Бот кидає свій боулінг
@@ -69,12 +78,28 @@ async def handle_bowling_dice(message: Message):
         strikes = game[user_id]
 
         if strikes >= 2:  # ДВА СТРАЙКИ = ПЕРЕМОГА!
+            # === ПЕРЕВІРКА КУЛДАУНУ ===
+            if user_id in bowling_winner_cooldown:
+                time_passed = datetime.now() - bowling_winner_cooldown[user_id]
+                if time_passed < timedelta(hours=12):
+                    minutes_left = 720 - int(time_passed.total_seconds() // 60)
+                    hours_left = minutes_left // 60
+                    mins_left = minutes_left % 60
+                    await message.answer(
+                        f"⏳ {user.mention_html()}, ти вже виграв в боулінг!\n"
+                        f"Наступна перемога доступна через <b>{hours_left} год {mins_left} хв</b>",
+                        parse_mode="HTML"
+                    )
+                    return  # не даємо перемогу вдруге
+
+            # === ФІКСАЦІЯ ПЕРЕМОГИ ===
+            bowling_winner_cooldown[user_id] = datetime.now()
             del active_bowling_games[chat_id]   # завершуємо гру
 
             await message.answer(
                 f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
                 f"{user.mention_html()} вибив <b>ДВА СТРАЙКИ</b>!\n"
-                f"Вітаємо! Приз буде видано негайно",
+                f"Вітаємо! Вивиграли 50 грн 🎁\n",
                 parse_mode="HTML"
             )
             return
