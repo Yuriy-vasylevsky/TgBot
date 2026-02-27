@@ -6,12 +6,16 @@ import logging
 import sqlite3
 from pathlib import Path
 
+# import os
+# from pathlib import Path
+
+# BASE_DIR = Path(__file__).resolve().parent
+# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
 import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
-
 
 # ---------------------- Ініціалізація ----------------------
 
