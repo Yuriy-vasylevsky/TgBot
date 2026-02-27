@@ -1221,7 +1221,8 @@ async def init_db():
 
             await add_gift_columns(db)
             await add_profile_columns(db)
-            await add_user_column_last_actions(db)
+            await add_user_column_last_actions()
+            # await add_user_column_last_actions(db)
 
             # Інші таблиці
             await db.execute("CREATE TABLE IF NOT EXISTS promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)")
@@ -1279,13 +1280,17 @@ async def add_profile_columns(db: aiosqlite.Connection):
     await db.commit()
 
 
-async def add_user_column_last_actions(db: aiosqlite.Connection):
-    async with db.execute("PRAGMA table_info(users)") as cursor:
-        columns = [row[1] for row in await cursor.fetchall()]
-    if "last_actions" not in columns:
-        await db.execute("ALTER TABLE users ADD COLUMN last_actions TEXT DEFAULT ''")
-        print("✅ Колонку last_actions додано!")
-    await db.commit()
+async def add_user_column_last_actions():
+    """Додає колонку last_actions у таблицю users, якщо її ще немає."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("PRAGMA table_info(users)") as cursor:
+            columns = [row[1] for row in await cursor.fetchall()]
+        if "last_actions" not in columns:
+            await db.execute("ALTER TABLE users ADD COLUMN last_actions TEXT DEFAULT ''")
+            await db.commit()
+            print("✅ Колонку last_actions додано!")
+        else:
+            print("ℹ️ Колонка last_actions уже існує.")
 
 
 # ===================== ВСІ ТВОЇ ФУНКЦІЇ =====================
