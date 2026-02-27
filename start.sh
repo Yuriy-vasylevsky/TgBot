@@ -17,9 +17,9 @@ chmod 777 /data
 
 DB_PATH="/data/users.db"
 
-# 🔥 НОВЕ: якщо база порожня — видаляємо її, щоб бот створив з таблицями
+# 🔥 Авто-виправлення порожньої бази
 if [ -f "$DB_PATH" ] && [ ! -s "$DB_PATH" ]; then
-    echo "🗑️  DB file is empty (0 bytes) - removing to recreate with tables"
+    echo "🗑️ DB file is empty (0 bytes) — deleting to recreate with tables"
     rm -f "$DB_PATH"
 fi
 
@@ -30,5 +30,9 @@ fi
 
 echo "💾 Database: $DB_PATH (size: $(du -sh "$DB_PATH" 2>/dev/null || echo '0B'))"
 chmod 666 "$DB_PATH"
+
+# Діагностика
+echo "📁 /data contents:"
+ls -la /data
 
 python3 main.py

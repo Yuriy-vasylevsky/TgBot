@@ -6,21 +6,12 @@ import logging
 import sqlite3
 from pathlib import Path
 
-# import os
-# from pathlib import Path
 
-# BASE_DIR = Path(__file__).resolve().parent
-# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
-# import os
-# from pathlib import Path
-
-# BASE_DIR = Path(__file__).resolve().parent
-# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
 
 import os
 from pathlib import Path
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")   # ← було BASE_DIR, тепер /data
+DATA_DIR = os.environ.get("DATA_DIR", "/data")   
 DB_PATH = Path(DATA_DIR) / "users.db"
 
 print(f"💾 Final DB path: {DB_PATH}")
@@ -278,8 +269,7 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "users.db"
+
 
 
 async def add_user_columns():
@@ -927,8 +917,7 @@ async def add_user_column_last_actions():
 import aiosqlite
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "users.db"
+
 
 
 # --- Додати нове тижневе завдання ---
