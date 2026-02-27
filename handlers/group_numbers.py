@@ -8,10 +8,9 @@ from config import ADMIN_ID
 
 router = Router(name="group_numbers")
 
-# Працюємо тільки в групах
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
-# chat_id → {"secret": "1234", "revealed": ["❓", "❓", "❓", "❓"]}
+# chat_id → {"secret": "12345", "revealed": ["❓", "❓", "❓", "❓", "❓"]}
 active_numbers_games = {}
 
 
@@ -28,40 +27,38 @@ async def start_numbers(message: Message):
         return
 
     chat_id = message.chat.id
-    secret = f"{random.randint(0, 9999):04d}"
+    secret = f"{random.randint(0, 99999):05d}"   # 5 цифр з провідними нулями
 
     active_numbers_games[chat_id] = {
         "secret": secret,
-        "revealed": ["❓"] * 4
+        "revealed": ["❓"] * 5
     }
 
-    logging.info(f"🔢 ЦИФРИ ЗАПУЩЕНО в чаті {chat_id} | Число: {secret}")
+    logging.info(f"🔢 ЦИФРИ ЗАПУЩЕНО | Число: {secret}")
 
     await message.answer(
-        "🔢 <b>ЦИФРИ СТАРТУВАЛИ!</b> 🎯\n\n"
-        "Я загадав 4-значне число (від 0000 до 9999).\n"
-        "Просто пишіть 4 цифри в чат!\n\n"
+        "🔑<b>Secret code</b>🔑\n\n"
+        "Я загадав 5-значне число.\n"
+        "Просто пишіть 5 цифр в чат!\n\n"
         "🟩 — цифра на правильному місці\n"
         "🟨 — цифра є, але не там\n"
         "⬛ — такої цифри немає\n\n"
-        "Правильно вгадані цифри **зберігаються** назавжди!\n\n"
+
         "Перший, хто вгадає число — переможець! 🏆",
         parse_mode="HTML"
     )
 
 
 def get_feedback(guess: str, secret: str) -> str:
-    result = ['⬛'] * 4
+    result = ['⬛'] * 5
     secret_list = list(secret)
 
-    # Точні збіги (зелені)
-    for i in range(4):
+    for i in range(5):
         if guess[i] == secret_list[i]:
             result[i] = '🟩'
             secret_list[i] = None
 
-    # Жовті (є, але не там)
-    for i in range(4):
+    for i in range(5):
         if result[i] == '⬛' and guess[i] in secret_list:
             result[i] = '🟨'
             secret_list[secret_list.index(guess[i])] = None
@@ -70,11 +67,11 @@ def get_feedback(guess: str, secret: str) -> str:
 
 
 # ==========================
-# ОБРОБКА ВІДГАДОК
+# ОБРОБКА ПРАВИЛЬНИХ СПРОБ (5 цифр)
 # ==========================
 @router.message(
     F.text,
-    lambda m: len(m.text.strip()) == 4 and m.text.strip().isdigit()
+    lambda m: len(m.text.strip()) == 5 and m.text.strip().isdigit()
 )
 async def handle_numbers_guess(message: Message):
     chat_id = message.chat.id
@@ -86,18 +83,17 @@ async def handle_numbers_guess(message: Message):
 
     game = active_numbers_games[chat_id]
     secret = game["secret"]
-    revealed = game["revealed"]          # накопичувана підказка
+    revealed = game["revealed"]
 
     feedback = get_feedback(guess, secret)
 
-    # Оновлюємо накопичену підказку (фіксуємо правильно вгадані цифри)
-    for i in range(4):
+    # Фіксуємо правильно вгадані цифри
+    for i in range(5):
         if feedback[i] == '🟩' and revealed[i] == "❓":
             revealed[i] = guess[i]
 
     if guess == secret:  # ПЕРЕМОГА!
         del active_numbers_games[chat_id]
-
         await message.answer(
             f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
             f"{user.mention_html()} вгадав число!\n"
@@ -107,7 +103,6 @@ async def handle_numbers_guess(message: Message):
         )
         return
 
-    # Симетричний вивід
     feedback_spaced = ' '.join(feedback)
     current_revealed = ' '.join(revealed)
 
@@ -117,3 +112,23 @@ async def handle_numbers_guess(message: Message):
         f"{current_revealed}",
         parse_mode="HTML"
     )
+
+
+# ==========================
+# ОБРОБКА ПОМИЛКИ (не 5 цифр)
+# ==========================
+@router.message(F.text)
+async def handle_numbers_error(message: Message):
+    chat_id = message.chat.id
+    user = message.from_user
+    text = message.text.strip()
+
+    if chat_id not in active_numbers_games:
+        return
+
+    # Якщо це не 5 цифр — пишемо помилку
+    if len(text) != 5 or not text.isdigit():
+        await message.answer(
+            f"❌ {user.mention_html()}, треба написати **рівно 5 цифр**!",
+            parse_mode="HTML"
+        )
