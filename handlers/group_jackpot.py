@@ -15,8 +15,8 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # ==========================
 # НАЛАШТУВАННЯ ГРИ
 # ==========================
-REQUIRED_PRESSES = 2
-MIN_MAX_AMOUNT = 51
+REQUIRED_PRESSES = 1
+MIN_MAX_AMOUNT = 70
 MAX_MAX_AMOUNT = 100
 COOLDOWN_HOURS = 12  # годин кулдауну на кнопку ПУСК
 # ==========================
@@ -68,9 +68,12 @@ async def start_jackpot(message: Message):
     ])
 
     msg = await message.answer(
-        f"🎰 <b>JACKPOT АКТИВОВАНО!</b>\n\n"
-        f"Максимальний можливий виграш: до <b>{max_amount} грн</b>\n\n"
-        f"Потрібно <b>{REQUIRED_PRESSES} різних людей</b> натиснути ПУСК!",
+        f"<b>💸💸💸Лови Jackpot💸💸💸</b>\n\n"
+        f"💰 Максимальний можливий виграш: до <b>{max_amount} грн 🤑</b>\n\n"
+        f"❌ Участь буруть <b>{REQUIRED_PRESSES} перших гравці</b> що натиснути ПУСК!\n"
+        f"❌ У вас лише 1 шанс на день забрати гроші\n"
+        f"💸 Приз росте кожну секунду\n",
+
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -120,7 +123,7 @@ async def jackpot_press(callback: CallbackQuery):
             [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{REQUIRED_PRESSES})", callback_data="jackpot_press")]
         ])
         await callback.message.edit_text(
-            f"🎰 <b>JACKPOT АКТИВОВАНО!</b>\n\n"
+            f"🎰 <b>Лови JACKPOT!</b>\n\n"
             f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
             f"Натиснули ПУСК: <b>{pressed}/{REQUIRED_PRESSES}</b>",
             reply_markup=keyboard,
@@ -247,7 +250,7 @@ async def jackpot_take(callback: CallbackQuery):
     await callback.message.edit_text(
         f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
         f"{user.mention_html()} забрав <b>{amount} грн</b>!\n\n"
-        f"Вітаємо! Приз буде видано в кабінеті.\n\n"
+        # f"Вітаємо! Приз буде видано негайно.\n\n"
         f"🔒 Наступний ПУСК для тебе буде доступний через {COOLDOWN_HOURS} годин.",
         parse_mode="HTML",
         reply_markup=None

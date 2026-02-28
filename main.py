@@ -76,15 +76,16 @@ bot = Bot(
 dp = Dispatcher()
 
 # Підключаємо роутери
+
+
 dp.include_router(jackpot_router)
+dp.include_router(wordle_router)
 dp.include_router(numbers_router)
 dp.include_router(safe_router)
 dp.include_router(admin_group_router)
 dp.include_router(bowling_router)
 dp.include_router(basketball_router)
 dp.include_router(football_router)
-dp.include_router(wordle_router)
-
 dp.include_router(antispam_router)
 dp.include_router(night_mode_router)
 dp.include_router(stats_router)
@@ -97,6 +98,7 @@ dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
+
 
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
@@ -261,7 +263,6 @@ async def set_commands():
 # ==========================
 async def main():
     await init_db()
-    await add_user_column_last_actions()
     await set_commands()
 
     logging.info("🚀 Бот запущений!")
