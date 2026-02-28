@@ -14,7 +14,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # ==========================
 # НАЛАШТУВАННЯ ГРИ
 # ==========================
-REQUIRED_PRESSES = 3
+REQUIRED_PRESSES = 3      # для звичайного /jackpot
 MIN_MAX_AMOUNT = 100
 MAX_MAX_AMOUNT = 100
 COOLDOWN_HOURS = 12
@@ -42,10 +42,7 @@ def format_cooldown(remaining_seconds: int) -> str:
 
 
 def get_display_name(user) -> str:
-    """Тільки @username якщо є, інакше просто ім'я"""
-    if user.username:
-        return f"@{user.username}"
-    return user.full_name
+    return f"@{user.username}" if user.username else user.full_name
 
 
 def get_starters_text(starters: list) -> str:
@@ -58,30 +55,22 @@ def get_starters_text(starters: list) -> str:
 
 
 # ==========================
-# ЗАПУСК ГРИ
+# УНІВЕРСАЛЬНА ФУНКЦІЯ ЗАПУСКУ
 # ==========================
-@router.message(Command("jackpot"))
-async def start_jackpot(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        try: await message.delete()
-        except: pass
-        return
-
+async def create_jackpot(message: Message, required_presses: int, max_amount: int, title: str = "JACKPOT"):
     chat_id = message.chat.id
     if chat_id in active_jackpots:
         await message.answer("❌ В цьому чаті вже запущена гра Jackpot!")
         return
 
-    max_amount = random.randint(MIN_MAX_AMOUNT, MAX_MAX_AMOUNT)
-
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"🚀 ПУСК (0/{REQUIRED_PRESSES})", callback_data="jackpot_press")]
+        [InlineKeyboardButton(text=f"🚀 ПУСК (0/{required_presses})", callback_data="jackpot_press")]
     ])
 
     msg = await message.answer(
-        f"<b>💸💸💸 Лови JACKPOT 💸💸💸</b>\n\n"
+        f"<b>💸💸💸 Лови {title} 💸💸💸</b>\n\n"
         f"💰 Максимальний можливий виграш: до <b>{max_amount} грн 🤑</b>\n\n"
-        f"Участь беруть <b>{REQUIRED_PRESSES} перших гравців</b>, що натиснуть ПУСК!\n"
+        f"Участь беруть <b>{required_presses} перших гравців</b>, що натиснуть ПУСК!\n"
         f"💸 Приз росте кожну секунду",
         reply_markup=keyboard,
         parse_mode="HTML"
@@ -90,13 +79,42 @@ async def start_jackpot(message: Message):
     active_jackpots[chat_id] = {
         "message": msg,
         "max_amount": max_amount,
-        "starters": [],          # список display_name
+        "starters": [],
         "starter_ids": set(),
         "amount": 1,
         "task": None,
-        "active": False
+        "active": False,
+        "required_presses": required_presses   # зберігаємо для цієї гри
     }
 
+
+# ==========================
+# КОМАНДИ ЗАПУСКУ
+# ==========================
+@router.message(Command("jackpot"))
+async def start_jackpot(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        try: await message.delete()
+        except: pass
+        return
+    await create_jackpot(message, REQUIRED_PRESSES, random.randint(MIN_MAX_AMOUNT, MAX_MAX_AMOUNT))
+
+
+@router.message(Command("jackpot2"))
+async def start_jackpot2(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        try: await message.delete()
+        except: pass
+        return
+    await create_jackpot(message, 2, 60, title="JACKPOT 2")
+
+@router.message(Command("jackpot5"))
+async def start_jackpot2(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        try: await message.delete()
+        except: pass
+        return
+    await create_jackpot(message, 5, 300, title="JACKPOT 5")
 
 # ==========================
 # НАТИСКАННЯ ПУСК
@@ -107,7 +125,6 @@ async def jackpot_press(callback: CallbackQuery):
     user = callback.from_user
     user_id = user.id
 
-    # Кулдаун
     on_cooldown, remaining = is_on_cooldown(user_id)
     if on_cooldown:
         await callback.answer(
@@ -131,23 +148,24 @@ async def jackpot_press(callback: CallbackQuery):
     game["starter_ids"].add(user_id)
 
     pressed = len(game["starters"])
+    required = game["required_presses"]
 
-    if pressed < REQUIRED_PRESSES:
+    if pressed < required:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{REQUIRED_PRESSES})", callback_data="jackpot_press")]
+            [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{required})", callback_data="jackpot_press")]
         ])
 
         await callback.message.edit_text(
             f"🎰 <b>Лови JACKPOT!</b>\n\n"
             f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
             f"{get_starters_text(game['starters'])}\n\n"
-            f"<b>{pressed}/{REQUIRED_PRESSES}</b>",
+            f"<b>{pressed}/{required}</b>",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
         return
 
-    # === ЗАПУСК ГРИ (залишаємо список учасників) ===
+    # === ЗАПУСК ГРИ ===
     game["active"] = True
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -168,7 +186,7 @@ async def jackpot_press(callback: CallbackQuery):
 
 
 # ==========================
-# ЛІЧИЛЬНИК
+# ЛІЧИЛЬНИК (без змін)
 # ==========================
 async def jackpot_counter(chat_id: int):
     if chat_id not in active_jackpots:
@@ -222,7 +240,7 @@ async def jackpot_counter(chat_id: int):
 
 
 # ==========================
-# ЗАБРАТИ ВИГРАШ
+# ЗАБРАТИ ВИГРАШ (без змін)
 # ==========================
 @router.callback_query(F.data == "jackpot_take")
 async def jackpot_take(callback: CallbackQuery):

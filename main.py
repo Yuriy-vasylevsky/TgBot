@@ -37,7 +37,8 @@ from aiogram.types import (
 import config
 from db import (
     init_db, save_user, add_promocode, has_claimed_gift,
-    reset_all_gifts, set_gift_claimed, get_all_users, add_user_column_last_actions
+    reset_all_gifts, set_gift_claimed, get_all_users,
+    get_promo, spend_promo, add_promo   # ← нові функції для промокодів
 )
 
 from middlewares.ban_middleware import BanMiddleware
@@ -252,6 +253,8 @@ async def set_commands():
         BotCommand(command="wordle", description="Вгадай слово"),
         BotCommand(command="numbers", description="Вгадай код"),
         BotCommand(command="jackpot", description="забери гроші"),
+        BotCommand(command="jackpot2", description="забери гроші"),
+        BotCommand(command="jackpot5", description="забери гроші"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
