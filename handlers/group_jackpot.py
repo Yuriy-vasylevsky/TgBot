@@ -9,30 +9,27 @@ import time
 from config import ADMIN_ID
 
 router = Router(name="group_jackpot")
-
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
 # ==========================
 # НАЛАШТУВАННЯ ГРИ
 # ==========================
 REQUIRED_PRESSES = 3
-MIN_MAX_AMOUNT = 70
+MIN_MAX_AMOUNT = 100
 MAX_MAX_AMOUNT = 100
-COOLDOWN_HOURS = 12  # годин кулдауну на кнопку ПУСК
+COOLDOWN_HOURS = 12
 # ==========================
 
 active_jackpots = {}
-winners_cooldown = {}  # user_id: timestamp коли можна знову натискати ПУСК
+winners_cooldown = {}
 
 
 def is_on_cooldown(user_id: int) -> tuple[bool, int]:
-    """Перевірка кулдауну на кнопку ПУСК"""
     if user_id in winners_cooldown:
         remaining = winners_cooldown[user_id] - time.time()
         if remaining > 0:
             return True, int(remaining)
-        else:
-            del winners_cooldown[user_id]
+        del winners_cooldown[user_id]
     return False, 0
 
 
@@ -44,16 +41,30 @@ def format_cooldown(remaining_seconds: int) -> str:
     return f"{minutes}хв"
 
 
+def get_display_name(user) -> str:
+    """Тільки @username якщо є, інакше просто ім'я"""
+    if user.username:
+        return f"@{user.username}"
+    return user.full_name
+
+
+def get_starters_text(starters: list) -> str:
+    if not starters:
+        return "👥 Учасники:"
+    lines = ["👥 Учасники:"]
+    for name in starters:
+        lines.append(f"• {name}")
+    return "\n".join(lines)
+
+
 # ==========================
 # ЗАПУСК ГРИ
 # ==========================
 @router.message(Command("jackpot"))
 async def start_jackpot(message: Message):
     if message.from_user.id != ADMIN_ID:
-        try:
-            await message.delete()
-        except:
-            pass
+        try: await message.delete()
+        except: pass
         return
 
     chat_id = message.chat.id
@@ -68,12 +79,10 @@ async def start_jackpot(message: Message):
     ])
 
     msg = await message.answer(
-        f"<b>💸💸💸Лови Jackpot💸💸💸</b>\n\n"
+        f"<b>💸💸💸 Лови JACKPOT 💸💸💸</b>\n\n"
         f"💰 Максимальний можливий виграш: до <b>{max_amount} грн 🤑</b>\n\n"
-        f"❌ Участь буруть <b>{REQUIRED_PRESSES} перших гравці</b> що натиснути ПУСК!\n"
-        f"❌ У вас лише 1 шанс на день забрати гроші\n"
-        f"💸 Приз росте кожну секунду\n",
-
+        f"Участь беруть <b>{REQUIRED_PRESSES} перших гравців</b>, що натиснуть ПУСК!\n"
+        f"💸 Приз росте кожну секунду",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -81,7 +90,8 @@ async def start_jackpot(message: Message):
     active_jackpots[chat_id] = {
         "message": msg,
         "max_amount": max_amount,
-        "starters": set(),
+        "starters": [],          # список display_name
+        "starter_ids": set(),
         "amount": 1,
         "task": None,
         "active": False
@@ -89,14 +99,15 @@ async def start_jackpot(message: Message):
 
 
 # ==========================
-# НАТИСКАННЯ ПУСК (з кулдауном)
+# НАТИСКАННЯ ПУСК
 # ==========================
 @router.callback_query(F.data == "jackpot_press")
 async def jackpot_press(callback: CallbackQuery):
     chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
+    user = callback.from_user
+    user_id = user.id
 
-    # === ПЕРЕВІРКА КУЛДАУНУ НА ПУСК ===
+    # Кулдаун
     on_cooldown, remaining = is_on_cooldown(user_id)
     if on_cooldown:
         await callback.answer(
@@ -111,27 +122,32 @@ async def jackpot_press(callback: CallbackQuery):
 
     game = active_jackpots[chat_id]
 
-    if user_id in game["starters"]:
+    if user_id in game["starter_ids"]:
         await callback.answer("Ти вже натиснув ПУСК!", show_alert=True)
         return
 
-    game["starters"].add(user_id)
+    display_name = get_display_name(user)
+    game["starters"].append(display_name)
+    game["starter_ids"].add(user_id)
+
     pressed = len(game["starters"])
 
     if pressed < REQUIRED_PRESSES:
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{REQUIRED_PRESSES})", callback_data="jackpot_press")]
         ])
+
         await callback.message.edit_text(
             f"🎰 <b>Лови JACKPOT!</b>\n\n"
             f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
-            f"Натиснули ПУСК: <b>{pressed}/{REQUIRED_PRESSES}</b>",
+            f"{get_starters_text(game['starters'])}\n\n"
+            f"<b>{pressed}/{REQUIRED_PRESSES}</b>",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
         return
 
-    # === ЗАПУСК ГРИ ===
+    # === ЗАПУСК ГРИ (залишаємо список учасників) ===
     game["active"] = True
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -139,8 +155,11 @@ async def jackpot_press(callback: CallbackQuery):
     ])
 
     await callback.message.edit_text(
-        "🔥 <b>ЛІЧИЛЬНИК ПРАЦЮЄ!</b>\n\n"
-        "Натискай кнопку, щоб забрати поточний виграш!",
+        f"🎰 <b>Лови JACKPOT!</b>\n\n"
+        f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
+        f"{get_starters_text(game['starters'])}\n\n"
+        f"🔥 <b>ЛІЧИЛЬНИК ПРАЦЮЄ!</b>\n"
+        f"Натискай кнопку, щоб забрати поточний виграш!",
         reply_markup=keyboard,
         parse_mode="HTML"
     )
@@ -187,14 +206,11 @@ async def jackpot_counter(chat_id: int):
                     logging.warning(f"Jackpot edit warning: {e}")
 
         if chat_id in active_jackpots and game.get("active"):
-            try:
-                await msg.edit_text(
-                    "⏰ Час вийшов!\n\n"
-                    f"Максимум {max_amount} грн ніхто не забрав 😔",
-                    reply_markup=None
-                )
-            except:
-                pass
+            await msg.edit_text(
+                "⏰ Час вийшов!\n\n"
+                f"Максимум {max_amount} грн ніхто не забрав 😔",
+                reply_markup=None
+            )
             del active_jackpots[chat_id]
 
     except asyncio.CancelledError:
@@ -206,7 +222,7 @@ async def jackpot_counter(chat_id: int):
 
 
 # ==========================
-# ЗАБРАТИ ВИГРАШ (без кулдауну, але тільки для учасників)
+# ЗАБРАТИ ВИГРАШ
 # ==========================
 @router.callback_query(F.data == "jackpot_take")
 async def jackpot_take(callback: CallbackQuery):
@@ -220,8 +236,7 @@ async def jackpot_take(callback: CallbackQuery):
 
     game = active_jackpots[chat_id]
 
-    # === ТІЛЬКИ ХТО НАТИСКАВ ПУСК МОЖЕ ЗАБИРАТИ ===
-    if user_id not in game.get("starters", set()):
+    if user_id not in game.get("starter_ids", set()):
         await callback.answer(
             "❌ Ти не натискав ПУСК на початку гри!\n"
             "Тільки учасники запуску можуть забирати приз.",
@@ -235,22 +250,15 @@ async def jackpot_take(callback: CallbackQuery):
         task = game["task"]
         if not task.done():
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:
-                pass
+            try: await task
+            except asyncio.CancelledError: pass
 
     game["active"] = False
-
-    # === ВСТАНОВЛЮЄМО КУЛДАУН НА ПУСК ===
     winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
 
     await callback.message.edit_text(
         f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
         f"{user.mention_html()} забрав <b>{amount} грн</b>!\n\n"
-        # f"Вітаємо! Приз буде видано негайно.\n\n"
         f"🔒 Наступний ПУСК для тебе буде доступний через {COOLDOWN_HOURS} годин.",
         parse_mode="HTML",
         reply_markup=None
