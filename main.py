@@ -37,8 +37,7 @@ from aiogram.types import (
 import config
 from db import (
     init_db, save_user, add_promocode, has_claimed_gift,
-    reset_all_gifts, set_gift_claimed, get_all_users,
-    get_promo, spend_promo, add_promo   # ← нові функції для промокодів
+    reset_all_gifts, set_gift_claimed, get_all_users, add_user_column_last_actions
 )
 
 from middlewares.ban_middleware import BanMiddleware
@@ -58,7 +57,7 @@ from handlers.admin import router as admin_router
 from handlers.profile import router as profile_router
 from games import (
     slot_router, one_of_three_router, rewards_router,
-    blackjack_router, fortune_router, daily_bonus_router
+    blackjack_router, fortune_router
 )
 from menu import main_menu
 from handlers.group_safe import router as safe_router
@@ -92,7 +91,7 @@ dp.include_router(night_mode_router)
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
-dp.include_router(daily_bonus_router)
+# dp.include_router(daily_bonus_router)
 dp.include_router(profile_router)
 dp.include_router(fortune_router)
 dp.include_router(slot_router)

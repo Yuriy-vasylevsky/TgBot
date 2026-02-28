@@ -1,3 +1,5 @@
+
+
 import asyncio
 import random
 import html
@@ -11,10 +13,16 @@ from aiogram.types import (
     User,
 )
 
-import aiosqlite
+import aiosqlite                     # ← додай цей
 from pathlib import Path
 
-# Імпорт з db
+# === Конфіг ===
+try:
+    from config import ADMIN_ID
+except Exception:
+    ADMIN_ID = None
+
+# Імпорт з db (тепер усе через єдину функцію)
 from db import (
     ensure_users_table_and_columns,
     get_user_data,
@@ -26,7 +34,7 @@ DB_PATH = Path(__file__).resolve().parent.parent / "users.db"
 router = Router(name="fortune")
 
 FORTUNE_BTN = "🎡 Колесо фортуни"
-REQUIRED_PROMO = 1
+REQUIRED_GAMES = 7
 
 # ==========================
 # КОНФІГУРАЦІЯ ПРИЗІВ
@@ -66,23 +74,25 @@ DISPLAY_CHANCES = {
 
 def _validate_config():
     prize_titles = {p["title"] for p in PRIZES}
-    if prize_titles != set(WEIGHTS.keys()) or prize_titles != set(DISPLAY_CHANCES.keys()):
-        raise ValueError("❌ Неузгодженість PRIZES / WEIGHTS / DISPLAY_CHANCES!")
+    if prize_titles != set(WEIGHTS.keys()):
+        raise ValueError("❌ Неузгодженість PRIZES і WEIGHTS!")
+    if prize_titles != set(DISPLAY_CHANCES.keys()):
+        raise ValueError("❌ Неузгодженість PRIZES і DISPLAY_CHANCES!")
     print("✅ Fortune config validated successfully")
 
 _validate_config()
 
+# Глобальний стан
 _spinning_users: set[int] = set()
 _spin_lock = asyncio.Lock()
 
 # ===============================
 # ДОПОМІЖНІ ФУНКЦІЇ
 # ===============================
-def _kb_main(promo_count: int) -> InlineKeyboardMarkup:
-    status = f" {promo_count}/1" if promo_count >= 1 else " 0/1"
+def _kb_main() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text=f"Крутити колесо 🎯{status}", callback_data="fortune:spin")],
+            [InlineKeyboardButton(text="Крутити колесо 🎯", callback_data="fortune:spin")],
             [InlineKeyboardButton(text="📜 Список призів і шансів", callback_data="fortune:prizes")],
         ]
     )
@@ -91,8 +101,10 @@ def _kb_main(promo_count: int) -> InlineKeyboardMarkup:
 def _format_prize_table() -> str:
     lines = ["<b>🎡 Колесо фортуни — призи та шанси</b>\n"]
     for i, prize in enumerate(PRIZES, 1):
-        lines.append(f"{i:>2}. {prize['title']} — <code>{DISPLAY_CHANCES[prize['title']]}</code>")
-    lines.append("\nНатисни кнопку вище, щоб спробувати удачу!")
+        title = prize["title"]
+        display_text = DISPLAY_CHANCES[title]
+        lines.append(f"{i:>2}. {title} — <code>{display_text}</code>")
+    lines.append("\nНатисни «Крутити колесо 🎯», щоб спробувати удачу!")
     return "\n".join(lines)
 
 
@@ -129,39 +141,33 @@ async def _animate_spin(message: Message):
 
 
 async def _notify_admin(user: User, prize_title: str, bot):
+    if not ADMIN_ID:
+        return
     try:
-        from config import ADMIN_ID
-        if not ADMIN_ID:
-            return
-        text = f"🎡 <b>Колесо фортуни</b>\n👤 {('@' + user.username) if user.username else user.full_name}\n🎁 {html.escape(prize_title)}"
+        text = (
+            "🎡 <b>Колесо фортуни — 🍀</b>\n"
+            f"👤 {('@' + user.username) if user.username else user.full_name}\n"
+            f"🔗 <a href='tg://user?id={user.id}'>Профіль</a>\n"
+            f"🎁 Приз: <b>{html.escape(prize_title)}</b>"
+        )
         await bot.send_message(ADMIN_ID, text, parse_mode="HTML")
-        await save_notification(user.id, user.username or "-", user.full_name or "-", "fortune", f"🎡 Колесо фортуни — {prize_title}")
+
+        await save_notification(
+            user.id,
+            user.username or "-",
+            user.full_name or "-",
+            "fortune",
+            f"🎡 Колесо фортуни — {prize_title}",
+        )
     except Exception as e:
         print(f"notify_admin error: {e}")
 
 
 # ===============================
-# СПИСАННЯ ПРОМО
+# ОСНОВНА ЛОГІКА СПІНУ
 # ===============================
-async def spend_one_promo(user_id: int) -> bool:
-    """Списує 1 промо (games_played)"""
-    print(f"🔄 spend_one_promo: забезпечуємо таблицю для {user_id}")
-    await ensure_users_table_and_columns()
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute("SELECT games_played FROM users WHERE user_id = ?", (user_id,)) as cursor:
-            row = await cursor.fetchone()
-            if not row or row[0] < 1:
-                print(f"❌ У користувача {user_id} немає промо")
-                return False
-
-        await db.execute("UPDATE users SET games_played = games_played - 1 WHERE user_id = ?", (user_id,))
-        await db.commit()
-        print(f"✅ Списано 1 промо для {user_id}")
-        return True
-
-
 async def perform_spin(cb: CallbackQuery, is_first_spin: bool = True):
+    """Універсальна функція для звичайного + додаткового обертання"""
     user_id = cb.from_user.id
     user = cb.from_user
 
@@ -173,6 +179,7 @@ async def perform_spin(cb: CallbackQuery, is_first_spin: bool = True):
 
     try:
         if is_first_spin:
+            await update_last_spin_date(user_id)
             await cb.answer()
 
         await _animate_spin(cb.message)
@@ -180,7 +187,10 @@ async def perform_spin(cb: CallbackQuery, is_first_spin: bool = True):
         prize = _choose_prize()
         prize_title = prize["title"]
 
-        await cb.message.edit_text(f"<b>🎉 Результат:</b>\nТобі випало: <b>{html.escape(prize_title)}</b>", parse_mode="HTML")
+        await cb.message.edit_text(
+            f"<b>🎉 Результат:</b>\nТобі випало: <b>{html.escape(prize_title)}</b>",
+            parse_mode="HTML",
+        )
 
         await _notify_admin(user, prize_title, cb.bot)
 
@@ -203,46 +213,83 @@ async def perform_spin(cb: CallbackQuery, is_first_spin: bool = True):
 @router.message(F.text.lower().contains("колесо фортуни"))
 @router.message(F.text == "/fortune")
 async def fortune_entry(message: Message):
-    await ensure_users_table_and_columns()
-    user_data = await get_user_data(message.from_user.id)
-    promo = user_data.get("games_played", 0) if user_data else 0
+    await ensure_users_table_and_columns()   # ← головний виклик
 
     text = (
         "<b>🎡 Колесо фортуни</b>\n\n"
-        "Кожен спін коштує <b>1 промокод</b>.\n"
-        f"У тебе зараз: <b>{promo} промокодів</b>"
+        "Тут ти можеш випробувати удачу.\n"
+        "Натисни «Крутити колесо 🎯»."
     )
-    await message.answer(text, reply_markup=_kb_main(promo), parse_mode="HTML")
+    await message.answer(text, reply_markup=_kb_main(), parse_mode="HTML")
 
 
 @router.callback_query(F.data == "fortune:prizes")
 async def show_prizes(cb: CallbackQuery):
     await cb.answer()
-    await cb.message.edit_text(_format_prize_table(), reply_markup=_kb_main(0), parse_mode="HTML")
+    await cb.message.edit_text(
+        _format_prize_table(), reply_markup=_kb_main(), parse_mode="HTML"
+    )
 
 
 @router.callback_query(F.data == "fortune:spin")
 async def spin(cb: CallbackQuery):
     user_id = cb.from_user.id
-    await ensure_users_table_and_columns()
+    await ensure_users_table_and_columns()   # ← головний виклик
 
-    user_data = await get_user_data(user_id)
-    promo = user_data.get("games_played", 0) if user_data else 0
+    # Перевірка кількості ігор
+    try:
+        user_data = await get_user_data(user_id)
+        games_played = user_data.get("games_played", 0) if user_data else 0
+    except Exception:
+        games_played = 0
 
-    if promo < REQUIRED_PROMO:
-        await cb.answer("❌ У тебе немає промокодів!", show_alert=True)
+    if games_played < REQUIRED_GAMES:
+        await cb.answer()
+        await cb.message.answer(
+            f"⚠️ Зберіть {REQUIRED_GAMES} PROMO 🎟️ щоб відкрити доступ\n"
+            f"🎮 У вас зараз: <b>{games_played} 🎟️</b>\n\n"
+            f"🔓 Оновлюється щопонеділка",
+            parse_mode="HTML",
+        )
         return
 
-    success = await spend_one_promo(user_id)
-    if not success:
-        await cb.answer("❌ Не вдалося списати промокод", show_alert=True)
+    # Перевірка дати
+    last_spin_date = await get_last_spin_date(user_id)
+    today = datetime.date.today().isoformat()
+
+    if last_spin_date == today:
+        await cb.answer()
+        await cb.message.answer(
+            "⚠️ Ви вже крутили колесо сьогодні!\n\n"
+            "🕒 Наступна спроба — після 03:00 нового дня.",
+            parse_mode="HTML",
+        )
         return
 
     await perform_spin(cb, is_first_spin=True)
 
 
-# ADMIN_ID
-try:
-    from config import ADMIN_ID
-except Exception:
-    ADMIN_ID = None
+# ===============================
+# РОБОТА З БД
+# ===============================
+async def get_last_spin_date(user_id: int) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT last_fortune_date FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
+
+
+async def update_last_spin_date(user_id: int):
+    today_str = datetime.date.today().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO users (user_id, last_fortune_date)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET last_fortune_date = excluded.last_fortune_date
+            """,
+            (user_id, today_str),
+        )
+        await db.commit()
