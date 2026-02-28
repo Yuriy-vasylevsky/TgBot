@@ -15,7 +15,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # ==========================
 # НАЛАШТУВАННЯ ГРИ
 # ==========================
-REQUIRED_PRESSES = 1
+REQUIRED_PRESSES = 3
 MIN_MAX_AMOUNT = 70
 MAX_MAX_AMOUNT = 100
 COOLDOWN_HOURS = 12  # годин кулдауну на кнопку ПУСК
