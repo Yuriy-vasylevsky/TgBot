@@ -555,3 +555,54 @@ async def save_safe_state(data: dict):
         await db.execute("INSERT OR REPLACE INTO safe_state (key, value) VALUES ('state', ?)", (json.dumps(data),))
         await db.commit()
 
+
+
+# ====================== PROMO (games_played) ======================
+
+async def get_promo(user_id: int) -> int:
+    """Повертає кількість PROMO у користувача"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT games_played FROM users WHERE user_id = ?", (user_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+# async def spend_promo_for_fortune(user_id: int) -> bool:
+#     """Списує 3 PROMO за спін. Повертає True якщо вистачило"""
+#     if await get_promo(user_id) < 3:
+#         return False
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             "UPDATE users SET games_played = games_played - 3 WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         await db.commit()
+#     return True
+
+async def spend_promo_for_fortune(user_id: int, cost: int = 3) -> bool:
+    """Списує cost промо за спін. Повертає True якщо вистачило"""
+    if await get_promo(user_id) < cost:
+        return False
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET games_played = games_played - ? WHERE user_id = ?",
+            (cost, user_id)
+        )
+        await db.commit()
+    return True
+
+
+async def add_promo(user_id: int, amount: int = 1):
+    """+1 PROMO (викликай після активації промокоду та після кожної зіграної гри)"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO users (user_id, games_played)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET 
+                games_played = games_played + ?
+        """, (user_id, amount, amount))
+        await db.commit()

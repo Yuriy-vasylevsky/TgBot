@@ -63,10 +63,10 @@ async def show_profile(message: types.Message):
         f"👤 <b>Кабінет гравця</b>\n\n"
         f"🆔 <b>ID:</b> <code>{user_id}</code>\n"
         f"💬 <b>Ім’я:</b> {user_data['full_name']}\n"
-        f"🍀 <b>WinRate:</b> <code>{winrate}%</code>\n\n"
+        # f"🍀 <b>WinRate:</b> <code>{winrate}%</code>\n\n"
         f"<b>Зібрано PROMO за тиждень: {weekly_coupons}</b>\n {coupons_display}\n\n"
-        f"<b>Виграно ігор за тиждень: </b> <code>{games_won}</code>\n"
-        f"{visual}\n\n"  # ← ВІЗУАЛІЗАЦІЯ
+        # f"<b>Виграно ігор за тиждень: </b> <code>{games_won}</code>\n"
+        # f"{visual}\n\n"  # ← ВІЗУАЛІЗАЦІЯ
         f"📅 <b>Тижневі завдання:</b>\n{tasks_text}"
     )
 

@@ -21,7 +21,8 @@ TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
 ADMIN_ID = 6335987620
 GROUP_LINK = "https://t.me/+Z2dJLGrGRVdmM2Yy"
 CONTACT_PHONE = "https://t.me/KaSSa_4444"
-
+# ====================== НАЛАШТУВАННЯ ФОРТУНИ ======================
+FORTUNE_COST = 3   # Скільки промо потрібно для одного обертання колеса
 CARD_NUMBER = """
 💳 Приват : 5457 0825 1854 3470
 💳 Ощад : 4790 7299 2105 9994
