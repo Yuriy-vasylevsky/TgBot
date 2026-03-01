@@ -28,7 +28,7 @@ async def night_mode_antispam(message: Message):
     hour = now.hour
 
     # Нічний режим: 00:00 — 08:59 включно
-    if 0 <= hour < 9:
+    if 2 <= hour < 9:
         try:
             await message.delete()
             logging.info(f"🌙 Нічний режим: видалено повідомлення від {message.from_user.id} о {hour}:00")
