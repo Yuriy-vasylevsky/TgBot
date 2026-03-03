@@ -300,6 +300,7 @@ async def paginate_users(callback: types.CallbackQuery):
 #                                            📢 Розсилка
 # ========================================================================================================
 
+from db import DB_PATH, ensure_users_table_and_columns   # ← ДОДАЛИ ЦЕ
 
 @router.message(F.text == "📢 Розсилка")
 async def start_broadcast(message: types.Message, state: FSMContext):
@@ -336,22 +337,36 @@ async def process_broadcast_text(message: types.Message, state: FSMContext):
 async def confirm_broadcast(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     text = data.get("broadcast_text")
+    if not text:
+        await callback.answer("❌ Текст розсилки порожній!", show_alert=True)
+        return
 
-    async with aiosqlite.connect("users.db") as conn:
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+    await ensure_users_table_and_columns()   # ← ОБОВ'ЯЗКОВО!
+    # ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+
+    async with aiosqlite.connect(DB_PATH) as conn:   # ← використовуємо DB_PATH
         async with conn.execute("SELECT user_id FROM users") as cur:
             rows = await cur.fetchall()
 
     count = 0
+    failed = 0
     for (user_id,) in rows:
         try:
-            await callback.bot.send_message(user_id, text)
+            await callback.bot.send_message(user_id, text, parse_mode="HTML")
             count += 1
         except Exception:
+            failed += 1
             continue
 
-    await callback.message.answer(f"✅ Розсилку надіслано {count} користувачам.")
+    await callback.message.answer(
+        f"✅ Розсилку завершено!\n\n"
+        f"✅ Успішно: <b>{count}</b>\n"
+        f"❌ Не вдалося: <b>{failed}</b>",
+        parse_mode="HTML"
+    )
     await state.clear()
-    await callback.answer()
+    await callback.answer("Розсилка завершена ✅")
 
 
 @router.callback_query(F.data == "cancel_broadcast")
@@ -359,7 +374,6 @@ async def cancel_broadcast(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.answer("❌ Розсилку скасовано.")
     await callback.answer()
-
 
 # ======================= шаблони++++++++++++++++++++++++++++
 
