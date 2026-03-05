@@ -249,11 +249,11 @@ async def set_commands():
         BotCommand(command="bowling", description="🎳 Боулінг"),
         BotCommand(command="basketball", description="🏀 Баскетбол"),
         BotCommand(command="football", description="⚽ Футбол"),
-        BotCommand(command="wordle", description="Вгадай слово"),
-        BotCommand(command="numbers", description="Вгадай код"),
-        BotCommand(command="jackpot", description="забери гроші"),
-        BotCommand(command="jackpot2", description="забери гроші"),
-        BotCommand(command="jackpot5", description="забери гроші"),
+        BotCommand(command="wordle", description="🎭 Вгадай слово"),
+        BotCommand(command="numbers", description="🕵️‍♂️ Вгадай код"),
+        BotCommand(command="jackpot", description="💵💵💵"),
+        BotCommand(command="jackpot2", description="💵💵"),
+        BotCommand(command="jackpot5", description="💵💵💵💵💵"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
