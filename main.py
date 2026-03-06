@@ -37,7 +37,7 @@ from aiogram.types import (
 import config
 from db import (
     init_db, save_user, add_promocode, has_claimed_gift,
-    reset_all_gifts, set_gift_claimed, get_all_users, add_user_column_last_actions
+    reset_all_gifts, set_gift_claimed,
 )
 
 from middlewares.ban_middleware import BanMiddleware
@@ -50,6 +50,7 @@ from handlers.group_antispam import router as antispam_router
 from handlers.group_night_mode import router as night_mode_router
 from handlers.group_numbers import router as numbers_router
 from handlers.group_jackpot import router as jackpot_router
+from handlers.wallet import router as wallet_router
 
 from stats import router as stats_router
 from handlers.general import router as general_router
@@ -62,7 +63,13 @@ from games import (
 from menu import main_menu
 from handlers.group_safe import router as safe_router
 from handlers.group_wordle import router as wordle_router
+from handlers.wallet import router as wallet_router
 
+from db import (
+    init_db, save_user, add_promocode, has_claimed_gift,
+    reset_all_gifts, set_gift_claimed,
+    mark_tx_used, is_tx_used,  # ← ДОБАВЬ ЭТО!
+)
 from db import DB_PATH
 print(f"📁 DB_PATH = {DB_PATH}")
 
@@ -98,6 +105,7 @@ dp.include_router(slot_router)
 dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
+dp.include_router(wallet_router)
 
 
 dp.message.middleware(BanMiddleware())
@@ -141,6 +149,114 @@ async def run_api():
     await site.start()
     print(f"🌐 Safe API запущено на порту {port}")
 
+
+from datetime import datetime, timedelta
+import time
+import monobank
+from db import (
+    get_pending_payments,
+    add_to_balance,
+    remove_pending_payment,
+    get_balance,
+)
+
+
+# ЗАМЕНИ функцию background_payment_checker в main.py НА ЭТУ:
+
+async def background_payment_checker():
+    """Фонова перевірка платежів Monobank кожні 90 секунд"""
+    while True:
+        await asyncio.sleep(90)
+
+        try:
+            pendings = await get_pending_payments()
+            if not pendings:
+                continue
+
+            logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} очікуючих платежів")
+
+            client = monobank.Client(token=config.MONO_TOKEN)
+
+            from_date = datetime.now() - timedelta(days=7)
+            to_date = datetime.now()
+
+            statements = client.get_statements(
+                config.MONO_ACCOUNT,
+                from_date,
+                to_date
+            )
+
+            logging.info(f"📥 Отримано {len(statements)} транзакцій з Monobank")
+
+            for p in pendings:
+                target_amount = p["amount_kop"]
+                user_id = p["user_id"]
+                payment_id = p["comment"]
+
+                try:
+                    parts = payment_id.split(":")
+                    payment_timestamp = int(parts[1])
+                except:
+                    payment_timestamp = int(time.time())
+
+                time_window = 600  # 10 хвилин
+
+                best_match = None
+                best_match_diff = float('inf')
+                best_match_tx_id = None
+
+                for tx in statements:
+                    tx_amount = tx.get("amount", 0)
+                    tx_time = tx.get("time", 0)
+                    tx_id = tx.get("id", "")
+                    time_diff = abs(tx_time - payment_timestamp)
+
+                    # 🛡️ КРИТИЧНО: Пропускаємо вже використані TX!
+                    if await is_tx_used(tx_id):
+                        logging.debug(f"  ⏭️ TX вже використана: '{tx_id}' - пропускаємо")
+                        continue
+
+                    if (tx_amount == target_amount and 
+                        time_diff <= time_window and
+                        tx_amount > 0):
+                        
+                        if time_diff < best_match_diff:
+                            best_match = tx
+                            best_match_diff = time_diff
+                            best_match_tx_id = tx_id
+
+                if best_match:
+                    # 🛡️ ПОМЕЧАЄМО КАК ИСПОЛЬЗОВАНУЮ!
+                    await mark_tx_used(best_match_tx_id, user_id, target_amount, payment_id)
+                    
+                    amount_grn = target_amount // 100
+                    await add_to_balance(user_id, amount_grn)
+                    await remove_pending_payment(user_id)
+
+                    try:
+                        tx_hold = best_match.get("hold", False)
+                        status = " (холд)" if tx_hold else ""
+                        await bot.send_message(
+                            user_id,
+                            f"✅ Автоматично зараховано {amount_grn} грн{status}!\n"
+                            f"Новий баланс: {await get_balance(user_id)} грн"
+                        )
+                    except Exception as send_err:
+                        logging.warning(f"Не вдалось надіслати повідомлення юзеру {user_id}: {send_err}")
+
+                    logging.info(
+                        f"✅ ФОНОВА ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
+                        f"tx_id='{best_match_tx_id}', payment_id='{payment_id}'"
+                    )
+                else:
+                    logging.debug(
+                        f"⏳ Платіж ще очікується: user_id={user_id}, "
+                        f"payment_id='{payment_id}', sum={target_amount // 100} грн"
+                    )
+
+        except Exception as e:
+            logging.error(f"❌ Background checker error: {e}", exc_info=True)
+            await asyncio.sleep(30)
 
 # ==========================
 # Middleware — автозбереження користувача ТІЛЬКИ В ПРИВАТІ
@@ -314,6 +430,7 @@ async def set_commands():
 async def main():
     await init_db()
     await set_commands()
+    asyncio.create_task(background_payment_checker())
 
     logging.info("🚀 Бот запущений!")
 
