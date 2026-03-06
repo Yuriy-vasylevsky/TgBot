@@ -1,28 +1,30 @@
 from pathlib import Path
 import os
 from pathlib import Path
-# DB_PATH = Path(__file__).parent / "users.db"
-
-# DATA_DIR = Path(os.environ.get("DATA_DIR", "."))
-# DB_PATH = DATA_DIR / "users.db"
-
-# BASE_DIR = Path(__file__).resolve().parent
-# DB_PATH = Path(os.environ.get("DATA_DIR", BASE_DIR)) / "users.db"
+from dotenv import load_dotenv
 
 import os
 from pathlib import Path
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")   # ← було BASE_DIR, тепер /data
+DATA_DIR = os.environ.get("DATA_DIR", "/data")  
 DB_PATH = Path(DATA_DIR) / "users.db"
 
-# print(f"💾 Final DB path: {DB_PATH}")
 
-TOKEN = "6333700659:AAHI1d1K-WbKQq4IXSb23rSNeOShPZZCbZg"
-ADMIN_ID = 6335987620
-GROUP_LINK = "https://t.me/+Z2dJLGrGRVdmM2Yy"
 CONTACT_PHONE = "https://t.me/KaSSa_4444"
+GROUP_LINK ="https://t.me/+Z2dJLGrGRVdmM2Yy"
+
+
+load_dotenv()
+
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+MONO_TOKEN = os.getenv("MONO_TOKEN")
+MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
+
 # ====================== НАЛАШТУВАННЯ ФОРТУНИ ======================
 FORTUNE_COST = 3   # Скільки промо потрібно для одного обертання колеса
+
+
 CARD_NUMBER = """
 💳 Приват : 5457 0825 1854 3470
 💳 Ощад : 4790 7299 2105 9994
