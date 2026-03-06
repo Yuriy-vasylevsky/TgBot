@@ -16,7 +16,7 @@ GROUP_LINK ="https://t.me/+Z2dJLGrGRVdmM2Yy"
 
 load_dotenv()
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+TOKEN = os.getenv("TOKEN")
 MONO_TOKEN = os.getenv("MONO_TOKEN")
 MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
