@@ -228,7 +228,8 @@ async def admin_open_cell(message: Message):
         skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
         opened_str = ', '.join(map(str, new_cells))
         await message.answer(
-            f"✅ Відкрито: <b>{len(new_cells)}</b> клітинок\n"
+            f"❌ <b>Не вгадали!</b> ❌\n\n"
+            f"✅ Перевірено: <b>{len(new_cells)}</b> клітинок\n"
             f"Номери: <b>{opened_str}</b>"
             f"{skipped}",
             parse_mode="HTML",
