@@ -112,29 +112,6 @@ async def show_winrate(message: types.Message, state: FSMContext):
     await state.set_state(WinrateFSM.waiting_for_value)
 
 
-# @router.message(WinrateFSM.waiting_for_value)
-# async def set_new_winrate(message: types.Message, state: FSMContext):
-
-#     if message.from_user.id != ADMIN_ID:
-#         return
-#     try:
-#         val = int(message.text.strip())
-#         if not (0 <= val <= 100):
-#             raise ValueError
-#         await set_winrate(val / 100)
-#         user_id = message.from_user.id
-#         await message.answer(
-#             f"✅ Новий winrate збережено: {val}%",
-#             reply_markup=main_menu(is_admin=(user_id == ADMIN_ID)),
-#         )
-#     except ValueError:
-#         await message.answer(
-#             "❌ Введіть число від 0 до 100.",
-#             reply_markup=(main_menu(is_admin=(user_id == ADMIN_ID)),),
-#         )
-
-#     await state.clear()
-
 @router.message(WinrateFSM.waiting_for_value)
 async def set_new_winrate(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -161,17 +138,155 @@ async def set_new_winrate(message: types.Message, state: FSMContext):
 #                          Список користувачів
 # ==============================================================================
 
-from aiogram import types, F, Router
+# from aiogram import types, F, Router
+# from aiogram.utils.keyboard import InlineKeyboardBuilder
+# from datetime import datetime, timezone, timedelta
+# from config import ADMIN_ID
+# from db import get_all_users_info
+
+# USERS_PER_PAGE = 5
+
+
+# # ===== Сервісна функція для безпечного парсингу дат =====
+# def parse_dt_safe(dt_str: str):
+#     try:
+#         dt = datetime.fromisoformat(dt_str)
+#         if dt.tzinfo is None:
+#             dt = dt.replace(tzinfo=timezone.utc)
+#         return dt
+#     except Exception:
+#         return datetime.min.replace(tzinfo=timezone.utc)
+
+
+# # ===== Форматування часу =====
+# def format_time(dt_str: str):
+#     """Повертає: 'сьогодні о 20:09', 'вчора о 18:30' або '29.10 о 21:55'"""
+#     try:
+#         dt = datetime.fromisoformat(dt_str)
+#         if dt.tzinfo is None:
+#             dt = dt.replace(tzinfo=timezone.utc)
+#         local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ
+
+#         now = datetime.now(timezone(timedelta(hours=2)))
+#         if local.date() == now.date():
+#             return f"сьогодні о {local.strftime('%H:%M')}"
+#         elif local.date() == (now - timedelta(days=1)).date():
+#             return f"вчора о {local.strftime('%H:%M')}"
+#         else:
+#             return local.strftime("%d.%m о %H:%M")
+#     except Exception:
+#         return "немає даних"
+
+
+# # ===== Основна функція для відображення списку =====
+
+
+# async def send_users_page(message_or_query, users, page: int):
+#     users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
+
+#     total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+#     start = (page - 1) * USERS_PER_PAGE
+#     end = start + USERS_PER_PAGE
+#     current_users = users[start:end]
+
+#     text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
+
+#     for i, user in enumerate(current_users, start=start + 1):
+#         full_name = user.get("full_name") or "—"
+#         username = user.get("username") or "-"
+#         user_id = user.get("user_id")
+#         games_played = user.get("games_played", 0)
+#         games_won = user.get("games_won", 0)
+#         last_active = format_time(user.get("last_active") or "")
+#         last_actions = user.get("last_actions") or "—"
+
+#         if games_played > 0:
+#             winrate = round((games_won / games_played) * 100)
+#         else:
+#             winrate = 0
+
+#         # формуємо профільну лінку
+#         if username != "-" and username != "":
+#             profile_link = f"@{username}"
+#         else:
+#             profile_link = f"<a href='tg://user?id={user_id}'>Профіль</a>"
+
+#         # 🔹 форматуємо останні дії
+#         if last_actions and last_actions != "—":
+#             actions_list = last_actions.split(" | ")
+#             actions_text = "\n".join([f"   {a.strip()}" for a in actions_list])
+#             last_actions_str = f"📜 <b>Останні дії:</b>\n{actions_text}"
+#         else:
+#             last_actions_str = "📜 Немає даних"
+
+#         text += (
+#             f"{i}. <b>{full_name}</b>\n"
+#             f"🔗 {profile_link}\n"
+#             f"🕒 {last_active}\n"
+#             f"{last_actions_str}\n"
+#             f"🔐 <code>{user_id}</code>\n"
+#             f"🎮 Зіграно: <b>{games_played}</b> | 🏆 Виграно: <b>{games_won} \n 🍀 {winrate}%</b>\n\n"
+#         )
+
+#     kb = InlineKeyboardBuilder()
+#     if page > 1:
+#         kb.button(text="⬅️ Назад", callback_data=f"users_page:{page - 1}")
+#     if end < len(users):
+#         kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
+#     kb.adjust(2)
+
+#     # Оновлюємо або надсилаємо повідомлення
+#     if isinstance(message_or_query, types.CallbackQuery):
+#         try:
+#             await message_or_query.message.edit_text(
+#                 text, parse_mode="HTML", reply_markup=kb.as_markup()
+#             )
+#         except Exception:
+#             await message_or_query.answer("⚠️ Не вдалося оновити сторінку.")
+#         await message_or_query.answer()
+#     else:
+#         await message_or_query.answer(
+#             text, parse_mode="HTML", reply_markup=kb.as_markup()
+#         )
+
+
+# # # ===== Команда: список користувачів =====
+# @router.message(F.text == "👥 Список користувачів")
+# async def list_users(message: types.Message):
+#     if message.from_user.id != ADMIN_ID:
+#         return
+#     users = await get_all_users_info()
+#     if not users:
+#         await message.answer("❌ Користувачів ще немає.")
+#         return
+#     await send_users_page(message, users, page=1)
+
+
+# # ===== Кнопки пагінації =====
+# @router.callback_query(F.data.startswith("users_page:"))
+# async def paginate_users(callback: types.CallbackQuery):
+#     if callback.from_user.id != ADMIN_ID:
+#         await callback.answer("⛔ Лише для адміністратора.", show_alert=True)
+#         return
+#     page = int(callback.data.split(":")[1])
+#     users = await get_all_users_info()
+#     await send_users_page(callback, users, page)
+
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
-from config import ADMIN_ID
+from aiogram import types, Router, F
 from db import get_all_users_info
+from config import ADMIN_ID
 
-USERS_PER_PAGE = 5
+USERS_PER_PAGE = 8          # скільки користувачів на одній сторінці (кнопок)
+MAX_ACTIONS_TO_SHOW = 20    # скільки останніх дій показувати в профілі
+
+# router = Router()           # якщо у вас вже є router — просто додавайте туди
 
 
-# ===== Сервісна функція для безпечного парсингу дат =====
-def parse_dt_safe(dt_str: str):
+def parse_dt_safe(dt_str: str | None) -> datetime:
+    if not dt_str:
+        return datetime.min.replace(tzinfo=timezone.utc)
     try:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
@@ -181,121 +296,259 @@ def parse_dt_safe(dt_str: str):
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
-# ===== Форматування часу =====
-def format_time(dt_str: str):
-    """Повертає: 'сьогодні о 20:09', 'вчора о 18:30' або '29.10 о 21:55'"""
+def format_time_kyiv(dt_str: str | None) -> str:
+    if not dt_str:
+        return "немає даних"
     try:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ
-
+        local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ UTC+2
         now = datetime.now(timezone(timedelta(hours=2)))
+
         if local.date() == now.date():
-            return f"сьогодні о {local.strftime('%H:%M')}"
-        elif local.date() == (now - timedelta(days=1)).date():
-            return f"вчора о {local.strftime('%H:%M')}"
-        else:
-            return local.strftime("%d.%m о %H:%M")
+            return f"сьогодні о {local:%H:%M}"
+        if local.date() == (now - timedelta(days=1)).date():
+            return f"вчора о {local:%H:%M}"
+        return local.strftime("%d.%m.%Y о %H:%M")
     except Exception:
-        return "немає даних"
+        return "—"
 
 
-# ===== Основна функція для відображення списку =====
+# async def build_users_keyboard(users: list[dict], page: int) -> InlineKeyboardBuilder:
+#     users_sorted = sorted(
+#         users,
+#         key=lambda x: parse_dt_safe(x.get("last_active")),
+#         reverse=True
+#     )
+
+#     total_pages = (len(users_sorted) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+#     start = (page - 1) * USERS_PER_PAGE
+#     end = start + USERS_PER_PAGE
+#     page_users = users_sorted[start:end]
+
+#     kb = InlineKeyboardBuilder()
+
+#     for user in page_users:
+#         user_id = user["user_id"]
+#         full_name = user.get("full_name") or "Без імені"
+#         username = user.get("username")
+#         last_active = format_time_kyiv(user.get("last_active"))
+
+#         btn_text = f"{full_name}"
+#         if username:
+#             btn_text += f"  @{username}"
+#         btn_text += f"  · {last_active}"
+
+#         # обмежуємо довжину тексту кнопки (Telegram ліміт ~64 символи)
+#         btn_text = btn_text[:60] + "…" if len(btn_text) > 60 else btn_text
+
+#         kb.row(
+#             types.InlineKeyboardButton(
+#                 text=btn_text,
+#                 callback_data=f"user_detail:{user_id}:{page}"
+#             )
+#         )
+
+#     # рядок навігації
+#     nav_row = []
+#     if page > 1:
+#         nav_row.append(types.InlineKeyboardButton(
+#             text="⬅️ Назад", callback_data=f"users_list:{page-1}"
+#         ))
+#     if end < len(users_sorted):
+#         nav_row.append(types.InlineKeyboardButton(
+#             text="Далі ➡️", callback_data=f"users_list:{page+1}"
+#         ))
+
+#     if nav_row:
+#         kb.row(*nav_row)
+
+#     kb.row(
+#         types.InlineKeyboardButton(
+#             text="⟲ Оновити список", callback_data=f"users_list:{page}"
+#         )
+#     )
+
+#     return kb
 
 
-async def send_users_page(message_or_query, users, page: int):
-    users.sort(key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True)
 
-    total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+# ────────────────────────────────────────────────
+#          Оновлена функція побудови клавіатури списку
+# ────────────────────────────────────────────────
+
+async def build_users_keyboard(users: list[dict], page: int) -> InlineKeyboardBuilder:
+    # Сортуємо за останньою активністю (найновіші зверху)
+    users_sorted = sorted(
+        users,
+        key=lambda x: parse_dt_safe(x.get("last_active")),
+        reverse=True
+    )
+
+    total_pages = (len(users_sorted) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
     start = (page - 1) * USERS_PER_PAGE
     end = start + USERS_PER_PAGE
-    current_users = users[start:end]
-
-    text = f"👥 <b>Користувачі (сторінка {page}/{total_pages}):</b>\n\n"
-
-    for i, user in enumerate(current_users, start=start + 1):
-        full_name = user.get("full_name") or "—"
-        username = user.get("username") or "-"
-        user_id = user.get("user_id")
-        games_played = user.get("games_played", 0)
-        games_won = user.get("games_won", 0)
-        last_active = format_time(user.get("last_active") or "")
-        last_actions = user.get("last_actions") or "—"
-
-        if games_played > 0:
-            winrate = round((games_won / games_played) * 100)
-        else:
-            winrate = 0
-
-        # формуємо профільну лінку
-        if username != "-" and username != "":
-            profile_link = f"@{username}"
-        else:
-            profile_link = f"<a href='tg://user?id={user_id}'>Профіль</a>"
-
-        # 🔹 форматуємо останні дії
-        if last_actions and last_actions != "—":
-            actions_list = last_actions.split(" | ")
-            actions_text = "\n".join([f"   {a.strip()}" for a in actions_list])
-            last_actions_str = f"📜 <b>Останні дії:</b>\n{actions_text}"
-        else:
-            last_actions_str = "📜 Немає даних"
-
-        text += (
-            f"{i}. <b>{full_name}</b>\n"
-            f"🔗 {profile_link}\n"
-            f"🕒 {last_active}\n"
-            f"{last_actions_str}\n"
-            f"🔐 <code>{user_id}</code>\n"
-            f"🎮 Зіграно: <b>{games_played}</b> | 🏆 Виграно: <b>{games_won} \n 🍀 {winrate}%</b>\n\n"
-        )
+    page_users = users_sorted[start:end]
 
     kb = InlineKeyboardBuilder()
-    if page > 1:
-        kb.button(text="⬅️ Назад", callback_data=f"users_page:{page - 1}")
-    if end < len(users):
-        kb.button(text="➡️ Далі", callback_data=f"users_page:{page + 1}")
-    kb.adjust(2)
 
-    # Оновлюємо або надсилаємо повідомлення
+    for idx, user in enumerate(page_users, start=1):  # 1, 2, 3... на сторінці
+        user_id = user["user_id"]
+        full_name = user.get("full_name") or "Без імені"
+        
+        # Беремо тільки ім'я, обрізаємо якщо дуже довге
+        name_short = full_name.strip()[:30]
+        if not name_short:
+            name_short = "Без імені"
+
+        btn_text = f"{idx}. {name_short}"
+
+        kb.row(
+            types.InlineKeyboardButton(
+                text=btn_text,
+                callback_data=f"user_detail:{user_id}:{page}"
+            )
+        )
+
+    # Навігація сторінками
+    nav_row = []
+    if page > 1:
+        nav_row.append(types.InlineKeyboardButton(
+            text="⬅️ Назад", callback_data=f"users_list:{page-1}"
+        ))
+    if end < len(users_sorted):
+        nav_row.append(types.InlineKeyboardButton(
+            text="Далі ➡️", callback_data=f"users_list:{page+1}"
+        ))
+
+    if nav_row:
+        kb.row(*nav_row)
+
+    kb.row(
+        types.InlineKeyboardButton(
+            text="⟲ Оновити список", callback_data=f"users_list:{page}"
+        )
+    )
+
+    return kb
+
+
+async def show_users_list(message_or_query, page: int = 1):
+    users = await get_all_users_info()
+    if not users:
+        text = "🫥 Користувачів ще немає"
+        kb = None
+    else:
+        kb_builder = await build_users_keyboard(users, page)
+        text = f"👥 Користувачі (стор. {page})\n\n"
+        kb = kb_builder.as_markup()
+
     if isinstance(message_or_query, types.CallbackQuery):
         try:
             await message_or_query.message.edit_text(
-                text, parse_mode="HTML", reply_markup=kb.as_markup()
+                text, reply_markup=kb, parse_mode="HTML", disable_web_page_preview=True
             )
         except Exception:
-            await message_or_query.answer("⚠️ Не вдалося оновити сторінку.")
+            await message_or_query.message.answer(text, reply_markup=kb, parse_mode="HTML")
         await message_or_query.answer()
     else:
         await message_or_query.answer(
-            text, parse_mode="HTML", reply_markup=kb.as_markup()
+            text,
+            reply_markup=kb,
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
 
 
-# # ===== Команда: список користувачів =====
 @router.message(F.text == "👥 Список користувачів")
-async def list_users(message: types.Message):
+async def cmd_list_users(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
-    users = await get_all_users_info()
-    if not users:
-        await message.answer("❌ Користувачів ще немає.")
-        return
-    await send_users_page(message, users, page=1)
+    await show_users_list(message, page=1)
 
 
-# ===== Кнопки пагінації =====
-@router.callback_query(F.data.startswith("users_page:"))
-async def paginate_users(callback: types.CallbackQuery):
+@router.callback_query(F.data.startswith("users_list:"))
+async def paginate_users_list(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("⛔ Лише для адміністратора.", show_alert=True)
+        await callback.answer("Доступно лише адміністратору", show_alert=True)
         return
-    page = int(callback.data.split(":")[1])
+
+    try:
+        page = int(callback.data.split(":", 1)[1])
+    except:
+        page = 1
+
+    await show_users_list(callback, page=page)
+
+
+# ────────────────────────────────────────────────
+#               Детальна інформація про користувача
+# ────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("user_detail:"))
+async def show_user_detail(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
     users = await get_all_users_info()
-    await send_users_page(callback, users, page)
+    user = next((u for u in users if u["user_id"] == user_id), None)
 
+    if not user:
+        await callback.message.edit_text("Користувача вже немає в базі.")
+        return
 
+    # ─── Формуємо текст профілю ────────────────────────────────
+    full_name = user.get("full_name") or "—"
+    username = user.get("username") or "—"
+    reg_date = format_time_kyiv(user.get("registered_at"))
+    last_active = format_time_kyiv(user.get("last_active"))
+
+    games_played = user.get("games_played", 0)
+    games_won = user.get("games_won", 0)
+    winrate = round(games_won / games_played * 100) if games_played > 0 else 0
+
+    actions = user.get("last_actions", "")
+    actions_list = [a.strip() for a in actions.split("|") if a.strip()]
+    actions_show = actions_list[-MAX_ACTIONS_TO_SHOW:]          # останні 20
+    actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
+
+    text = (
+        f"👤 <b>{full_name}</b>\n"
+        f"{'@' if username != '—' else ''}{username}\n\n"
+        f"🆔 <code>{user_id}</code>\n"
+        f"📅 Реєстрація: {reg_date}\n"
+        f"🕒 Остання активність: {last_active}\n\n"
+        f"🎮 Зіграно: <b>{games_played}</b>\n"
+        f"🏆 Виграно: <b>{games_won}</b>  ({winrate}%)\n\n"
+        f"<b>Останні дії (до {MAX_ACTIONS_TO_SHOW}):</b>\n"
+        f"{actions_text}\n"
+    )
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
+    # можна додати ще кнопки: бан, видати бонуси, переглянути платежі тощо
+
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+            disable_web_page_preview=True
+        )
+    except Exception as e:
+        await callback.message.answer("Не вдалося оновити повідомлення.\n\n" + text, parse_mode="HTML")
+
+    await callback.answer()
 # ========================================================================================================
 #                                            📢 Розсилка
 # ========================================================================================================
@@ -1473,138 +1726,6 @@ def build_notifications_kb(page: int, total_pages: int, filter_type: str | None)
         ]
     )
 
-
-# # =============================================================================================
-# #                              🔒 КЕРУВАННЯ СЕЙФОМ (АДМІН)
-# # =============================================================================================
-# from handlers.group_safe import load_state, save_state, get_win_cell, TOTAL_CELLS
-
-# class SafeFSM(StatesGroup):
-#     waiting_for_win_cell = State()
-
-
-# def safe_admin_keyboard():
-#     return InlineKeyboardMarkup(inline_keyboard=[
-#         [InlineKeyboardButton(text="🗑 Очистити сейф", callback_data="safe:clear")],
-#         [InlineKeyboardButton(text="🔢 Встановити виграшне число", callback_data="safe:set_win")],
-#         [InlineKeyboardButton(text="👁 Поточне виграшне число", callback_data="safe:view_win")],
-#         [InlineKeyboardButton(text="📊 Стан сейфа", callback_data="safe:status")],
-#     ])
-
-
-# @router.message(F.text == "🔒 Сейф")
-# async def safe_admin_panel(message: types.Message):
-#     if message.from_user.id != ADMIN_ID:
-#         return
-#     await message.answer("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
-
-
-# # --- Очистити сейф ---
-# @router.callback_query(F.data == "safe:clear")
-# async def safe_clear_confirm(cb: types.CallbackQuery):
-#     if cb.from_user.id != ADMIN_ID:
-#         return
-#     kb = InlineKeyboardMarkup(inline_keyboard=[
-#         [
-#             InlineKeyboardButton(text="✅ Так, очистити", callback_data="safe:clear_confirm"),
-#             InlineKeyboardButton(text="❌ Скасувати", callback_data="safe:back"),
-#         ]
-#     ])
-#     await cb.message.edit_text("⚠️ Очистити всі відкриті клітинки та почати новий раунд?", reply_markup=kb)
-#     await cb.answer()
-
-
-# @router.callback_query(F.data == "safe:clear_confirm")
-# async def safe_clear_do(cb: types.CallbackQuery):
-#     if cb.from_user.id != ADMIN_ID:
-#         return
-#     win_cell = get_win_cell()
-#     save_state([], win_cell=win_cell)
-#     await cb.message.edit_text(
-#         f"✅ <b>Сейф очищено!</b>\nНовий раунд розпочато.\nВиграшна клітинка залишається: <b>{win_cell}</b>",
-#         parse_mode="HTML",
-#         reply_markup=safe_admin_keyboard()
-#     )
-#     await cb.answer("✅ Сейф очищено!")
-
-
-# # --- Встановити виграшне число ---
-# @router.callback_query(F.data == "safe:set_win")
-# async def safe_set_win_ask(cb: types.CallbackQuery, state: FSMContext):
-#     if cb.from_user.id != ADMIN_ID:
-#         return
-#     await state.set_state(SafeFSM.waiting_for_win_cell)
-#     kb = InlineKeyboardMarkup(inline_keyboard=[
-#         [InlineKeyboardButton(text="❌ Скасувати", callback_data="safe:cancel_fsm")]
-#     ])
-#     await cb.message.edit_text(
-#         f"🔢 Введіть нове виграшне число (від 1 до {TOTAL_CELLS}):",
-#         reply_markup=kb
-#     )
-#     await cb.answer()
-
-
-# @router.message(SafeFSM.waiting_for_win_cell)
-# async def safe_set_win_save(message: types.Message, state: FSMContext):
-#     if message.from_user.id != ADMIN_ID:
-#         return
-#     try:
-#         cell = int(message.text.strip())
-#         if cell < 1 or cell > TOTAL_CELLS:
-#             raise ValueError
-#     except ValueError:
-#         await message.answer(f"❌ Введіть число від 1 до {TOTAL_CELLS}")
-#         return
-
-#     state_data = load_state()
-#     save_state(state_data.get("opened", []), win_cell=cell)
-#     await state.clear()
-#     await message.answer(
-#         f"✅ <b>Виграшну клітинку встановлено: {cell}</b>",
-#         parse_mode="HTML",
-#         reply_markup=safe_admin_keyboard()
-#     )
-
-
-# @router.callback_query(F.data == "safe:cancel_fsm")
-# async def safe_cancel_fsm(cb: types.CallbackQuery, state: FSMContext):
-#     await state.clear()
-#     await cb.message.edit_text("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
-#     await cb.answer("❌ Скасовано")
-
-
-# # --- Переглянути виграшне число ---
-# @router.callback_query(F.data == "safe:view_win")
-# async def safe_view_win(cb: types.CallbackQuery):
-#     if cb.from_user.id != ADMIN_ID:
-#         return
-#     win_cell = get_win_cell()
-#     await cb.answer(f"🏆 Виграшна клітинка: {win_cell}", show_alert=True)
-
-
-# # --- Стан сейфа ---
-# @router.callback_query(F.data == "safe:status")
-# async def safe_status(cb: types.CallbackQuery):
-#     if cb.from_user.id != ADMIN_ID:
-#         return
-#     state = load_state()
-#     opened = state.get("opened", [])
-#     win_cell = state.get("win_cell", "?")
-#     text = (
-#         f"📊 <b>Стан сейфа</b>\n\n"
-#         f"Відкрито: <b>{len(opened)}</b> / {TOTAL_CELLS}\n"
-#         f"Виграшна клітинка: <b>{win_cell}</b>\n"
-#         f"Залишилось: <b>{TOTAL_CELLS - len(opened)}</b>"
-#     )
-#     await cb.message.edit_text(text, parse_mode="HTML", reply_markup=safe_admin_keyboard())
-#     await cb.answer()
-
-
-# # --- Назад ---
-# @router.callback_query(F.data == "safe:back")
-# async def safe_back(cb: types.CallbackQuery):
-#     await cb.message.edit_text("🔒 <b>Керування сейфом</b>", parse_mode="HTML", reply_markup=safe_admin_keyboard())
-#     await cb.answer()
 
 # =============================================================================================
 #                              🔒 КЕРУВАННЯ СЕЙФОМ (АДМІН)

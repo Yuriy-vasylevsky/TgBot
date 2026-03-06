@@ -143,23 +143,71 @@ async def run_api():
 
 
 # ==========================
-# Middleware — автозбереження користувача
+# Middleware — автозбереження користувача ТІЛЬКИ В ПРИВАТІ
 # ==========================
+from aiogram import BaseMiddleware, types
+import logging
+
 class SaveUserMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
-        if isinstance(event, types.Message) and event.from_user:
-            try:
-                action = event.text or "Невідома дія"
-                await save_user(
-                    event.from_user.id,
-                    event.from_user.username or "",
-                    event.from_user.full_name or "",
-                    action=action,
-                )
-            except Exception as e:
-                logging.error(f"Save user error: {e}")
+        if not isinstance(event, types.Message):
+            return await handler(event, data)
+
+        if not event.from_user:
+            return await handler(event, data)
+
+        # Тільки приватні чати
+        if event.chat.type != "private":
+            return await handler(event, data)
+
+        text = (event.text or "").strip()
+
+        # Список текстів, які НЕ потрібно фіксувати як дії
+        ignored_actions = {
+            "1 купон",
+            "2 купони",
+            "3 купони",
+            # за бажанням додай інші кнопки гри, які не хочеш бачити в історії
+            "▶️ Почати гру",
+            "ℹ️ Правила та комбінації",
+            "🔙 Повернутись до ігор",
+        }
+
+        # Якщо текст — це одна з ігнорованих кнопок → пропускаємо збереження дії
+        if text in ignored_actions:
+            return await handler(event, data)
+
+        # ────────────── тільки для дозволених повідомлень ──────────────
+        try:
+            # Формуємо короткий опис дії
+            if text:
+                if len(text) > 60:
+                    action = f"{text[:57]}..."
+                else:
+                    action = f"{text}"
+            elif event.photo:
+                action = "відправив фото"
+            elif event.sticker:
+                action = "відправив стікер"
+            elif event.voice:
+                action = "відправив голосове"
+            elif event.video:
+                action = "відправив відео"
+            else:
+                action = "виконав дію"
+
+            await save_user(
+                event.from_user.id,
+                event.from_user.username or "",
+                event.from_user.full_name or "",
+                action=action,
+            )
+        except Exception as e:
+            logging.error(f"Помилка збереження користувача: {e}")
+
         return await handler(event, data)
 
+# Реєстрація залишається без змін
 dp.message.middleware(SaveUserMiddleware())
 
 # ==========================

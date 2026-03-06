@@ -134,22 +134,66 @@ async def add_user_column_last_actions():
 
 # ===================== ВСІ ТВОЇ ФУНКЦІЇ =====================
 
-async def save_user(user_id: int, username: str, full_name: str, action: str = None):
+# async def save_user(user_id: int, username: str, full_name: str, action: str = None):
+#     kyiv_tz = timezone(timedelta(hours=3))
+#     now_str = datetime.now(kyiv_tz).isoformat(timespec="seconds")
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute("SELECT last_actions FROM users WHERE user_id = ?", (user_id,))
+#         row = await cursor.fetchone()
+#         old_actions = row[0] if row and row[0] else ""
+#         await cursor.close()
+
+#         if action:
+#             parts = old_actions.split(" | ") if old_actions else []
+#             parts = (parts + [action])[-5:]
+#             new_actions = " | ".join(parts)
+#         else:
+#             new_actions = old_actions
+
+#         await db.execute(
+#             """
+#             INSERT INTO users (user_id, username, full_name, last_active, last_actions)
+#             VALUES (?, ?, ?, ?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET
+#                 username = excluded.username,
+#                 full_name = excluded.full_name,
+#                 last_active = excluded.last_active,
+#                 last_actions = excluded.last_actions
+#             """,
+#             (user_id, username, full_name, now_str, new_actions)
+#         )
+#         await db.commit()
+from aiogram import types
+async def save_user(
+    user_id: int,
+    username: str,
+    full_name: str,
+    action: str = None,
+    chat_type: str | None = None,
+):
+    if chat_type and chat_type != "private":
+        action = None   # група → ігноруємо дію
+
     kyiv_tz = timezone(timedelta(hours=3))
     now_str = datetime.now(kyiv_tz).isoformat(timespec="seconds")
 
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("SELECT last_actions FROM users WHERE user_id = ?", (user_id,))
+        cursor = await db.execute(
+            "SELECT last_actions FROM users WHERE user_id = ?",
+            (user_id,)
+        )
         row = await cursor.fetchone()
         old_actions = row[0] if row and row[0] else ""
-        await cursor.close()
+        await cursor.close()   # краще закривати курсор явно
+
+        new_actions = old_actions
 
         if action:
             parts = old_actions.split(" | ") if old_actions else []
-            parts = (parts + [action])[-5:]
+            parts.insert(0, action.strip())
+            parts = parts[:20]
             new_actions = " | ".join(parts)
-        else:
-            new_actions = old_actions
 
         await db.execute(
             """
@@ -164,7 +208,6 @@ async def save_user(user_id: int, username: str, full_name: str, action: str = N
             (user_id, username, full_name, now_str, new_actions)
         )
         await db.commit()
-
 
 async def get_all_users() -> List[int]:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -433,16 +476,53 @@ async def update_card(bank_name: str, new_number: str):
         await db.commit()
 
 
-async def add_last_action(user_id: int, action: str):
+# async def add_last_action(user_id: int, action: str):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cur = await db.execute("SELECT last_actions FROM users WHERE user_id = ?", (user_id,))
+#         row = await cur.fetchone()
+#         old_actions = row[0].split(" | ") if row and row[0] else []
+#         old_actions.insert(0, action.strip())
+#         old_actions = old_actions[:2]
+#         actions_str = " | ".join(old_actions)
+#         await db.execute("UPDATE users SET last_actions = ? WHERE user_id = ?", (actions_str, user_id))
+#         await db.commit()
+
+async def add_last_action(user_id: int, action: str, chat_type: str | None = None):
+    """
+    Додає дію тільки якщо це приватний чат (або chat_type не передано).
+    Якщо дія з групи — ігнорується.
+    """
+    if chat_type and chat_type != "private":
+        # Це група / супергрупа / канал → пропускаємо
+        return
+
+    if not action or not action.strip():
+        return
+
     async with aiosqlite.connect(DB_PATH) as db:
-        cur = await db.execute("SELECT last_actions FROM users WHERE user_id = ?", (user_id,))
-        row = await cur.fetchone()
-        old_actions = row[0].split(" | ") if row and row[0] else []
-        old_actions.insert(0, action.strip())
-        old_actions = old_actions[:2]
-        actions_str = " | ".join(old_actions)
-        await db.execute("UPDATE users SET last_actions = ? WHERE user_id = ?", (actions_str, user_id))
+        cursor = await db.execute(
+            "SELECT last_actions FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        actions_str = row[0] if row else ""
+        parts = [a.strip() for a in actions_str.split(" | ") if a.strip()]
+
+        # Додаємо нову дію на початок (найновіші перші)
+        parts.insert(0, action.strip())
+
+        # Обмежуємо до 20 дій
+        parts = parts[:20]
+
+        new_actions = " | ".join(parts)
+
+        await db.execute(
+            "UPDATE users SET last_actions = ? WHERE user_id = ?",
+            (new_actions, user_id)
+        )
         await db.commit()
+
+
 
 
 async def add_weekly_task(title: str, description: str, reward: str, duration: str):
@@ -568,19 +648,6 @@ async def get_promo(user_id: int) -> int:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
-
-# async def spend_promo_for_fortune(user_id: int) -> bool:
-#     """Списує 3 PROMO за спін. Повертає True якщо вистачило"""
-#     if await get_promo(user_id) < 3:
-#         return False
-
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute(
-#             "UPDATE users SET games_played = games_played - 3 WHERE user_id = ?",
-#             (user_id,)
-#         )
-#         await db.commit()
-#     return True
 
 async def spend_promo_for_fortune(user_id: int, cost: int = 3) -> bool:
     """Списує cost промо за спін. Повертає True якщо вистачило"""
