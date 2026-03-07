@@ -20,3 +20,20 @@ class EnterPromoFSM(StatesGroup):
 
 class CodeLinkFSM(StatesGroup):
     waiting_for_code = State()
+
+
+# ======================
+# СТАНИ
+# ======================
+class AddCodeFSM(StatesGroup):
+    waiting_for_code = State()
+
+
+class CodeLinkFSM(StatesGroup):
+    waiting_for_code = State()
+
+
+# FSM для додавання коду
+class AddCodeFSM(StatesGroup):
+    waiting_for_type = State()
+    waiting_for_code = State()

@@ -9,7 +9,7 @@ from db import (
     clear_game_stats,
 )
 
-import config
+import handlers.config as config
 from db import get_total_money_won  # зверху
 
 router = Router()

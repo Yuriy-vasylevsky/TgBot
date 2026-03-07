@@ -4,7 +4,7 @@ from datetime import datetime
 import zoneinfo
 import logging
 
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 
 router = Router(name="group_night_mode")
 

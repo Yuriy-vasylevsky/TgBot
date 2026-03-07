@@ -1,9 +1,77 @@
-
 import socket
 import sys
+import logging
+import asyncio
+import random
+import string
+import os
+import time
+from datetime import datetime, timedelta
+
+import monobank
+from aiohttp import web
+
+from aiogram import Bot, Dispatcher, F, types
+from aiogram.enums import ParseMode
+from aiogram.filters import Command
+from aiogram.client.default import DefaultBotProperties
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllChatAdministrators,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+)
+
+import handlers.config as config
+from db import (
+    init_db,
+    add_promocode,
+    has_claimed_gift,
+    reset_all_gifts,
+    set_gift_claimed,
+    mark_tx_used,
+    is_tx_used,
+    get_pending_payments,
+    add_to_balance,
+    remove_pending_payment,
+    get_balance,
+    DB_PATH,
+)
+
+from middlewares.middleware import BanMiddleware, SaveUserMiddleware
+
+# ==================== РОУТЕРИ ====================
+from group_games.group_safe import router as safe_router
+from handlers.admin_group import router as admin_group_router
+from group_games.group_bowling import router as bowling_router
+from group_games.group_basketball import router as basketball_router
+from group_games.football_router import router as football_router
+from group_games.group_antispam import router as antispam_router
+from group_games.group_night_mode import router as night_mode_router
+from group_games.group_numbers import router as numbers_router
+from group_games.group_jackpot import router as jackpot_router
+from handlers.wallet import router as wallet_router
+from group_games.group_wordle import router as wordle_router
+
+from handlers.stats import router as stats_router
+from handlers.general import router as general_router
+from handlers.admin.router import router as admin_router
+from handlers.profile import router as profile_router
+
+from games import (
+    slot_router,
+    one_of_three_router,
+    rewards_router,
+    blackjack_router,
+    fortune_router,
+)
+
+from handlers.menu import main_menu
 
 # ===============================
-# Захист від подвійного запуску
+# ЗАХИСТ ВІД ПОДВІЙНОГО ЗАПУСКУ
 # ===============================
 LOCK_PORT = 9999
 _lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -13,68 +81,14 @@ except OSError:
     print("❌ Бот уже запущений! Другий екземпляр заблоковано.")
     sys.exit(0)
 
-import logging
-import asyncio
-import random
-import string
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-import os
-
-import logging
+# ==========================
+# НАЛАШТУВАННЯ ЛОГІВ ТА БАЗИ
+# ==========================
 logging.basicConfig(level=logging.INFO)
-from aiogram import Bot, Dispatcher, F, types, BaseMiddleware
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.enums import ParseMode
-from aiogram.filters import Command
-from aiogram.client.default import DefaultBotProperties
-from aiogram.types import (
-    BotCommand, BotCommandScopeDefault, BotCommandScopeAllPrivateChats,
-    BotCommandScopeAllGroupChats, BotCommandScopeAllChatAdministrators,
-    InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
-)
-
-import config
-from db import (
-    init_db, save_user, add_promocode, has_claimed_gift,
-    reset_all_gifts, set_gift_claimed,
-)
-
-from middlewares.ban_middleware import BanMiddleware
-from handlers.group_safe import router as safe_router
-from handlers.admin_group import router as admin_group_router
-from handlers.group_bowling import router as bowling_router
-from handlers.group_basketball import router as basketball_router
-from handlers.football_router import router as football_router
-from handlers.group_antispam import router as antispam_router
-from handlers.group_night_mode import router as night_mode_router
-from handlers.group_numbers import router as numbers_router
-from handlers.group_jackpot import router as jackpot_router
-from handlers.wallet import router as wallet_router
-
-from stats import router as stats_router
-from handlers.general import router as general_router
-from handlers.admin import router as admin_router
-from handlers.profile import router as profile_router
-from games import (
-    slot_router, one_of_three_router, rewards_router,
-    blackjack_router, fortune_router
-)
-from menu import main_menu
-from handlers.group_safe import router as safe_router
-from handlers.group_wordle import router as wordle_router
-from handlers.wallet import router as wallet_router
-
-from db import (
-    init_db, save_user, add_promocode, has_claimed_gift,
-    reset_all_gifts, set_gift_claimed,
-    mark_tx_used, is_tx_used,  # ← ДОБАВЬ ЭТО!
-)
-from db import DB_PATH
 print(f"📁 DB_PATH = {DB_PATH}")
 
 # ==========================
-# Ініціалізація
+# ІНІЦІАЛІЗАЦІЯ БОТА
 # ==========================
 bot = Bot(
     token=config.TOKEN,
@@ -82,9 +96,7 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# Підключаємо роутери
-
-
+# Підключаємо роутери (тільки один раз!)
 dp.include_router(jackpot_router)
 dp.include_router(wordle_router)
 dp.include_router(numbers_router)
@@ -98,7 +110,6 @@ dp.include_router(night_mode_router)
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
-# dp.include_router(daily_bonus_router)
 dp.include_router(profile_router)
 dp.include_router(fortune_router)
 dp.include_router(slot_router)
@@ -107,19 +118,18 @@ dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
 
-
+# Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
+dp.message.middleware(SaveUserMiddleware())
 
 ADMIN_ID = config.ADMIN_ID
 
 # ==========================
-# API для веб-апу сейфа (порт 3000 — щоб не конфліктував)
+# API ДЛЯ ВЕБ-АПУ СЕЙФА (порт 3000)
 # ==========================
-from aiohttp import web
-
 async def safe_api(request):
-    from handlers.group_safe import load_state
+    from group_games.group_safe import load_state
     state = await load_state()
 
     response = web.json_response({
@@ -127,7 +137,7 @@ async def safe_api(request):
         "total": 250,
     })
 
-    # CORS — дозволяємо Railway сайту робити запити
+    # CORS
     origin = request.headers.get("Origin", "*")
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -147,22 +157,12 @@ async def run_api():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Safe API запущено на порту {port}")
+    logging.info(f"🌐 Safe API запущено на порту {port}")
 
 
-from datetime import datetime, timedelta
-import time
-import monobank
-from db import (
-    get_pending_payments,
-    add_to_balance,
-    remove_pending_payment,
-    get_balance,
-)
-
-
-# ЗАМЕНИ функцию background_payment_checker в main.py НА ЭТУ:
-
+# ==========================
+# ФОНОВА ПЕРЕВІРКА ПЛАТЕЖІВ MONOBANK
+# ==========================
 async def background_payment_checker():
     """Фонова перевірка платежів Monobank кожні 90 секунд"""
     while True:
@@ -173,20 +173,14 @@ async def background_payment_checker():
             if not pendings:
                 continue
 
-            logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} очікуючих платежів")
+            logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} платежів")
 
             client = monobank.Client(token=config.MONO_TOKEN)
-
             from_date = datetime.now() - timedelta(days=7)
             to_date = datetime.now()
 
-            statements = client.get_statements(
-                config.MONO_ACCOUNT,
-                from_date,
-                to_date
-            )
-
-            logging.info(f"📥 Отримано {len(statements)} транзакцій з Monobank")
+            statements = client.get_statements(config.MONO_ACCOUNT, from_date, to_date)
+            logging.info(f"📥 Отримано {len(statements)} транзакцій")
 
             for p in pendings:
                 target_amount = p["amount_kop"]
@@ -194,15 +188,13 @@ async def background_payment_checker():
                 payment_id = p["comment"]
 
                 try:
-                    parts = payment_id.split(":")
-                    payment_timestamp = int(parts[1])
-                except:
+                    payment_timestamp = int(payment_id.split(":")[1])
+                except Exception:
                     payment_timestamp = int(time.time())
 
-                time_window = 600  # 10 хвилин
-
+                time_window = 600
                 best_match = None
-                best_match_diff = float('inf')
+                best_match_diff = float("inf")
                 best_match_tx_id = None
 
                 for tx in statements:
@@ -211,130 +203,58 @@ async def background_payment_checker():
                     tx_id = tx.get("id", "")
                     time_diff = abs(tx_time - payment_timestamp)
 
-                    # 🛡️ КРИТИЧНО: Пропускаємо вже використані TX!
                     if await is_tx_used(tx_id):
-                        logging.debug(f"  ⏭️ TX вже використана: '{tx_id}' - пропускаємо")
+                        logging.debug(f"  ⏭️ TX вже використана: {tx_id}")
                         continue
 
-                    if (tx_amount == target_amount and 
+                    if (tx_amount == target_amount and
                         time_diff <= time_window and
                         tx_amount > 0):
-                        
+
                         if time_diff < best_match_diff:
                             best_match = tx
                             best_match_diff = time_diff
                             best_match_tx_id = tx_id
 
                 if best_match:
-                    # 🛡️ ПОМЕЧАЄМО КАК ИСПОЛЬЗОВАНУЮ!
                     await mark_tx_used(best_match_tx_id, user_id, target_amount, payment_id)
-                    
+
                     amount_grn = target_amount // 100
                     await add_to_balance(user_id, amount_grn)
                     await remove_pending_payment(user_id)
 
+                    status = " (холд)" if best_match.get("hold", False) else ""
                     try:
-                        tx_hold = best_match.get("hold", False)
-                        status = " (холд)" if tx_hold else ""
                         await bot.send_message(
                             user_id,
                             f"✅ Автоматично зараховано {amount_grn} грн{status}!\n"
                             f"Новий баланс: {await get_balance(user_id)} грн"
                         )
                     except Exception as send_err:
-                        logging.warning(f"Не вдалось надіслати повідомлення юзеру {user_id}: {send_err}")
+                        logging.warning(f"Не вдалося надіслати повідомлення {user_id}: {send_err}")
 
                     logging.info(
-                        f"✅ ФОНОВА ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
-                        f"tx_id='{best_match_tx_id}', payment_id='{payment_id}'"
+                        f"✅ ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
+                        f"tx_id='{best_match_tx_id}'"
                     )
                 else:
-                    logging.debug(
-                        f"⏳ Платіж ще очікується: user_id={user_id}, "
-                        f"payment_id='{payment_id}', sum={target_amount // 100} грн"
-                    )
+                    logging.debug(f"⏳ Платіж очікується: user_id={user_id}, {target_amount//100} грн")
 
         except Exception as e:
             logging.error(f"❌ Background checker error: {e}", exc_info=True)
             await asyncio.sleep(30)
 
-# ==========================
-# Middleware — автозбереження користувача ТІЛЬКИ В ПРИВАТІ
-# ==========================
-from aiogram import BaseMiddleware, types
-import logging
-
-class SaveUserMiddleware(BaseMiddleware):
-    async def __call__(self, handler, event, data):
-        if not isinstance(event, types.Message):
-            return await handler(event, data)
-
-        if not event.from_user:
-            return await handler(event, data)
-
-        # Тільки приватні чати
-        if event.chat.type != "private":
-            return await handler(event, data)
-
-        text = (event.text or "").strip()
-
-        # Список текстів, які НЕ потрібно фіксувати як дії
-        ignored_actions = {
-            "1 купон",
-            "2 купони",
-            "3 купони",
-            # за бажанням додай інші кнопки гри, які не хочеш бачити в історії
-            "▶️ Почати гру",
-            "ℹ️ Правила та комбінації",
-            "🔙 Повернутись до ігор",
-        }
-
-        # Якщо текст — це одна з ігнорованих кнопок → пропускаємо збереження дії
-        if text in ignored_actions:
-            return await handler(event, data)
-
-        # ────────────── тільки для дозволених повідомлень ──────────────
-        try:
-            # Формуємо короткий опис дії
-            if text:
-                if len(text) > 60:
-                    action = f"{text[:57]}..."
-                else:
-                    action = f"{text}"
-            elif event.photo:
-                action = "відправив фото"
-            elif event.sticker:
-                action = "відправив стікер"
-            elif event.voice:
-                action = "відправив голосове"
-            elif event.video:
-                action = "відправив відео"
-            else:
-                action = "виконав дію"
-
-            await save_user(
-                event.from_user.id,
-                event.from_user.username or "",
-                event.from_user.full_name or "",
-                action=action,
-            )
-        except Exception as e:
-            logging.error(f"Помилка збереження користувача: {e}")
-
-        return await handler(event, data)
-
-# Реєстрація залишається без змін
-dp.message.middleware(SaveUserMiddleware())
 
 # ==========================
-# Генерація промокоду (одна функція!)
+# ГЕНЕРАЦІЯ ПРОМОКОДУ
 # ==========================
 def generate_promocode(length: int = 8) -> str:
     chars = string.ascii_uppercase + string.digits
     return "".join(random.choices(chars, k=length))
 
+
 # ==========================
-# Команди
+# КОМАНДИ
 # ==========================
 @dp.message(Command("start"), F.chat.type == "private")
 async def cmd_start(message: types.Message):
@@ -351,11 +271,11 @@ async def cmd_start(message: types.Message):
         reply_markup=keyboard,
     )
 
+
 @dp.message(F.text == "🎁 Подарунок")
 async def gift_command(message: types.Message):
     user_id = message.from_user.id
-    claimed = await has_claimed_gift(user_id)
-    if claimed:
+    if await has_claimed_gift(user_id):
         await message.answer("🎁 Ви вже отримали свій подарунок!")
         return
 
@@ -371,33 +291,37 @@ async def gift_command(message: types.Message):
     keyboard = main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=True)
     await message.answer("Меню оновлено ⬇️", reply_markup=keyboard)
 
+
 # ==========================
-# Скинути подарунки (адмін)
+# СКИДАННЯ ПОДАРУНКІВ (АДМІН)
 # ==========================
 @dp.message(F.text == "🎁 Скинути подарунки")
 async def confirm_reset_gifts(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Тільки для адміністратора.")
         return
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Так, скинути", callback_data="confirm_reset_gifts"),
         InlineKeyboardButton(text="❌ Ні", callback_data="cancel_reset_gifts")
     ]])
-    await message.answer("⚠️ Скинути ВСІ подарунки?", reply_markup=keyboard, parse_mode="Markdown")
+    await message.answer("⚠️ Скинути ВСІ подарунки?", reply_markup=keyboard)
+
 
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
     await callback.message.edit_text("🔄 Скидаємо...")
     await reset_all_gifts()
-    # ... (твій код розсилки лишається без змін)
     await callback.message.edit_text("✅ Усі подарунки скинуто.")
+
 
 @dp.callback_query(F.data == "cancel_reset_gifts")
 async def cancel_reset_gifts(callback: types.CallbackQuery):
     await callback.message.edit_text("❌ Скасовано.")
 
+
 # ==========================
-# Команди для адміна
+# КОМАНДИ ТА МЕНЮ
 # ==========================
 async def set_commands():
     await bot.set_my_commands(
@@ -405,24 +329,22 @@ async def set_commands():
         scope=BotCommandScopeAllPrivateChats()
     )
     await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
-    await bot.set_my_commands(commands=[], scope=BotCommandScopeAllGroupChats())
 
     admin_commands = [
         BotCommand(command="safe", description="🔒 Показати Сейф"),
-        BotCommand(command="open", description="🔓 Відкрити клітинку /open 123"),
+        BotCommand(command="open", description="🔓 Відкрити клітинку"),
         BotCommand(command="bowling", description="🎳 Боулінг"),
         BotCommand(command="basketball", description="🏀 Баскетбол"),
         BotCommand(command="football", description="⚽ Футбол"),
         BotCommand(command="wordle", description="🎭 Вгадай слово"),
         BotCommand(command="numbers", description="🕵️‍♂️ Вгадай код"),
-        BotCommand(command="jackpot", description="💵💵💵"),
-        BotCommand(command="jackpot2", description="💵💵"),
-        BotCommand(command="jackpot5", description="💵💵💵💵💵"),
+        BotCommand(command="jackpot", description="💵 Jackpot"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
         scope=BotCommandScopeAllChatAdministrators()
     )
+
 
 # ==========================
 # ЗАПУСК
@@ -430,11 +352,11 @@ async def set_commands():
 async def main():
     await init_db()
     await set_commands()
+
     asyncio.create_task(background_payment_checker())
+    asyncio.create_task(run_api())
 
-    logging.info("🚀 Бот запущений!")
-
-    asyncio.create_task(run_api())      # ← API стартує тут
+    logging.info("🚀 Бот успішно запущений!")
     await dp.start_polling(bot)
 
 

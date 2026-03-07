@@ -17,8 +17,8 @@ from db import (
     save_notification,
     add_game_win,
 )
-from menu import main_menu
-from config import ADMIN_ID
+from handlers.menu import main_menu
+from handlers.config import ADMIN_ID
 
 router = Router()
 

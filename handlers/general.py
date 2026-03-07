@@ -5,9 +5,9 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.types import FSInputFile
-from menu import actions_menu, main_menu
+from handlers.menu import actions_menu, main_menu
 from db import has_claimed_gift
-import config
+import handlers.config as config
 from games import games_menu as imported_games_menu
 
 
@@ -34,11 +34,6 @@ async def send_casher(message: types.Message):
 @router.message(F.text == "🏅 Провайдери")
 async def send_providers(message: types.Message):
     await message.answer(f"{config.PROVAIDER}")
-
-
-# @router.message(F.text == "💳 Номер карти")
-# async def send_card(message: types.Message):
-#     await message.answer(config.CARD_NUMBER)
 
 
 @router.message(F.text == "💳 Номер карти")

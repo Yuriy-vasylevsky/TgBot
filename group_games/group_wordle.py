@@ -7,7 +7,7 @@ import logging
 import random
 from datetime import datetime
 
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 
 router = Router(name="group_wordle")
 

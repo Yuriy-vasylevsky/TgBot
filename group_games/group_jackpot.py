@@ -6,7 +6,7 @@ import logging
 import random
 import time
 
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 
 router = Router(name="group_jackpot")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))

@@ -6,7 +6,7 @@ import random
 import string
 from datetime import datetime, timedelta
 
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 from db import add_promocode
 
 router = Router(name="group_football")

@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import monobank
-from config import MONO_TOKEN, MONO_ACCOUNT
+from handlers.config import MONO_TOKEN, MONO_ACCOUNT
 
 from db import (
     get_balance,

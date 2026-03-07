@@ -7,7 +7,7 @@ from db import (
     has_claimed_gift,
     get_user_task_progress,
 )
-from menu import main_menu
+from handlers.menu import main_menu
 
 router = Router()
 logging.basicConfig(level=logging.INFO)

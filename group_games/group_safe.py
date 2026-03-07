@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from aiogram.types import Message
 import random
 import string
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 from db import get_safe_state, save_safe_state
 
 router = Router(name="group_safe")
@@ -55,84 +55,6 @@ async def show_safe(message: Message):
 # ==========================
 # АДМІН ВІДКРИВАЄ КЛІТИНКУ
 # ==========================
-# @router.message(Command("open"))
-# async def admin_open_cell(message: Message):
-#     if message.from_user.id != ADMIN_ID:
-#         return
-
-#     args = message.text.split()
-#     if len(args) < 2:
-#         await message.answer(
-#             "❌ Формат:\n"
-#             "<code>/open 123</code> — одна клітинка\n"
-#             "<code>/open 1-10</code> — діапазон\n"
-#             "<code>/open 1,5,9,12</code> — декілька",
-#             parse_mode="HTML"
-#         )
-#         return
-
-#     try:
-#         arg = args[1]
-#         if "," in arg:
-#             cells_to_open = [int(x.strip()) for x in arg.split(",")]
-#         elif "-" in arg:
-#             start, end = map(int, arg.split("-"))
-#             cells_to_open = list(range(start, end + 1))
-#         else:
-#             cells_to_open = [int(arg)]
-#     except:
-#         await message.answer(
-#             "❌ Формат:\n"
-#             "<code>/open 123</code> — одна клітинка\n"
-#             "<code>/open 1-10</code> — діапазон\n"
-#             "<code>/open 1,5,9,12</code> — декілька",
-#             parse_mode="HTML"
-#         )
-#         return
-
-#     if any(c < 1 or c > TOTAL_CELLS for c in cells_to_open):
-#         await message.answer(f"❌ Клітинки від 1 до {TOTAL_CELLS}")
-#         return
-
-#     if len(cells_to_open) > 50:
-#         await message.answer("❌ Максимум 50 клітинок за раз")
-#         return
-
-#     state = await load_state()
-#     opened = set(state["opened"])
-#     win_cell = state.get("win_cell", WIN_CELL)
-
-#     already_opened = [c for c in cells_to_open if c in opened]
-#     new_cells = [c for c in cells_to_open if c not in opened]
-
-#     if not new_cells:
-#         await message.answer("⚠️ Всі ці клітинки вже відкриті!")
-#         return
-
-#     opened.update(new_cells)
-#     await save_state(opened)
-
-#     if win_cell in new_cells:
-#         await message.bot.send_message(
-#             ADMIN_ID,
-#             f"🎉 <b>СЕЙФ ЗЛОМАНО!</b>\n\nКлітинка <b>{win_cell}</b> — ВИГРАШНА!",
-#             parse_mode="HTML",
-#         )
-#         await message.answer(
-#             f"🎉 <b>ВІТАЄМО! ВИ ВИГРАЛИ 2000 ГРН!</b> 🏆\n\n"
-#             f"🔓 Клітинка <b>{win_cell}</b> відкрила сейф!\n\n"
-#             f"💰 Ваш виграш: <b>2000 грн</b>",
-#             parse_mode="HTML",
-#         )
-#     else:
-#         skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
-#         await message.answer(
-#             f"❌ <b>Не вгадали!</b> ❌\n\n"
-#             f"Відкрито номер №: <b>{', '.join(map(str, sorted(new_cells)))}</b>"
-#             f"{skipped}",
-#             parse_mode="HTML",
-#         )
-
 
 @router.message(Command("open"))
 async def admin_open_cell(message: Message):

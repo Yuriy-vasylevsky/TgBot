@@ -10,8 +10,8 @@ from db import (
     mark_code_unused,
     has_claimed_gift,
 )
-from menu import main_menu
-from config import ADMIN_ID
+from handlers.menu import main_menu
+from handlers.config import ADMIN_ID
 
 router = Router()
 

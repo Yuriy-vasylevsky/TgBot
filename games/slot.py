@@ -20,8 +20,8 @@ from db import (
     has_claimed_gift,
     add_game_win,
 )
-from menu import main_menu
-from config import ADMIN_ID
+from handlers.menu import main_menu
+from handlers.config import ADMIN_ID
 from db import increment_games_played
 
 # після збереження результату сесії
@@ -52,7 +52,7 @@ def games_menu():
 
 from aiogram import types
 from datetime import datetime
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 
 
 async def notify_admin_slots(user: types.User, coupons: int, bot):

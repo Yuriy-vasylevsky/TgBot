@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, ContentType
 import logging
 
-from config import ADMIN_ID
+from handlers.config import ADMIN_ID
 
 router = Router(name="group_antispam")
 
