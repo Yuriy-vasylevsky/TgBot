@@ -54,6 +54,10 @@ from group_games.group_numbers import router as numbers_router
 from group_games.group_jackpot import router as jackpot_router
 from handlers.wallet import router as wallet_router
 from group_games.group_wordle import router as wordle_router
+from group_games.group_skarb import router as skarb_router
+from group_games.group_vote_prize import router as vote_router
+
+
 
 from handlers.stats import router as stats_router
 from handlers.general import router as general_router
@@ -97,6 +101,8 @@ bot = Bot(
 dp = Dispatcher()
 
 # Підключаємо роутери (тільки один раз!)
+dp.include_router(vote_router)
+dp.include_router(skarb_router)
 dp.include_router(jackpot_router)
 dp.include_router(wordle_router)
 dp.include_router(numbers_router)
@@ -163,86 +169,86 @@ async def run_api():
 # ==========================
 # ФОНОВА ПЕРЕВІРКА ПЛАТЕЖІВ MONOBANK
 # ==========================
-async def background_payment_checker():
-    """Фонова перевірка платежів Monobank кожні 90 секунд"""
-    while True:
-        await asyncio.sleep(90)
+# async def background_payment_checker():
+#     """Фонова перевірка платежів Monobank кожні 90 секунд"""
+#     while True:
+#         await asyncio.sleep(90)
 
-        try:
-            pendings = await get_pending_payments()
-            if not pendings:
-                continue
+#         try:
+#             pendings = await get_pending_payments()
+#             if not pendings:
+#                 continue
 
-            logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} платежів")
+#             logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} платежів")
 
-            client = monobank.Client(token=config.MONO_TOKEN)
-            from_date = datetime.now() - timedelta(days=7)
-            to_date = datetime.now()
+#             client = monobank.Client(token=config.MONO_TOKEN)
+#             from_date = datetime.now() - timedelta(days=7)
+#             to_date = datetime.now()
 
-            statements = client.get_statements(config.MONO_ACCOUNT, from_date, to_date)
-            logging.info(f"📥 Отримано {len(statements)} транзакцій")
+#             statements = client.get_statements(config.MONO_ACCOUNT, from_date, to_date)
+#             logging.info(f"📥 Отримано {len(statements)} транзакцій")
 
-            for p in pendings:
-                target_amount = p["amount_kop"]
-                user_id = p["user_id"]
-                payment_id = p["comment"]
+#             for p in pendings:
+#                 target_amount = p["amount_kop"]
+#                 user_id = p["user_id"]
+#                 payment_id = p["comment"]
 
-                try:
-                    payment_timestamp = int(payment_id.split(":")[1])
-                except Exception:
-                    payment_timestamp = int(time.time())
+#                 try:
+#                     payment_timestamp = int(payment_id.split(":")[1])
+#                 except Exception:
+#                     payment_timestamp = int(time.time())
 
-                time_window = 600
-                best_match = None
-                best_match_diff = float("inf")
-                best_match_tx_id = None
+#                 time_window = 600
+#                 best_match = None
+#                 best_match_diff = float("inf")
+#                 best_match_tx_id = None
 
-                for tx in statements:
-                    tx_amount = tx.get("amount", 0)
-                    tx_time = tx.get("time", 0)
-                    tx_id = tx.get("id", "")
-                    time_diff = abs(tx_time - payment_timestamp)
+#                 for tx in statements:
+#                     tx_amount = tx.get("amount", 0)
+#                     tx_time = tx.get("time", 0)
+#                     tx_id = tx.get("id", "")
+#                     time_diff = abs(tx_time - payment_timestamp)
 
-                    if await is_tx_used(tx_id):
-                        logging.debug(f"  ⏭️ TX вже використана: {tx_id}")
-                        continue
+#                     if await is_tx_used(tx_id):
+#                         logging.debug(f"  ⏭️ TX вже використана: {tx_id}")
+#                         continue
 
-                    if (tx_amount == target_amount and
-                        time_diff <= time_window and
-                        tx_amount > 0):
+#                     if (tx_amount == target_amount and
+#                         time_diff <= time_window and
+#                         tx_amount > 0):
 
-                        if time_diff < best_match_diff:
-                            best_match = tx
-                            best_match_diff = time_diff
-                            best_match_tx_id = tx_id
+#                         if time_diff < best_match_diff:
+#                             best_match = tx
+#                             best_match_diff = time_diff
+#                             best_match_tx_id = tx_id
 
-                if best_match:
-                    await mark_tx_used(best_match_tx_id, user_id, target_amount, payment_id)
+#                 if best_match:
+#                     await mark_tx_used(best_match_tx_id, user_id, target_amount, payment_id)
 
-                    amount_grn = target_amount // 100
-                    await add_to_balance(user_id, amount_grn)
-                    await remove_pending_payment(user_id)
+#                     amount_grn = target_amount // 100
+#                     await add_to_balance(user_id, amount_grn)
+#                     await remove_pending_payment(user_id)
 
-                    status = " (холд)" if best_match.get("hold", False) else ""
-                    try:
-                        await bot.send_message(
-                            user_id,
-                            f"✅ Автоматично зараховано {amount_grn} грн{status}!\n"
-                            f"Новий баланс: {await get_balance(user_id)} грн"
-                        )
-                    except Exception as send_err:
-                        logging.warning(f"Не вдалося надіслати повідомлення {user_id}: {send_err}")
+#                     status = " (холд)" if best_match.get("hold", False) else ""
+#                     try:
+#                         await bot.send_message(
+#                             user_id,
+#                             f"✅ Автоматично зараховано {amount_grn} грн{status}!\n"
+#                             f"Новий баланс: {await get_balance(user_id)} грн"
+#                         )
+#                     except Exception as send_err:
+#                         logging.warning(f"Не вдалося надіслати повідомлення {user_id}: {send_err}")
 
-                    logging.info(
-                        f"✅ ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
-                        f"tx_id='{best_match_tx_id}'"
-                    )
-                else:
-                    logging.debug(f"⏳ Платіж очікується: user_id={user_id}, {target_amount//100} грн")
+#                     logging.info(
+#                         f"✅ ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
+#                         f"tx_id='{best_match_tx_id}'"
+#                     )
+#                 else:
+#                     logging.debug(f"⏳ Платіж очікується: user_id={user_id}, {target_amount//100} грн")
 
-        except Exception as e:
-            logging.error(f"❌ Background checker error: {e}", exc_info=True)
-            await asyncio.sleep(30)
+#         except Exception as e:
+#             logging.error(f"❌ Background checker error: {e}", exc_info=True)
+#             await asyncio.sleep(30)
 
 
 # ==========================
@@ -338,7 +344,11 @@ async def set_commands():
         BotCommand(command="football", description="⚽ Футбол"),
         BotCommand(command="wordle", description="🎭 Вгадай слово"),
         BotCommand(command="numbers", description="🕵️‍♂️ Вгадай код"),
-        BotCommand(command="jackpot", description="💵 Jackpot"),
+        BotCommand(command="jackpot2", description="💵💵 Jackpot"),
+        BotCommand(command="jackpot", description="💵💵💵 Jackpot"),
+        BotCommand(command="jackpot5", description="💵💵💵💵💵 Jackpot"),
+        BotCommand(command="skarb", description="💎 Найди скарб"),
+        BotCommand(command="/vote_prize", description="Голосування"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
@@ -353,7 +363,7 @@ async def main():
     await init_db()
     await set_commands()
 
-    asyncio.create_task(background_payment_checker())
+    # asyncio.create_task(background_payment_checker())
     asyncio.create_task(run_api())
 
     logging.info("🚀 Бот успішно запущений!")
