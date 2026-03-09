@@ -56,6 +56,7 @@ from handlers.wallet import router as wallet_router
 from group_games.group_wordle import router as wordle_router
 from group_games.group_skarb import router as skarb_router
 from group_games.group_vote_prize import router as vote_router
+from group_games.group_minefield import router as minefield_router
 
 
 
@@ -101,6 +102,7 @@ bot = Bot(
 dp = Dispatcher()
 
 # Підключаємо роутери (тільки один раз!)
+dp.include_router(minefield_router)
 dp.include_router(vote_router)
 dp.include_router(skarb_router)
 dp.include_router(jackpot_router)
@@ -349,6 +351,7 @@ async def set_commands():
         BotCommand(command="jackpot5", description="💵💵💵💵💵 Jackpot"),
         BotCommand(command="skarb", description="💎 Найди скарб"),
         BotCommand(command="/vote_prize", description="Голосування"),
+        BotCommand(command="/minefield", description="Промо борьба"),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
