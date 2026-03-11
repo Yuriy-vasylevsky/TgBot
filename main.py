@@ -137,15 +137,18 @@ ADMIN_ID = config.ADMIN_ID
 # API ДЛЯ ВЕБ-АПУ СЕЙФА (порт 3000)
 # ==========================
 async def safe_api(request):
-    from group_games.group_safe import load_state
+    from group_games.group_safe import load_state   # ← тут твій оновлений load_state
+    
     state = await load_state()
 
     response = web.json_response({
         "opened": state.get("opened", []),
         "total": 250,
+        "win_cell": state.get("win_cell", 198),      # ← додано (корисно)
+        "users": state.get("users", {})              # ← САМЕ ГОЛОВНЕ для лідерборду!
     })
 
-    # CORS
+    # CORS (залишаємо як було)
     origin = request.headers.get("Origin", "*")
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -168,6 +171,7 @@ async def run_api():
     logging.info(f"🌐 Safe API запущено на порту {port}")
 
 
+    
 # ==========================
 # ФОНОВА ПЕРЕВІРКА ПЛАТЕЖІВ MONOBANK
 # ==========================
