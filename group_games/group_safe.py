@@ -32,8 +32,29 @@ async def load_state() -> dict:
     
     state.setdefault("opened", [])
     state.setdefault("win_cell", WIN_CELL)
-    state.setdefault("users", {})          # <-- НОВЕ
+    state.setdefault("users", {})          # ← вже було
     return state
+
+
+async def save_state(opened=None, win_cell=None, users=None):
+    """Оновлена версія — автоматично очищає лідерборд при повному скиданні сейфа"""
+    current = await load_state()
+    
+    new_opened = list(opened) if opened is not None else current["opened"]
+    new_win_cell = win_cell if win_cell is not None else current["win_cell"]
+    
+    # 🔥 ОСНОВНА ФІШКА: якщо сейф повністю очищається — скидаємо і users
+    if opened is not None and len(new_opened) == 0:
+        new_users = {}
+    else:
+        new_users = users if users is not None else current.get("users", {})
+
+    updated = {
+        "opened": new_opened,
+        "win_cell": new_win_cell,
+        "users": new_users,
+    }
+    await save_safe_state(updated)
 
 
 async def save_state(opened=None, win_cell=None, users=None):
