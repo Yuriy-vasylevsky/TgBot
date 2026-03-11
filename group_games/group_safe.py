@@ -14,17 +14,6 @@ WIN_CELL = 198
 TOTAL_CELLS = 250
 
 
-# async def load_state() -> dict:
-#     return await get_safe_state()
-
-
-# async def save_state(opened, win_cell=None):
-#     current = await get_safe_state()
-#     await save_safe_state({
-#         "opened": list(opened),
-#         "win_cell": win_cell if win_cell is not None else current.get("win_cell", WIN_CELL)
-#     })
-
 async def load_state() -> dict:
     state = await get_safe_state()
     if not state or not isinstance(state, dict):
@@ -53,17 +42,6 @@ async def save_state(opened=None, win_cell=None, users=None):
         "opened": new_opened,
         "win_cell": new_win_cell,
         "users": new_users,
-    }
-    await save_safe_state(updated)
-
-
-async def save_state(opened=None, win_cell=None, users=None):
-    """Оновлена версія — зберігає ВСІ поля (включаючи users)"""
-    current = await load_state()
-    updated = {
-        "opened": list(opened) if opened is not None else current["opened"],
-        "win_cell": win_cell if win_cell is not None else current["win_cell"],
-        "users": users if users is not None else current["users"],
     }
     await save_safe_state(updated)
 
