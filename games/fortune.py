@@ -28,7 +28,7 @@ PRIZES = [
     {"title": "500 грн", "value": 500, "emoji": "🏆"},
 ]
 
-WEIGHTS = [40, 30, 20, 8, 2]  # 500 грн тепер реально може випасти
+WEIGHTS = [40, 32, 20, 8, 0]  
 
 
 def fortune_keyboard(current_promo: int = 0) -> InlineKeyboardMarkup:

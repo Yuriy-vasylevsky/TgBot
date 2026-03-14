@@ -6,11 +6,39 @@ from datetime import datetime, timezone, timedelta
 import json
 import time
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
+# DATA_DIR = os.environ.get("DATA_DIR", "/data")
+# DB_PATH = Path(DATA_DIR) / "users.db"
+
+# logging.basicConfig(level=logging.INFO)
+# print(f"💾 Final DB path: {DB_PATH}")
+
+
+
+from pathlib import Path
+import os
+
+# Визначення DATA_DIR з розумним fallback
+if os.getenv("RAILWAY_ENVIRONMENT"):  # або RAILWAY_GIT_COMMIT_SHA, RAILWAY_VOLUME_NAME тощо — будь-яка Railway-специфічна змінна
+    DATA_DIR = "/data"  # Volume на Railway монтується сюди
+else:
+    # Локально — використовуємо теку "data" в корені проєкту (створимо автоматично)
+    DATA_DIR = "data"
+
+# Повний шлях до бази
 DB_PATH = Path(DATA_DIR) / "users.db"
+
+# Створюємо теку автоматично (працює і локально, і на Railway)
+Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
+
+# Додай це для дебагу (можна видалити після тестів)
+print(f"Поточна робоча директорія: {Path.cwd()}")
+print(f"DATA_DIR: {DATA_DIR}")
+print(f"Final DB path (resolved): {DB_PATH.resolve()}")
+print(f"Тека існує і доступна для запису? {Path(DATA_DIR).exists() and os.access(Path(DATA_DIR), os.W_OK)}")
 
 logging.basicConfig(level=logging.INFO)
 print(f"💾 Final DB path: {DB_PATH}")
+
 
 # ===================== ІНІЦІАЛІЗАЦІЯ =====================
 async def ensure_users_table_and_columns():
