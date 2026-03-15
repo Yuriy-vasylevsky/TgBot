@@ -3,6 +3,7 @@ from .one_of_three import router as one_of_three_router
 from .rewards import router as rewards_router
 from .blackjack import router as blackjack_router
 from .fortune import router as fortune_router
+from .simple_win import router as simple_win_router
 # from .daily_bonus import router as daily_bonus_router
 # dp.include_router(blackjack_router)
 

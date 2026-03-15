@@ -12,11 +12,6 @@ import time
 # logging.basicConfig(level=logging.INFO)
 # print(f"💾 Final DB path: {DB_PATH}")
 
-
-
-from pathlib import Path
-import os
-
 # Визначення DATA_DIR з розумним fallback
 if os.getenv("RAILWAY_ENVIRONMENT"):  # або RAILWAY_GIT_COMMIT_SHA, RAILWAY_VOLUME_NAME тощо — будь-яка Railway-специфічна змінна
     DATA_DIR = "/data"  # Volume на Railway монтується сюди
@@ -56,6 +51,7 @@ async def ensure_users_table_and_columns():
             last_daily_bonus_date TEXT,
             last_fortune_date TEXT,
             balance INTEGER DEFAULT 0
+            
         )""")
 
         async with db.execute("PRAGMA table_info(users)") as cur:
@@ -64,7 +60,8 @@ async def ensure_users_table_and_columns():
         for col, sql in [
             ("last_daily_bonus_date", "ALTER TABLE users ADD COLUMN last_daily_bonus_date TEXT"),
             ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
-            ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
+            ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0"),
+            ("promo_cooldown_until", "ALTER TABLE users ADD COLUMN promo_cooldown_until TEXT"),
         ]:
             if col not in cols:
                 await db.execute(sql)
@@ -134,7 +131,7 @@ async def init_db():
             if (await cur.fetchone())[0] == 0:
                 await db.executemany(
                     "INSERT INTO cards (bank_name, card_number) VALUES (?, ?)",
-                    [("Приват", "5457 0825 1854 3470"), ("Ощад", "4790 7299 2105 9994")]
+                    [("Карта 1", ""), ("Карта 2", "")]
                 )
                 print("✅ Default cards added")
 

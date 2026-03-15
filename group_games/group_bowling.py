@@ -1,13 +1,14 @@
-
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ContentType
 import logging
+from datetime import datetime, timedelta, timezone
 import random
-from datetime import datetime, timedelta
+import string
 
 from handlers.config import ADMIN_ID
+from db import DB_PATH, add_promocode
+import aiosqlite
 
 router = Router(name="group_bowling")
 
@@ -20,8 +21,68 @@ active_bowling_games = {}
 # chat_id → список message_id, які можна видалити після завершення гри
 bowling_messages = {}
 
-# Коoldown: user_id → час останньої перемоги
-bowling_winner_cooldown = {}
+KYIV_TZ = timezone(timedelta(hours=3))
+
+
+async def is_promo_on_cooldown(user_id: int) -> bool:
+    """Перевіряє, чи користувач ще на кулдауні"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return False
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+            return now < cooldown_until
+
+
+async def get_promo_cooldown_remaining(user_id: int) -> tuple[int, int] | None:
+    """Повертає (години, хвилини), що залишилось, або None якщо кулдаун минув"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return None
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+
+            if now >= cooldown_until:
+                return None
+
+            delta = cooldown_until - now
+            hours = int(delta.total_seconds() // 3600)
+            minutes = int((delta.total_seconds() % 3600) // 60)
+            return hours, minutes
+
+
+async def set_promo_cooldown(user_id: int, hours: int = 12):
+    """Встановлює кулдаун на N годин від поточного моменту"""
+    future = datetime.now(KYIV_TZ) + timedelta(hours=hours)
+    future_str = future.isoformat(timespec="seconds")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users 
+            SET promo_cooldown_until = ? 
+            WHERE user_id = ?
+            """,
+            (future_str, user_id)
+        )
+        await db.commit()
+
+
+def generate_promocode(length: int = 8) -> str:
+    characters = string.ascii_uppercase + string.digits
+    return "".join(random.choices(characters, k=length))
 
 
 # ==========================
@@ -47,7 +108,7 @@ async def start_bowling(message: Message):
     start_msg = await message.answer(
         "🎳 <b>БОУЛІНГ СТАРТУВАВ!</b> 🎳\n\n"
     
-        "🏆 <b>Перший, хто виб’є ДВА СТРАЙКИ</b> — Переможець!\n",
+         "🏆 Приз —  🎟️ промокод!\n\n",
         parse_mode="HTML"
     )
     bowling_messages[chat_id].append(start_msg.message_id)  # 0 — стартове, захищене
@@ -97,33 +158,59 @@ async def handle_bowling_dice(message: Message):
 
     if strikes >= 2:
         # Перевірка кулдауну
-        if user_id in bowling_winner_cooldown:
-            time_passed = datetime.now() - bowling_winner_cooldown[user_id]
-            if time_passed < timedelta(hours=12):
-                minutes_left = 720 - int(time_passed.total_seconds() // 60)
-                hours_left = minutes_left // 60
-                mins_left = minutes_left % 60
-
+        if await is_promo_on_cooldown(user_id):
+            remaining = await get_promo_cooldown_remaining(user_id)
+            if remaining:
+                h, m = remaining
                 cd_msg = await message.answer(
                     f"{user.mention_html()}, дай шанс іншим гравцям!\n"
-                    f"⏳ <b>{hours_left} год {mins_left} хв</b> ⏳",
+                    f"⏳ <b>{h} год {m} хв</b> ⏳",
                     parse_mode="HTML"
                 )
                 bowling_messages[chat_id].append(cd_msg.message_id)
+                return  # Гра продовжується, без очищення та завершення
 
-                # Очищаємо все крім стартового та цього повідомлення
-                await cleanup_bowling_chat(chat_id, message.bot, protected_extra=cd_msg.message_id)
-                del active_bowling_games[chat_id]
-                return
+        # Промокод
+        promo = generate_promocode()
+        await add_promocode(promo)
 
-        # Перемога!
-        bowling_winner_cooldown[user_id] = datetime.now()
+        # Встановлюємо кулдаун
+        await set_promo_cooldown(user_id, hours=12)
 
-        win_msg = await message.answer(
-            f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
-            f"{user.mention_html()} вибив <b>ДВА СТРАЙКИ</b>!\n",
-            parse_mode="HTML"
-        )
+        # Надсилання в приват + fallback
+        sent_to_private = False
+        try:
+            await message.bot.send_message(
+                chat_id=user_id,
+                text=(
+                    f"🎉 <b>Вітаємо з перемогою в Боулінгу!</b>\n\n"
+                    f"Твій приз:\n"
+                    f"<code>{promo}</code>\n\n"
+                    "Використовуй його в боті 👇\n"
+             
+                ),
+                parse_mode="HTML"
+            )
+            sent_to_private = True
+        except Exception as e:
+            logging.warning(f"Не вдалося надіслати промокод гравцю {user_id}: {e}")
+
+        # Повідомлення про перемогу
+        if sent_to_private:
+            win_text = (
+                f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
+                f"{user.mention_html()} вибив <b>ДВА СТРАЙКИ</b>!\n\n"
+                f"🎳 🎳"
+            )
+        else:
+            win_text = (
+                f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
+                f"{user.mention_html()} вибив <b>ДВА СТРАЙКИ</b>!\n\n"
+                f"Вам потрібно активувати бота\n\n"
+     
+            )
+
+        win_msg = await message.answer(win_text, parse_mode="HTML")
         bowling_messages[chat_id].append(win_msg.message_id)
 
         # Очищаємо чат — залишаємо тільки стартове + повідомлення про перемогу

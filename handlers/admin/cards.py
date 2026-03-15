@@ -27,7 +27,7 @@ async def manage_cards(message: types.Message, state: FSMContext):
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Приват"), KeyboardButton(text="Ощад")],
+            [KeyboardButton(text="Карта 1"), KeyboardButton(text="Карта 2")],
             [KeyboardButton(text="❌ Відмінити")],
         ],
         resize_keyboard=True,

@@ -1,13 +1,15 @@
+
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, ContentType
 import logging
 import random
 import string
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from handlers.config import ADMIN_ID
-from db import add_promocode
+from db import add_promocode, DB_PATH
+import aiosqlite
 
 router = Router(name="group_football")
 
@@ -20,8 +22,63 @@ active_football_games = {}
 # chat_id → список message_id, які можна видалити після закінчення гри
 football_messages = {}
 
-# Коoldown: user_id → час останньої перемоги
-winner_cooldown = {}
+KYIV_TZ = timezone(timedelta(hours=3))
+
+
+async def is_promo_on_cooldown(user_id: int) -> bool:
+    """Перевіряє, чи користувач ще на кулдауні промо"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return False
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+            return now < cooldown_until
+
+
+async def get_promo_cooldown_remaining(user_id: int) -> tuple[int, int] | None:
+    """Повертає (години, хвилини), що залишилось, або None якщо кулдаун минув"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return None
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+
+            if now >= cooldown_until:
+                return None
+
+            delta = cooldown_until - now
+            hours = int(delta.total_seconds() // 3600)
+            minutes = int((delta.total_seconds() % 3600) // 60)
+            return hours, minutes
+
+
+async def set_promo_cooldown(user_id: int, hours: int = 12):
+    """Встановлює кулдаун на N годин від поточного моменту"""
+    future = datetime.now(KYIV_TZ) + timedelta(hours=hours)
+    future_str = future.isoformat(timespec="seconds")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users 
+            SET promo_cooldown_until = ? 
+            WHERE user_id = ?
+            """,
+            (future_str, user_id)
+        )
+        await db.commit()
 
 
 def generate_promocode(length: int = 8) -> str:
@@ -99,16 +156,14 @@ async def handle_football_dice(message: Message):
     goals = game[user_id]
 
     if goals >= 5:
-        # Кулдаун
-        if user_id in winner_cooldown:
-            time_passed = datetime.now() - winner_cooldown[user_id]
-            if time_passed < timedelta(hours=12):
-                minutes_left = 720 - int(time_passed.total_seconds() // 60)
-                hours_left = minutes_left // 60
-                mins_left = minutes_left % 60
+        # Перевірка кулдауну
+        if await is_promo_on_cooldown(user_id):
+            remaining = await get_promo_cooldown_remaining(user_id)
+            if remaining:
+                h, m = remaining
                 cd_msg = await message.answer(
-                    f"{user.mention_html()}, ти вже виграв!\n"
-                    f"⏳ <b>{hours_left} год {mins_left} хв</b> ⏳",
+                    f"{user.mention_html()}, ти вже виграв промокод!\n"
+                    f"⏳ Наступний можна отримати через <b>{h} год {m} хв</b> ⏳",
                     parse_mode="HTML"
                 )
                 football_messages[chat_id].append(cd_msg.message_id)
@@ -117,7 +172,9 @@ async def handle_football_dice(message: Message):
         # Промокод
         promo = generate_promocode()
         await add_promocode(promo)
-        winner_cooldown[user_id] = datetime.now()
+
+        # Встановлюємо кулдаун
+        await set_promo_cooldown(user_id, hours=12)
 
         # Надсилання в приват + fallback
         sent_to_private = False

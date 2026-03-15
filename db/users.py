@@ -201,3 +201,66 @@ async def add_or_update_user(user_id: int, username: str, full_name: str):
             (user_id, username, full_name)
         )
         await db.commit()
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++
+
+from datetime import datetime, timedelta, timezone
+
+
+KYIV_TZ = timezone(timedelta(hours=3))
+
+
+async def is_promo_on_cooldown(user_id: int) -> bool:
+    """Перевіряє, чи користувач ще на кулдауні промо"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return False
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+            return now < cooldown_until
+
+
+async def get_promo_cooldown_remaining(user_id: int) -> tuple[int, int] | None:
+    """Повертає (години, хвилини), що залишилось, або None якщо кулдаун минув"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT promo_cooldown_until FROM users WHERE user_id = ?",
+            (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            if not row or not row[0]:
+                return None
+
+            cooldown_until = datetime.fromisoformat(row[0])
+            now = datetime.now(KYIV_TZ)
+
+            if now >= cooldown_until:
+                return None
+
+            delta = cooldown_until - now
+            hours = int(delta.total_seconds() // 3600)
+            minutes = int((delta.total_seconds() % 3600) // 60)
+            return hours, minutes
+
+
+async def set_promo_cooldown(user_id: int, hours: int = 12):
+    """Встановлює кулдаун на N годин від поточного моменту"""
+    future = datetime.now(KYIV_TZ) + timedelta(hours=hours)
+    future_str = future.isoformat(timespec="seconds")
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE users 
+            SET promo_cooldown_until = ? 
+            WHERE user_id = ?
+            """,
+            (future_str, user_id)
+        )
+        await db.commit()

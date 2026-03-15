@@ -1,13 +1,18 @@
+
+
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
 from db import get_all_users_info
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
+from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining  # Імпортуємо функції кулдауну (або з іншого файлу, де вони є)
+import aiosqlite
+from db import DB_PATH
 
 router = Router(name="admin_users")
 
-USERS_PER_PAGE = 8
+USERS_PER_PAGE = 10
 MAX_ACTIONS_TO_SHOW = 20
 
 
@@ -137,6 +142,16 @@ async def paginate_users_list(callback: types.CallbackQuery):
     await show_users_list(callback, page=page)
 
 
+async def reset_promo_cooldown(user_id: int):
+    """Скидає кулдаун промокоду для користувача"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET promo_cooldown_until = NULL WHERE user_id = ?",
+            (user_id,)
+        )
+        await db.commit()
+
+
 @router.callback_query(F.data.startswith("user_detail:"))
 async def show_user_detail(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -172,20 +187,30 @@ async def show_user_detail(callback: types.CallbackQuery):
     actions_show = actions_list[-MAX_ACTIONS_TO_SHOW:]
     actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
 
+    # Статус кулдауну
+    cooldown_text = "❌ Немає кулдауну"
+    if await is_promo_on_cooldown(user_id):
+        remaining = await get_promo_cooldown_remaining(user_id)
+        if remaining:
+            h, m = remaining
+            cooldown_text = f"⏳ Кулдаун: {h} год {m} хв"
+
     text = (
         f"👤 <b>{full_name}</b>\n"
         f"{'@' if username != '—' else ''}{username}\n\n"
         f"🆔 <code>{user_id}</code>\n"
-        f"📅 Реєстрація: {reg_date}\n"
-        f"🕒 Остання активність: {last_active}\n\n"
-        f"🎮 Зіграно: <b>{games_played}</b>\n"
-        f"🏆 Виграно: <b>{games_won}</b>  ({winrate}%)\n\n"
+        # f"📅 Реєстрація: {reg_date}\n"
+        f"🕒 Активність: {last_active}\n\n"
+        f"🎮 Зібрано промо: <b>{games_played}</b>\n"
+        # f"🏆 Виграно: <b>{games_won}</b>  ({winrate}%)\n\n"
+        f"{cooldown_text}\n\n"
         f"<b>Останні дії (до {MAX_ACTIONS_TO_SHOW}):</b>\n"
         f"{actions_text}\n"
     )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
+    kb.button(text="🔄 Скинути кулдаун", callback_data=f"reset_cooldown:{user_id}:{from_page}")
 
     try:
         await callback.message.edit_text(
@@ -198,3 +223,24 @@ async def show_user_detail(callback: types.CallbackQuery):
         await callback.message.answer(text, parse_mode="HTML")
 
     await callback.answer()
+
+
+@router.callback_query(F.data.startswith("reset_cooldown:"))
+async def handle_reset_cooldown(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    await reset_promo_cooldown(user_id)
+    await callback.answer("✅ Кулдаун скинуто!", show_alert=True)
+
+    # Оновлюємо деталі користувача
+    await show_user_detail(callback)

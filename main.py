@@ -71,6 +71,7 @@ from games import (
     rewards_router,
     blackjack_router,
     fortune_router,
+    simple_win_router
 )
 
 from handlers.menu import main_menu
@@ -125,7 +126,7 @@ dp.include_router(one_of_three_router)
 dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
-
+dp.include_router(simple_win_router)
 # Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
@@ -169,92 +170,6 @@ async def run_api():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     logging.info(f"🌐 Safe API запущено на порту {port}")
-
-
-    
-# ==========================
-# ФОНОВА ПЕРЕВІРКА ПЛАТЕЖІВ MONOBANK
-# ==========================
-# async def background_payment_checker():
-#     """Фонова перевірка платежів Monobank кожні 90 секунд"""
-#     while True:
-#         await asyncio.sleep(90)
-
-#         try:
-#             pendings = await get_pending_payments()
-#             if not pendings:
-#                 continue
-
-#             logging.info(f"🔄 Фонова перевірка: знайдено {len(pendings)} платежів")
-
-#             client = monobank.Client(token=config.MONO_TOKEN)
-#             from_date = datetime.now() - timedelta(days=7)
-#             to_date = datetime.now()
-
-#             statements = client.get_statements(config.MONO_ACCOUNT, from_date, to_date)
-#             logging.info(f"📥 Отримано {len(statements)} транзакцій")
-
-#             for p in pendings:
-#                 target_amount = p["amount_kop"]
-#                 user_id = p["user_id"]
-#                 payment_id = p["comment"]
-
-#                 try:
-#                     payment_timestamp = int(payment_id.split(":")[1])
-#                 except Exception:
-#                     payment_timestamp = int(time.time())
-
-#                 time_window = 600
-#                 best_match = None
-#                 best_match_diff = float("inf")
-#                 best_match_tx_id = None
-
-#                 for tx in statements:
-#                     tx_amount = tx.get("amount", 0)
-#                     tx_time = tx.get("time", 0)
-#                     tx_id = tx.get("id", "")
-#                     time_diff = abs(tx_time - payment_timestamp)
-
-#                     if await is_tx_used(tx_id):
-#                         logging.debug(f"  ⏭️ TX вже використана: {tx_id}")
-#                         continue
-
-#                     if (tx_amount == target_amount and
-#                         time_diff <= time_window and
-#                         tx_amount > 0):
-
-#                         if time_diff < best_match_diff:
-#                             best_match = tx
-#                             best_match_diff = time_diff
-#                             best_match_tx_id = tx_id
-
-#                 if best_match:
-#                     await mark_tx_used(best_match_tx_id, user_id, target_amount, payment_id)
-
-#                     amount_grn = target_amount // 100
-#                     await add_to_balance(user_id, amount_grn)
-#                     await remove_pending_payment(user_id)
-
-#                     status = " (холд)" if best_match.get("hold", False) else ""
-#                     try:
-#                         await bot.send_message(
-#                             user_id,
-#                             f"✅ Автоматично зараховано {amount_grn} грн{status}!\n"
-#                             f"Новий баланс: {await get_balance(user_id)} грн"
-#                         )
-#                     except Exception as send_err:
-#                         logging.warning(f"Не вдалося надіслати повідомлення {user_id}: {send_err}")
-
-#                     logging.info(
-#                         f"✅ ЗАРАХУВАННЯ: user_id={user_id}, {amount_grn} грн, "
-#                         f"tx_id='{best_match_tx_id}'"
-#                     )
-#                 else:
-#                     logging.debug(f"⏳ Платіж очікується: user_id={user_id}, {target_amount//100} грн")
-
-#         except Exception as e:
-#             logging.error(f"❌ Background checker error: {e}", exc_info=True)
-#             await asyncio.sleep(30)
 
 
 # ==========================
