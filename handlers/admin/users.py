@@ -1,5 +1,4 @@
 
-
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
@@ -210,7 +209,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     kb = InlineKeyboardBuilder()
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
-    kb.button(text="🔄 Скинути кулдаун", callback_data=f"reset_cooldown:{user_id}:{from_page}")
+    kb.button(text="🔄 Скинути кулдаун", callback_data=f"ask_reset:{user_id}:{from_page}")
 
     try:
         await callback.message.edit_text(
@@ -225,8 +224,40 @@ async def show_user_detail(callback: types.CallbackQuery):
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("reset_cooldown:"))
-async def handle_reset_cooldown(callback: types.CallbackQuery):
+@router.callback_query(F.data.startswith("ask_reset:"))
+async def ask_reset_cooldown(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    text = "Ви впевнені, що хочете скинути кулдаун для цього користувача?"
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Так, скинути", callback_data=f"do_reset:{user_id}:{from_page}")
+    kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}")
+
+    try:
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.as_markup(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        await callback.message.answer(text)
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("do_reset:"))
+async def do_reset_cooldown(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("Тільки для адміна", show_alert=True)
         return
@@ -243,4 +274,4 @@ async def handle_reset_cooldown(callback: types.CallbackQuery):
     await callback.answer("✅ Кулдаун скинуто!", show_alert=True)
 
     # Оновлюємо деталі користувача
-    await show_user_detail(callback)
+    await show_user_detail(callback) 
