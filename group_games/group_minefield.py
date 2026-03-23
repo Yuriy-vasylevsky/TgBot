@@ -18,17 +18,23 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # ==========================
 FIELD_SIZE = 7
 
-MONEY_CELLS_COUNT = 23
-MONEY_PER_CELL = 10
+MONEY_CELLS_COUNT = 18
+MONEY_PER_CELL = 15
 
-HEART_CELLS_COUNT = 2
-MINES_COUNT = 12
-STEAL_COUNT = 12
+DIAMOND_CELLS_COUNT = 5
+DIAMOND_PER_CELL = 25
+
+WIN_MONEY = 70          # Перший хто набрав — переможець
+
+HEART_CELLS_COUNT = 3
+MINES_COUNT = 14
+STEAL_COUNT = 9
 
 START_LIVES = 2
 MAX_PLAYERS = 3
 
 COOLDOWN_SECONDS = 5
+TURN_TIMEOUT = 10        # секунд на хід, потім хід передається далі
 
 # Телеграм дозволяє ~1 edit/сек на одне повідомлення і ~30 msg/сек на чат
 API_CALL_INTERVAL = 1.2   # мін. пауза між API-запитами для одного чату
@@ -38,6 +44,7 @@ WINNER_COOLDOWN_HOURS = 12
 # ==========================
 
 EMOJI_MONEY   = "💰"
+EMOJI_DIAMOND = "💎"
 EMOJI_HEART   = "❤️"
 EMOJI_MINE    = "💣"
 EMOJI_STEAL   = "🕵️"
@@ -60,33 +67,44 @@ def _get_api_lock(chat_id: int) -> asyncio.Lock:
     return _api_locks[chat_id]
 
 
-async def rate_limited_call(chat_id: int, coro):
-    """Виконує корутину з паузою API_CALL_INTERVAL між запитами до одного чату."""
+async def rate_limited_call(chat_id: int, factory):
+    """
+    Виконує API-запит з паузою API_CALL_INTERVAL між запитами до одного чату.
+    factory — callable без аргументів що повертає нову корутину (lambda або functools.partial).
+    Це дозволяє безпечно робити retry після TelegramRetryAfter.
+
+    Приклад: rate_limited_call(chat_id, lambda: msg.edit_text("hi"))
+    """
     async with _get_api_lock(chat_id):
         since = time.monotonic() - _last_api_call.get(chat_id, 0)
         if since < API_CALL_INTERVAL:
             await asyncio.sleep(API_CALL_INTERVAL - since)
-        try:
-            result = await coro
-            _last_api_call[chat_id] = time.monotonic()
-            return result
-        except TelegramRetryAfter as e:
-            wait = e.retry_after + 1.0
-            logging.warning(f"[{chat_id}] Flood control — чекаємо {wait:.1f}с")
-            await asyncio.sleep(wait)
-            _last_api_call[chat_id] = time.monotonic()
+
+        for attempt in range(2):
             try:
-                return await coro
-            except Exception as ex:
-                logging.error(f"[{chat_id}] Повтор після flood провалився: {ex}")
-        except TelegramForbiddenError as e:
-            logging.error(f"[{chat_id}] Forbidden: {e}")
-            active_minefields.pop(chat_id, None)
-        except TelegramBadRequest as e:
-            if "message is not modified" not in str(e).lower():
-                logging.warning(f"[{chat_id}] BadRequest: {e}")
-        except Exception as e:
-            logging.error(f"[{chat_id}] rate_limited_call: {e}")
+                result = await factory()
+                _last_api_call[chat_id] = time.monotonic()
+                return result
+            except TelegramRetryAfter as e:
+                if attempt == 0:
+                    wait = e.retry_after + 1.0
+                    logging.warning(f"[{chat_id}] Flood control — чекаємо {wait:.1f}с")
+                    await asyncio.sleep(wait)
+                    _last_api_call[chat_id] = time.monotonic()
+                else:
+                    logging.error(f"[{chat_id}] Повторний flood — пропускаємо")
+                    return
+            except TelegramForbiddenError as e:
+                logging.error(f"[{chat_id}] Forbidden: {e}")
+                active_minefields.pop(chat_id, None)
+                return
+            except TelegramBadRequest as e:
+                if "message is not modified" not in str(e).lower():
+                    logging.warning(f"[{chat_id}] BadRequest: {e}")
+                return
+            except Exception as e:
+                logging.error(f"[{chat_id}] rate_limited_call: {e}")
+                return
 
 
 # ==========================
@@ -100,17 +118,21 @@ def generate_field():
     board = [["EMPTY"] * FIELD_SIZE for _ in range(FIELD_SIZE)]
     positions = [(i, j) for i in range(FIELD_SIZE) for j in range(FIELD_SIZE)]
     random.shuffle(positions)
-    for kind, count in [("MONEY", MONEY_CELLS_COUNT), ("HEART", HEART_CELLS_COUNT),
+    for kind, count in [("MONEY", MONEY_CELLS_COUNT), ("DIAMOND", DIAMOND_CELLS_COUNT),
+                        ("HEART", HEART_CELLS_COUNT),
                         ("MINE", MINES_COUNT), ("STEAL", STEAL_COUNT)]:
         for _ in range(count):
+            if not positions:
+                logging.warning(f"generate_field: закінчились позиції при розміщенні {kind}")
+                break
             x, y = positions.pop()
             board[x][y] = kind
     return board
 
 
 def build_field_keyboard(game) -> InlineKeyboardMarkup:
-    cell_emoji = {"MONEY": EMOJI_MONEY, "HEART": EMOJI_HEART,
-                  "STEAL": EMOJI_STEAL, "MINE": EMOJI_MINE}
+    cell_emoji = {"MONEY": EMOJI_MONEY, "DIAMOND": EMOJI_DIAMOND,
+                  "HEART": EMOJI_HEART, "STEAL": EMOJI_STEAL, "MINE": EMOJI_MINE}
     kb = []
     for i in range(FIELD_SIZE):
         row = []
@@ -125,7 +147,7 @@ def build_main_text(game) -> str:
     """Тільки стати гравців. Без стрілки і лічильника — менше зайвих edit."""
     lines = ["<b>💣 МІННЕ ПОЛЕ 💣</b>\n", EMOJI_PLAYERS]
     for p in game["players"].values():
-        status = f"{EMOJI_MONEY}{p['money']}  {EMOJI_HEART}{p['lives']}" if p["alive"] else EMOJI_DEAD
+        status = f"{EMOJI_MONEY}{p['money']}/{WIN_MONEY}  {EMOJI_HEART}{p['lives']}" if p["alive"] else EMOJI_DEAD
         lines.append(f"• {p['name']} {status}")
     return "\n".join(lines)
 
@@ -170,7 +192,7 @@ async def update_display(chat_id: int):
                 return
             await rate_limited_call(
                 chat_id,
-                g["message"].edit_text(
+                lambda: g["message"].edit_text(
                     build_main_text(g),
                     reply_markup=build_field_keyboard(g),
                     parse_mode="HTML"
@@ -200,20 +222,56 @@ async def update_log(chat_id: int, action: str):
     game["log_action"] = action
     await rate_limited_call(
         chat_id,
-        log_msg.edit_text(build_log_text(game), parse_mode="HTML")
+        lambda: log_msg.edit_text(build_log_text(game), parse_mode="HTML")
     )
 
 
 # ==========================
 # ЛОГІКА ХОДІВ
 # ==========================
+def _cancel_turn_task(game: dict):
+    """Скасовує попередній таймер ходу, якщо є."""
+    task = game.get("turn_task")
+    if task and not task.done():
+        task.cancel()
+    game["turn_task"] = None
+
+
+def schedule_turn_timeout(chat_id: int):
+    """Запускає таймер: якщо гравець не ходить TURN_TIMEOUT секунд — хід передається."""
+    game = active_minefields.get(chat_id)
+    if not game:
+        return
+    _cancel_turn_task(game)
+
+    async def _timeout():
+        try:
+            await asyncio.sleep(TURN_TIMEOUT)
+            g = active_minefields.get(chat_id)
+            if not g or g["phase"] != "playing":
+                return
+            # Якщо гравець очікує вибору (міна/крадіжка) — не пропускаємо
+            cur = g.get("current_player")
+            if cur and g["awaiting_choice"].get(cur):
+                return
+            skipped_name = g["players"].get(cur, {}).get("name", "?")
+            g["log_action"] = f"⏩ <b>{skipped_name}</b> не встиг — хід пропущено!"
+            await next_turn(chat_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logging.warning(f"turn_timeout: {e}")
+
+    game["turn_task"] = asyncio.create_task(_timeout())
+
+
 async def next_turn(chat_id: int):
     game = active_minefields.get(chat_id)
     if not game or game["phase"] != "playing":
         return
 
     alive = [uid for uid, p in game["players"].items() if p["alive"]]
-    if not alive or game["collected_money"] >= game["total_money"]:
+    if not alive:
         await finish_minefield(chat_id)
         return
 
@@ -229,8 +287,9 @@ async def next_turn(chat_id: int):
     if g and g.get("log_message"):
         await rate_limited_call(
             chat_id,
-            g["log_message"].edit_text(build_log_text(g), parse_mode="HTML")
+            lambda: g["log_message"].edit_text(build_log_text(g), parse_mode="HTML")
         )
+    schedule_turn_timeout(chat_id)
 
 
 async def check_and_finish(chat_id: int) -> bool:
@@ -238,7 +297,8 @@ async def check_and_finish(chat_id: int) -> bool:
     if not game or game["phase"] != "playing":
         return True
     alive = [p for p in game["players"].values() if p["alive"]]
-    if len(alive) <= 1 or game["collected_money"] >= game["total_money"]:
+    winner_by_money = any(p["money"] >= WIN_MONEY for p in game["players"].values())
+    if len(alive) <= 1 or winner_by_money:
         await finish_minefield(chat_id)
         return True
     return False
@@ -268,10 +328,11 @@ async def start_minefield(message: Message):
         ])
         msg = await message.answer(
             f"<b>💣 МІННЕ ПОЛЕ 💣</b>\n\n"
-            f"💰 Клітинка = <b>{MONEY_PER_CELL} грн</b>\n"
-            f"{EMOJI_HEART} Знаходь життя\n"
-            f"{EMOJI_STEAL} Кради гроші\n"
-            f"{EMOJI_MINE} Міни — вибір кого вибути\n\n"
+            f"💰 Клітинка = <b>{MONEY_PER_CELL} грн</b>  💎 Алмаз = <b>{DIAMOND_PER_CELL} грн</b>\n"
+            f"🏆 Перший хто набрав <b>{WIN_MONEY} грн</b> — переможець!\n"
+            # f"{EMOJI_HEART} Знаходь життя\n"
+            # f"{EMOJI_STEAL} Кради гроші\n"
+            # f"{EMOJI_MINE} Міни — вибір кого вибути\n\n"
             f"👥 Максимум <b>{MAX_PLAYERS} гравці</b>\nПриєднуйтесь!",
             reply_markup=kb, parse_mode="HTML"
         )
@@ -282,8 +343,7 @@ async def start_minefield(message: Message):
             "players": {},
             "board": None,
             "revealed": None,
-            "total_money": MONEY_CELLS_COUNT * MONEY_PER_CELL,
-            "collected_money": 0,
+
             "cooldowns": {},
             "queue": [],
             "current_turn": 0,
@@ -293,6 +353,7 @@ async def start_minefield(message: Message):
             "display_task": None,
             "log_message": None,
             "log_action": "",
+            "turn_task": None,
         }
     except Exception as e:
         logging.error(f"start_minefield: {e}")
@@ -334,7 +395,7 @@ async def join_minefield(callback: CallbackQuery):
         places_text = f"Залишилось місць: <b>{places_left}</b>" if places_left > 0 else "🚫 Гра заповнена!"
         player_list = "\n".join(f"• {p['name']}" for p in game["players"].values())
 
-        await rate_limited_call(chat_id, callback.message.edit_text(
+        await rate_limited_call(chat_id, lambda: callback.message.edit_text(
             f"<b>💣 МІННЕ ПОЛЕ 💣</b>\n\nГравців: <b>{len(game['players'])}/{MAX_PLAYERS}</b>\n"
             f"{places_text}\n\n{EMOJI_PLAYERS}\n{player_list}\n\nАдмін, тисни СТАРТ!",
             reply_markup=callback.message.reply_markup, parse_mode="HTML"
@@ -363,26 +424,31 @@ async def start_game(callback: CallbackQuery):
             await callback.answer("Мінімум 2 гравці!", show_alert=True)
             return
 
-        game["queue"] = list(game["players"].keys())
-        random.shuffle(game["queue"])
+        queue = list(game["players"].keys())
+        if not queue:
+            await callback.answer("❌ Немає гравців!", show_alert=True)
+            return
+        random.shuffle(queue)
+        game["queue"] = queue
         game["current_turn"] = 0
-        game["current_player"] = game["queue"][0]
+        game["current_player"] = queue[0]
         game["board"] = generate_field()
         game["revealed"] = [[False] * FIELD_SIZE for _ in range(FIELD_SIZE)]
         game["phase"] = "playing"
 
         first = game["players"][game["current_player"]]["name"]
-        await rate_limited_call(chat_id, callback.message.edit_text(
+        await rate_limited_call(chat_id, lambda: callback.message.edit_text(
             build_main_text(game),
             reply_markup=build_field_keyboard(game), parse_mode="HTML"
         ))
         # Надсилаємо лог-повідомлення одразу під полем
-        log_msg = await rate_limited_call(chat_id, callback.message.bot.send_message(
+        log_msg = await rate_limited_call(chat_id, lambda: callback.message.bot.send_message(
             chat_id,
             f"➡️ Зараз ходить: <b>{first}</b>",
             parse_mode="HTML"
         ))
         game["log_message"] = log_msg
+        schedule_turn_timeout(chat_id)
     except Exception as e:
         logging.error(f"start_game: {e}")
 
@@ -413,6 +479,7 @@ async def field_click(callback: CallbackQuery):
             await callback.answer(f"⏳ Зачекай {COOLDOWN_SECONDS}с", show_alert=True)
             return
         game["cooldowns"][user_id] = now
+        _cancel_turn_task(game)  # гравець ходить — скасовуємо таймер
 
         # --- тільки зміна стану ---
         async with game["lock"]:
@@ -437,13 +504,17 @@ async def field_click(callback: CallbackQuery):
 
             if cell == "MONEY":
                 player["money"] += MONEY_PER_CELL
-                game["collected_money"] += MONEY_PER_CELL
                 action = f"💰 <b>{player['name']}</b> знайшов {MONEY_PER_CELL} грн!"
                 auto_next = True
 
             elif cell == "HEART":
                 player["lives"] += 1
                 action = f"❤️ <b>{player['name']}</b> знайшов життя!"
+                auto_next = True
+
+            elif cell == "DIAMOND":
+                player["money"] += DIAMOND_PER_CELL
+                action = f"💎 <b>{player['name']}</b> знайшов алмаз! +{DIAMOND_PER_CELL} грн!"
                 auto_next = True
 
             elif cell == "STEAL":
@@ -460,16 +531,23 @@ async def field_click(callback: CallbackQuery):
             elif cell == "MINE":
                 alive_others = [uid for uid, p in game["players"].items()
                                 if p["alive"] and uid != user_id]
-                if not alive_others:
+                if random.random() < 0.4:
+                    # 40% — вибухає на самому гравці
                     player["lives"] -= 1
                     if player["lives"] <= 0:
                         player["alive"] = False
-                        action = f"💀 <b>{player['name']}</b> наступив на міну і вибув!"
+                        player["money"] = 0   # сам зірвався — гроші згоріли
+                        action = f"💥 Міна вибухнула! <b>{player['name']}</b> вибув і втратив всі гроші!"
                     else:
-                        action = f"⚡ <b>{player['name']}</b> на міні! {player['lives']} {get_lives_text(player['lives'])}"
+                        action = f"💥 Міна вибухнула на <b>{player['name']}</b>! {player['lives']} {get_lives_text(player['lives'])}"
                     auto_next = True
-                else:
+                elif alive_others:
+                    # 60% — кидає міну в іншого, треба вибрати
                     game["awaiting_choice"][user_id] = True
+                else:
+                    # 60% але немає інших — міна дуда
+                    action = f"💨 <b>{player['name']}</b> наступив на міну, але вона не спрацювала!"
+                    auto_next = True
 
         # --- side-effects поза локом ---
 
@@ -483,7 +561,7 @@ async def field_click(callback: CallbackQuery):
                         callback_data=f"steal_{user_id}_{uid}"
                     )])
             await update_log(chat_id, f"🕵️ <b>{player['name']}</b> активував крадіжку!")
-            await rate_limited_call(chat_id, callback.message.bot.send_message(
+            await rate_limited_call(chat_id, lambda: callback.message.bot.send_message(
                 chat_id,
                 f"🕵️ <b>{player['name']}</b>, обери у кого вкрасти:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
@@ -492,18 +570,17 @@ async def field_click(callback: CallbackQuery):
             return
 
         if cell == "MINE" and game["awaiting_choice"].get(user_id):
-            buttons = [[InlineKeyboardButton(text=f"{EMOJI_DEAD} Підірвати себе",
-                                             callback_data=f"mine_self_{user_id}")]]
+            buttons = []
             for uid, p in game["players"].items():
                 if p["alive"] and uid != user_id:
                     buttons.append([InlineKeyboardButton(
-                        text=f"{EMOJI_DEAD} Вибити {p['name']}",
+                        text=f"{EMOJI_DEAD} Кинути міну в {p['name']}",
                         callback_data=f"mine_kill_{user_id}_{uid}"
                     )])
-            await update_log(chat_id, f"💣 <b>{player['name']}</b> на міні! Вибирає...")
-            await rate_limited_call(chat_id, callback.message.bot.send_message(
+            await update_log(chat_id, f"💣 <b>{player['name']}</b> перекидає міну! Вибирає жертву...")
+            await rate_limited_call(chat_id, lambda: callback.message.bot.send_message(
                 chat_id,
-                f"{EMOJI_MINE} <b>{player['name']}</b> наступив на міну! Обери кого вибити:",
+                f"💣 <b>{player['name']}</b> Обери кому кинути міну:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
                 parse_mode="HTML"
             ))
@@ -621,9 +698,7 @@ async def mine_action(callback: CallbackQuery):
             return
 
         parts = callback.data.split("_")
-        if parts[1] == "self" and len(parts) == 3:
-            actor_id, victim_id = int(parts[2]), None
-        elif parts[1] == "kill" and len(parts) == 4:
+        if parts[1] == "kill" and len(parts) == 4:
             actor_id, victim_id = int(parts[2]), int(parts[3])
         else:
             return
@@ -639,30 +714,23 @@ async def mine_action(callback: CallbackQuery):
             if not actor["alive"]:
                 return
 
-            if victim_id is None:
-                actor["lives"] -= 1
-                if actor["lives"] <= 0:
-                    actor["alive"] = False
-                    action = f"💀 <b>{actor['name']}</b> підірвав себе та вибув!"
-                else:
-                    action = f"⚡ <b>{actor['name']}</b> підірвав себе! {actor['lives']} {get_lives_text(actor['lives'])}"
+            if victim_id not in game["players"]:
+                return
+            victim = game["players"][victim_id]
+            if not victim["alive"]:
+                await callback.answer("❌ Жертва вже вибула!", show_alert=True)
+                return
+
+            victim["lives"] -= 1
+            if victim["lives"] <= 0:
+                victim["alive"] = False
+                stolen = victim["money"]
+                actor["money"] += stolen
+                victim["money"] = 0
+                action = f"💀 <b>{actor['name']}</b> кинув міну в <b>{victim['name']}</b> — вибув! +{stolen} грн"
             else:
-                if victim_id not in game["players"]:
-                    return
-                victim = game["players"][victim_id]
-                if not victim["alive"]:
-                    await callback.answer("❌ Жертва вже вибула!", show_alert=True)
-                    return
-                victim["lives"] -= 1
-                if victim["lives"] <= 0:
-                    victim["alive"] = False
-                    stolen = victim["money"]
-                    actor["money"] += stolen
-                    victim["money"] = 0
-                    action = f"💀 <b>{actor['name']}</b> вибив <b>{victim['name']}</b> і забрав <b>{stolen} грн</b>!"
-                else:
-                    action = (f"⚡ <b>{actor['name']}</b> поранив <b>{victim['name']}</b>! "
-                              f"{victim['lives']} {get_lives_text(victim['lives'])}")
+                action = (f"💣 <b>{actor['name']}</b> кинув міну в <b>{victim['name']}</b>! "
+                          f"Залишилось {victim['lives']} {get_lives_text(victim['lives'])}")
 
             game["awaiting_choice"].pop(actor_id, None)
 
@@ -695,19 +763,40 @@ async def finish_minefield(chat_id: int):
         task = game.get("display_task")
         if task and not task.done():
             task.cancel()
+        _cancel_turn_task(game)
 
-        winners = sorted(game["players"].values(), key=lambda p: p["money"], reverse=True)
-        text = "🏆 <b>ГРА ЗАВЕРШЕНА!</b>\n\n<b>РЕЙТИНГ:</b>\n"
+        winners = sorted(game["players"].values(), key=lambda p: (p["alive"], p["money"]), reverse=True)
+
+        # Визначаємо тип перемоги
+        money_winner = next((p for p in winners if p["money"] >= WIN_MONEY), None)
+        alive_players = [p for p in game["players"].values() if p["alive"]]
+
+        if money_winner:
+            win_reason = f"💰 Перший досяг <b>{WIN_MONEY} грн</b>!"
+        elif len(alive_players) == 1:
+            win_reason = "⚔️ Останній вцілілий!"
+        else:
+            win_reason = "🏁 Гра завершена"
+
+        # Приз 1-го місця: набрав >= WIN_MONEY → приз WIN_MONEY, інакше → мінімум 50 грн
+        first = winners[0] if winners else None
+        prize = WIN_MONEY if (first and first["money"] >= WIN_MONEY) else 50
+
+        text = f"🏆 <b>ГРА ЗАВЕРШЕНА!</b>  {win_reason}\n\n<b>РЕЙТИНГ:</b>\n"
         for i, p in enumerate(winners, 1):
             medal = ("🥇", "🥈", "🥉")[i - 1] if i <= 3 else "•"
             status = "✅ Живий" if p["alive"] else "💀 Вибув"
-            text += f"{medal} {p['name']} — {EMOJI_MONEY}<b>{p['money']} грн</b> ({status})\n"
+            if i == 1:
+                # text += f"{medal} {p['name']} — {EMOJI_MONEY}<b>{p['money']} грн</b> → приз <b>{prize} грн</b> ({status})\n"
+                text += f"{medal} {p['name']} — {EMOJI_MONEY} Приз <b>{prize} грн</b> ({status})\n"
+            else:
+                text += f"{medal} {p['name']} — {EMOJI_MONEY}<b>{p['money']} грн</b> ({status})\n"
 
-        if winners and winners[0]["money"] > 0:
-            banned_players[winners[0]["id"]] = time.time() + WINNER_COOLDOWN_HOURS * 3600
-            text += f"\n🥇 <b>{winners[0]['name']}</b> не може грати {WINNER_COOLDOWN_HOURS} год."
+        if first and first["money"] > 0:
+            banned_players[first["id"]] = time.time() + WINNER_COOLDOWN_HOURS * 3600
+            text += f"\n🥇 <b>{first['name']}</b> не може грати {WINNER_COOLDOWN_HOURS} год."
 
-        await rate_limited_call(chat_id, game["message"].edit_text(
+        await rate_limited_call(chat_id, lambda: game["message"].edit_text(
             text, reply_markup=None, parse_mode="HTML"
         ))
 
