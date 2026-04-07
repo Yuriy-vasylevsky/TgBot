@@ -57,7 +57,7 @@ from group_games.group_wordle import router as wordle_router
 from group_games.group_skarb import router as skarb_router
 from group_games.group_vote_prize import router as vote_router
 from group_games.group_minefield import router as minefield_router
-
+from group_games.bank import router as bank_router
 
 
 from handlers.stats import router as stats_router
@@ -103,6 +103,7 @@ bot = Bot(
 dp = Dispatcher()
 
 # Підключаємо роутери (тільки один раз!)
+dp.include_router(bank_router)
 dp.include_router(minefield_router)
 dp.include_router(vote_router)
 dp.include_router(skarb_router)
@@ -127,6 +128,8 @@ dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
 dp.include_router(simple_win_router)
+
+
 # Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
@@ -271,6 +274,7 @@ async def set_commands():
         BotCommand(command="skarb", description="💎 Найди скарб"),
         BotCommand(command="/vote_prize", description="Голосування"),
         BotCommand(command="/minefield", description="Промо борьба"),
+        BotCommand(command="/bank", description="Банк "),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
