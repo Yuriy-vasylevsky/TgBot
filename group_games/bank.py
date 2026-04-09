@@ -1,42 +1,47 @@
 from aiogram import Router, F
-from aiogram.filters import Command
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile
-import logging
+from aiogram.filters import Command, Filter
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, FSInputFile, InputMediaPhoto
 import random
+import asyncio
 
 from handlers.config import ADMIN_ID
 
 router = Router(name="group_pograb")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
-# =====================================
-# НАЛАШТУВАННЯ ГРИ
-# =====================================
-REQUIRED_PLAYERS = 4
-MAX_ROUNDS = 4
-
+REQUIRED_PLAYERS = 2
+MAX_ROUNDS = 2
 TOTAL_LOOT = 200
 CODE_LENGTH = 2
 
 IMAGE_GUESSING = "bank1.png"
 IMAGE_LOOTING = "bank2.png"
+IMAGE_3 = "bank3.png"
+IMAGE_POLICE = "police.png"          # ← картинка поліції (залишена)
+
+# === НАЛАШТУВАННЯ ===
+RISK_CHANCES = {200: 70, 150: 60, 100: 50}
+
+POLICE_HEADING = "🚨 ЗА ВАМИ ВИЇХАЛА ПОЛІЦІЯ 🚨"
+CAUGHT_TEXT = "😭 <b>ВАС СПІЙМАЛИ КОПИ!</b>\nВи надто довго збирали гроші."
+ESCAPED_TEXT = "🏃‍♂️ <b>ВИ ЗМОГЛИ ВТЕКТИ!</b>\nГроші ваші!"
+
+LAST_PLAYER_TEXT = "🎟️ <b>Копам на вас всеодно бо ви поганий взломщик сейфів, спокійно забираєте все що залишилось</b>"
+
+TURN_TIMEOUT_SECONDS = 40
+TIMEOUT_CAUGHT_TEXT = "⏰ <b>ВИ ЗАНАДТО ДОВГО ГРАБУВАЛИ!</b>\nКопи вас зловили. Хід переходить далі."
+
 
 active_pograb = {}
 
 
-# =====================================
-# ДОПОМІЖНІ ФУНКЦІЇ
-# =====================================
+class PograbActiveFilter(Filter):
+    async def __call__(self, message: Message) -> bool:
+        return message.chat.id in active_pograb
+
+
 def get_display_name(user) -> str:
     return f"@{user.username}" if user.username else user.full_name
-
-
-def build_recruit_keyboard() -> InlineKeyboardMarkup:
-    keyboard = [
-        [InlineKeyboardButton(text="🔥 Запустити гру", callback_data="pograb_force_start")],
-        [InlineKeyboardButton(text="❌ Скасувати гру", callback_data="pograb_cancel")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_feedback(guess: str, secret: str) -> str:
@@ -53,13 +58,24 @@ def get_feedback(guess: str, secret: str) -> str:
     return ''.join(result)
 
 
+def build_recruit_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔥 ЗАПУСТИТИ ГРУ", callback_data="pograb_force_start")],
+        [InlineKeyboardButton(text="❌ Скасувати гру", callback_data="pograb_cancel")]
+    ])
+
+
+def build_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Скасувати гру", callback_data="pograb_cancel")]
+    ])
+
+
 def build_loot_keyboard(remaining: int) -> InlineKeyboardMarkup:
     if remaining <= 0:
         return InlineKeyboardMarkup(inline_keyboard=[])
 
-    fixed = [25, 50, 100, 150, 200]
-    amounts = [amt for amt in fixed if amt < remaining]
-
+    amounts = [amt for amt in [25, 50, 100, 150] if amt < remaining]
     keyboard = []
     row = []
     for amt in amounts:
@@ -71,73 +87,52 @@ def build_loot_keyboard(remaining: int) -> InlineKeyboardMarkup:
         keyboard.append(row)
 
     keyboard.append([InlineKeyboardButton(
-        text=f"💰 Забрати все ({remaining} грн)",
+        text=f"💰 ЗАБРАТИ ВСЕ ({remaining} грн)",
         callback_data=f"pograb_take_{remaining}"
     )])
+
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 def get_status_text(game: dict) -> str:
     phase = game["phase"]
-    text = "<b>🏦 ПОГРАБУВАННЯ БАНКУ 🏦</b>\n\n"
-
-    if phase in ("recruiting", "guessing"):
-        text += f"Загальний скарб: <b>{TOTAL_LOOT} грн</b>\n\n"
 
     if phase == "recruiting":
-        text += "👥 Учасники:\n"
-        for data in game["participants"].values():
-            text += f"• {data['name']}\n"
-        text += f"\nУчасників: <b>{len(game['participants'])}</b>/{REQUIRED_PLAYERS}\n"
-        text += f"Максимум {REQUIRED_PLAYERS} учасників"
+        participants = "\n".join(f"• {data['name']}" for data in game["participants"].values()) or "Поки нікого..."
+        return f"<b>🏦 ПОГРАБУВАННЯ БАНКУ</b>\n\n👥 Учасники:\n{participants}\n\n<b>{len(game['participants'])}/{REQUIRED_PLAYERS}</b> гравців"
 
     elif phase == "guessing":
         round_num = game["current_round"]
-        ranked_lines = [f"{i}. {game['participants'][uid]['name']}" for i, uid in enumerate(game["ranking"], 1)]
-
-        text += f"Раунд {round_num}/{MAX_ROUNDS} — взлом {CODE_LENGTH}-значного коду!\n\n"
-        text += "🟩 — цифра на правильному місці\n"
-        text += "🟨 — цифра є, але не там\n"
-        text += "⬛ — такої цифри немає\n\n"
-        text += "Перший хто вгадає — отримує наступне місце в черзі\n\n"
-
-        if ranked_lines:
-            text += "<b>Поточний порядок:</b>\n" + "\n".join(ranked_lines) + "\n\n"
+        ranking = "\n".join(f"{i+1}. {game['participants'][uid]['name']}" for i, uid in enumerate(game["ranking"])) or "Очікуємо першого вгадування..."
+        return f"<b>🛡️ РАУНД {round_num}/{MAX_ROUNDS}</b>\nВзлом 2-значного коду\n\n🟩 правильно 🟨 є, але не там ⬛ немає\n\n<b>Черга:</b>\n{ranking}\n\nПишіть двозначний код в чат"
 
     elif phase == "looting":
         remaining = game["remaining_loot"]
-        text += f"Загальний скарб: <b>{TOTAL_LOOT} грн</b>\n"
-        text += f"Залишок у сейфі: <b>{remaining} грн</b>\n\n"
-        text += "<b>Черга (за результатами взлому):</b>\n"
-        for i, uid in enumerate(game["ranking"], 1):
-            name = game["participants"][uid]["name"]
-            taken = game["participants"][uid].get("taken", 0)
-            text += f"{i}. {name} — {taken} грн\n"
-
-        if game["current_turn"] < len(game["ranking"]):
-            current_uid = game["ranking"][game["current_turn"]]
-            current_name = game["participants"][current_uid]["name"]
-            text += f"\n<b>🔥 Зараз черга:</b> {current_name} (місце {game['current_turn'] + 1})\n"
-            text += "Обери скільки грошей забрати ⬇️"
-        else:
-            text += "\n\nГра завершена — всі гроші розібрано!"
-
-    return text
+        ranking = "\n".join(f"{i+1}. {game['participants'][uid]['name']} — <b>{game['participants'][uid].get('taken', 0)} грн</b>" for i, uid in enumerate(game["ranking"]))
+        current = f"\n\n🔥 <b>Зараз ходить:</b> {game['participants'][game['ranking'][game['current_turn']]]['name']}" if game["current_turn"] < len(game["ranking"]) else ""
+        return f"<b>💰 ПОГРАБУВАННЯ СЕЙФУ</b>\n\nЗалишок у сейфі: <b>{remaining} грн</b>\n\n<b>Черга:</b>\n{ranking}{current}"
 
 
-# =====================================
-# СТВОРЕННЯ ГРИ
-# =====================================
+def get_final_text(game: dict) -> str:
+    ranking_lines = "\n".join(f"{i+1}. {game['participants'][uid]['name']} — {game['participants'][uid].get('taken', 0)} грн" for i, uid in enumerate(game["ranking"]))
+    return f"<b>🏁 ПОГРАБУВАННЯ ЗАВЕРШЕНО!</b>\n\nЗалишок у сейфі: <b>{game['remaining_loot']} грн</b>\n\n<b>Переможці:</b>\n{ranking_lines}"
+
+
 async def create_pograb(message: Message):
     chat_id = message.chat.id
     if chat_id in active_pograb:
-        await message.answer("❌ У цьому чаті вже запущена гра «Пограбування банку»!")
+        await message.answer("❌ У цьому чаті вже запущена гра!")
         return
 
-    keyboard = build_recruit_keyboard()
-    text = get_status_text({"phase": "recruiting", "participants": {}})
+    try: await message.delete()
+    except: pass
 
-    msg = await message.answer(text=text, reply_markup=keyboard, parse_mode="HTML")
+    msg = await message.answer_photo(
+        photo=FSInputFile(IMAGE_GUESSING),
+        caption=get_status_text({"phase": "recruiting", "participants": {}}),
+        reply_markup=build_recruit_keyboard(),
+        parse_mode="HTML"
+    )
 
     active_pograb[chat_id] = {
         "phase": "recruiting",
@@ -147,9 +142,9 @@ async def create_pograb(message: Message):
         "secret": None,
         "status_msg_id": msg.message_id,
         "round_messages": [],
-        "total_loot": TOTAL_LOOT,
         "remaining_loot": TOTAL_LOOT,
         "current_turn": 0,
+        "turn_task": None,
     }
 
 
@@ -162,129 +157,93 @@ async def cmd_bank(message: Message):
     await create_pograb(message)
 
 
-# =====================================
-# СКАСУВАННЯ ГРИ
-# =====================================
-@router.callback_query(F.data == "pograb_cancel")
-async def pograb_cancel(callback: CallbackQuery):
-    if callback.from_user.id != ADMIN_ID:
-        await callback.answer("Тільки адміністратор може скасувати гру!", show_alert=True)
-        return
-
-    chat_id = callback.message.chat.id
-    if chat_id not in active_pograb:
-        return
-
-    game = active_pograb[chat_id]
-    try:
-        await callback.bot.delete_message(chat_id=chat_id, message_id=game["status_msg_id"])
-    except:
-        pass
-    active_pograb.pop(chat_id, None)
-    await callback.answer("Гра скасована!")
-    await callback.message.answer("❌ Гра «Пограбування банку» скасована адміном.")
-
-
-# =====================================
-# ЗАПУСК ГРИ
-# =====================================
 @router.callback_query(F.data == "pograb_force_start")
 async def pograb_force_start(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Тільки адмін може запустити гру", show_alert=True)
+
     chat_id = callback.message.chat.id
-    user_id = callback.from_user.id
-
-    if user_id != ADMIN_ID:
-        await callback.answer("Ця кнопка тільки для адміністратора", show_alert=True)
-        return
-
     if chat_id not in active_pograb:
-        await callback.answer("Гра вже неактивна", show_alert=True)
-        return
+        return await callback.answer("Гра вже неактивна", show_alert=True)
 
     game = active_pograb[chat_id]
-
     game["phase"] = "guessing"
-    game["current_round"] = 1
-    game["ranking"] = []
     game["secret"] = f"{random.randint(0, 99):02d}"
     game["round_messages"] = []
 
-    text = get_status_text(game)
-    await callback.bot.edit_message_text(
-        chat_id=chat_id, message_id=game["status_msg_id"],
-        text=text, reply_markup=None, parse_mode="HTML"
-    )
-
-    await callback.message.answer_photo(
-        photo=FSInputFile(IMAGE_GUESSING),
-        caption=f"🛡️ <b>Раунд 1</b>\n"
-                "Пишіть рівно 2 цифри в чат.\n",
+    await callback.bot.edit_message_caption(
+        chat_id=chat_id,
+        message_id=game["status_msg_id"],
+        caption=get_status_text(game),
+        reply_markup=build_cancel_keyboard(),
         parse_mode="HTML"
     )
+    await callback.answer("Гру запущено! 🔥")
 
-    await callback.answer("Гру запущено! Раунд 1 почався 🔥")
+
+@router.callback_query(F.data == "pograb_cancel")
+async def pograb_cancel(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        return await callback.answer("Тільки адмін може скасувати гру", show_alert=True)
+
+    chat_id = callback.message.chat.id
+    if chat_id not in active_pograb:
+        return
+
+    game = active_pograb[chat_id]
+    if game.get("turn_task"):
+        game["turn_task"].cancel()
+
+    try: await callback.bot.delete_message(chat_id, game["status_msg_id"])
+    except: pass
+
+    active_pograb.pop(chat_id, None)
+    await callback.answer("Гра скасована")
+    await callback.message.answer("❌ Пограбування банку скасовано")
 
 
-# =====================================
-# ОБРОБКА ПОВІДОМЛЕНЬ
-# =====================================
-@router.message(F.text)
+@router.message(F.text, PograbActiveFilter())
 async def handle_pograb_message(message: Message):
     chat_id = message.chat.id
     user = message.from_user
     user_id = user.id
     text = message.text.strip()
-
-    if chat_id not in active_pograb:
-        return
-
     game = active_pograb[chat_id]
-    phase = game["phase"]
 
-    # --- ФАЗА ВГАДУВАННЯ ---
-    if phase == "guessing":
-        # Хто вже зайняв місце — мовчки видаляємо їх повідомлення
+    if game["phase"] == "guessing":
+        is_admin = (user_id == ADMIN_ID)
+
         if user_id in game["ranking"]:
-            try: await message.delete()
-            except: pass
+            if not is_admin: await message.delete()
             return
 
-        # Не 2 цифри — мовчки видаляємо, не реагуємо
         if len(text) != CODE_LENGTH or not text.isdigit():
-            try: await message.delete()
-            except: pass
+            if not is_admin: await message.delete()
             return
 
-        secret = game["secret"]
         game["round_messages"].append(message.message_id)
+        feedback = get_feedback(text, game["secret"])
 
-        feedback = get_feedback(text, secret)
-        resp = await message.answer(
-            f"{user.mention_html()} → <b>{text}</b>\n{feedback}",
-            parse_mode="HTML"
-        )
+        resp = await message.answer(f"{user.mention_html()} → <b>{text}</b>  {feedback}", parse_mode="HTML")
         game["round_messages"].append(resp.message_id)
 
-        if text == secret:
-            # Гравець стає учасником ТІЛЬКИ якщо вгадав код
+        if text == game["secret"]:
             if user_id not in game["participants"]:
                 game["participants"][user_id] = {"name": get_display_name(user), "taken": 0}
             game["ranking"].append(user_id)
 
-            win_text = (
-                f"🎉 <b>РАУНД {game['current_round']} ЗАВЕРШЕНО!</b>\n\n"
-                f"{user.mention_html()} вгадав код <b>{secret}</b>!\n"
-                f"Отримує місце №{len(game['ranking'])} в черзі!"
+            win_msg = await message.answer(
+                f"🎉 <b>РАУНД {game['current_round']} ЗАВЕРШЕНО!</b>\n{user.mention_html()} вгадав код <b>{game['secret']}</b>!",
+                parse_mode="HTML"
             )
-            await message.answer(win_text, parse_mode="HTML")
+            game["round_messages"].append(win_msg.message_id)
 
-            for msg_id in game["round_messages"]:
-                try: await message.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            for mid in game["round_messages"]:
+                try: await message.bot.delete_message(chat_id, mid)
                 except: pass
             game["round_messages"] = []
 
             if len(game["ranking"]) == MAX_ROUNDS:
-                # Якщо є другий учасник — додаємо його автоматично останнім
                 ranked_set = set(game["ranking"])
                 last_uid = next((uid for uid in game["participants"] if uid not in ranked_set), None)
                 if last_uid:
@@ -293,123 +252,166 @@ async def handle_pograb_message(message: Message):
                 game["phase"] = "looting"
                 game["current_turn"] = 0
 
-                status_text = get_status_text(game)
-                loot_keyboard = build_loot_keyboard(game["remaining_loot"])
-
-                await message.answer_photo(
-                    photo=FSInputFile(IMAGE_LOOTING),
-                    caption="🏆 <b>ГРАБУЄМО!</b>\n"
-                            "Переходимо до пограбування сейфів \n",
-                    parse_mode="HTML"
+                await message.bot.edit_message_media(
+                    chat_id=chat_id,
+                    message_id=game["status_msg_id"],
+                    media=InputMediaPhoto(media=FSInputFile(IMAGE_LOOTING), caption=get_status_text(game), parse_mode="HTML")
                 )
 
                 new_status = await message.answer(
-                    text=status_text,
-                    reply_markup=loot_keyboard,
+                    text=get_status_text(game),
+                    reply_markup=build_loot_keyboard(game["remaining_loot"]),
                     parse_mode="HTML"
                 )
                 game["status_msg_id"] = new_status.message_id
 
+                if game.get("turn_task"): game["turn_task"].cancel()
+                game["turn_task"] = asyncio.create_task(turn_timeout_task(chat_id, message.bot))
+
             else:
                 game["current_round"] += 1
                 game["secret"] = f"{random.randint(0, 99):02d}"
-
-                status_text = get_status_text(game)
-                await message.bot.edit_message_text(
-                    chat_id=chat_id, message_id=game["status_msg_id"],
-                    text=status_text, reply_markup=None, parse_mode="HTML"
-                )
-
-                await message.answer(
-                    f"🛡️ <b>Раунд {game['current_round']}</b>\n"
-                    "Пишіть рівно 2 цифри в чат.\n",
+                await message.bot.edit_message_caption(
+                    chat_id=chat_id,
+                    message_id=game["status_msg_id"],
+                    caption=get_status_text(game),
+                    reply_markup=build_cancel_keyboard(),
                     parse_mode="HTML"
                 )
 
-    # --- ФАЗА ПОГРАБУВАННЯ ---
-    elif phase == "looting":
-        # Видаляємо повідомлення тих, хто не є учасником
-        if user_id not in game["participants"]:
-            try: await message.delete()
-            except: pass
+    elif game["phase"] == "looting":
+        if user_id not in game["participants"] or game["current_turn"] >= len(game["ranking"]):
+            await message.delete()
             return
-
-        if game["current_turn"] >= len(game["ranking"]):
+        if user_id != game["ranking"][game["current_turn"]]:
             return
-        current_uid = game["ranking"][game["current_turn"]]
-        if user_id != current_uid:
-            return
-        try: await message.delete()
-        except: pass
+        await message.delete()
 
 
-# =====================================
-# ЗАБИРАННЯ ГРОШЕЙ
-# =====================================
 @router.callback_query(F.data.startswith("pograb_take_"))
 async def pograb_take_money(callback: CallbackQuery):
     chat_id = callback.message.chat.id
-    user = callback.from_user
-    user_id = user.id
+    user_id = callback.from_user.id
 
-    if chat_id not in active_pograb:
-        return
+    if chat_id not in active_pograb: return
     game = active_pograb[chat_id]
 
     if game["phase"] != "looting" or game["current_turn"] >= len(game["ranking"]):
-        await callback.answer("Гра вже завершена", show_alert=True)
-        return
+        return await callback.answer("Гра вже завершена", show_alert=True)
 
-    current_uid = game["ranking"][game["current_turn"]]
-    if user_id != current_uid:
-        await callback.answer("Не твоя черга!", show_alert=True)
-        return
+    if user_id != game["ranking"][game["current_turn"]]:
+        return await callback.answer("Не твоя черга!", show_alert=True)
 
     try:
-        _, amount_str = callback.data.split("_take_")
-        amount = int(amount_str)
+        amount = int(callback.data.split("_take_")[1])
     except:
-        await callback.answer("Помилка", show_alert=True)
-        return
+        return await callback.answer("Помилка", show_alert=True)
 
     if amount < 1 or amount > game["remaining_loot"]:
-        await callback.answer("Невірна сума!", show_alert=True)
-        return
+        return await callback.answer("Невірна сума!", show_alert=True)
 
-    game["remaining_loot"] -= amount
-    game["participants"][user_id]["taken"] += amount
+    await callback.answer("Обробляємо запит...")
 
     name = game["participants"][user_id]["name"]
-    await callback.message.answer(
-        f"💰 <b>{name}</b> забрав <b>{amount} грн</b> з сейфу!\n"
-        f"Залишок у банку: <b>{game['remaining_loot']} грн</b>",
-        parse_mode="HTML"
-    )
+    is_last_player = (game["current_turn"] == len(game["ranking"]) - 1)
+
+    if is_last_player:
+        final_amount = game["remaining_loot"]
+        await callback.message.answer(
+            f"💰 <b>{name}</b> {LAST_PLAYER_TEXT}\nВи отримали <b>{final_amount} грн</b>",
+            parse_mode="HTML"
+        )
+    else:
+        risk_chance = RISK_CHANCES.get(amount, 0)
+
+        if risk_chance > 0:
+            # Залишаємо картинку + напис (без анімації)
+            police_photo = FSInputFile(IMAGE_POLICE)
+            await callback.message.answer_photo(
+                photo=police_photo,
+                caption=POLICE_HEADING
+            )
+
+            caught = random.random() < (risk_chance / 100.0)
+            result_text = CAUGHT_TEXT if caught else ESCAPED_TEXT
+            final_amount = 0 if caught else amount
+
+            await callback.message.answer(
+                f"💰 <b>{name}</b> намагався забрати <b>{amount} грн</b>\n{result_text}",
+                parse_mode="HTML"
+            )
+        else:
+            final_amount = amount
+
+    if final_amount > 0:
+        game["remaining_loot"] -= final_amount
+        game["participants"][user_id]["taken"] += final_amount
+
+        if not is_last_player and RISK_CHANCES.get(amount, 0) == 0:
+            await callback.message.answer(
+                f"💰 <b>{name}</b> забрав <b>{final_amount} грн</b>\nЗалишок: <b>{game['remaining_loot']} грн</b>",
+                parse_mode="HTML"
+            )
 
     game["current_turn"] += 1
 
-    status_text = get_status_text(game)
-    new_keyboard = build_loot_keyboard(game["remaining_loot"]) if game["current_turn"] < len(game["ranking"]) else None
+    is_finished = game["remaining_loot"] <= 0 or game["current_turn"] >= len(game["ranking"])
 
-    new_status = await callback.message.answer(
-        text=status_text,
-        reply_markup=new_keyboard,
-        parse_mode="HTML"
-    )
+    if game.get("turn_task"):
+        game["turn_task"].cancel()
 
-    try:
-        await callback.bot.delete_message(chat_id=chat_id, message_id=game["status_msg_id"])
-    except:
-        pass
-    game["status_msg_id"] = new_status.message_id
+    if not is_finished:
+        new_status = await callback.message.answer(
+            text=get_status_text(game),
+            reply_markup=build_loot_keyboard(game["remaining_loot"]),
+            parse_mode="HTML"
+        )
+        try: await callback.bot.delete_message(chat_id, game["status_msg_id"])
+        except: pass
+        game["status_msg_id"] = new_status.message_id
 
-    if game["remaining_loot"] <= 0 or game["current_turn"] >= len(game["ranking"]):
-        await callback.message.answer(
-            "🏁 <b>ПОГРАБУВАННЯ ЗАВЕРШЕНО!</b>\n"
-            "Всі гроші розібрано\n"
-            "Дякуємо за гру! 💸",
+        game["turn_task"] = asyncio.create_task(turn_timeout_task(chat_id, callback.bot))
+    else:
+        try: await callback.bot.delete_message(chat_id, game["status_msg_id"])
+        except: pass
+        await callback.message.answer_photo(
+            photo=FSInputFile(IMAGE_3),
+            caption=get_final_text(game),
             parse_mode="HTML"
         )
         active_pograb.pop(chat_id, None)
 
-    await callback.answer(f"✅ Забрав {amount} грн!")
+
+async def turn_timeout_task(chat_id: int, bot):
+    await asyncio.sleep(TURN_TIMEOUT_SECONDS)
+    game = active_pograb.get(chat_id)
+    if not game or game["phase"] != "looting":
+        return
+
+    current_turn = game.get("current_turn", 0)
+    if current_turn >= len(game["ranking"]):
+        return
+
+    user_id = game["ranking"][current_turn]
+    name = game["participants"][user_id]["name"]
+
+    await bot.send_message(chat_id=chat_id, text=f"💰 <b>{name}</b> {TIMEOUT_CAUGHT_TEXT}", parse_mode="HTML")
+
+    game["current_turn"] += 1
+    is_finished = game["remaining_loot"] <= 0 or game["current_turn"] >= len(game["ranking"])
+
+    if not is_finished:
+        new_status = await bot.send_message(
+            chat_id=chat_id,
+            text=get_status_text(game),
+            reply_markup=build_loot_keyboard(game["remaining_loot"]),
+            parse_mode="HTML"
+        )
+        try: await bot.delete_message(chat_id, game["status_msg_id"])
+        except: pass
+        game["status_msg_id"] = new_status.message_id
+    else:
+        try: await bot.delete_message(chat_id, game["status_msg_id"])
+        except: pass
+        await bot.send_photo(chat_id=chat_id, photo=FSInputFile(IMAGE_3), caption=get_final_text(game), parse_mode="HTML")
+        active_pograb.pop(chat_id, None)
