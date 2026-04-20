@@ -161,10 +161,16 @@ def new_game_state(msg_id: int) -> dict:
 
 async def finish_game(chat_id: int, bot, game: dict):
     """Видаляє статус і надсилає фінальне фото."""
-    try: await bot.delete_message(chat_id, game["status_msg_id"])
-    except: pass
-    await bot.send_photo(chat_id=chat_id, photo=FSInputFile(IMAGE_FINAL),
-                         caption=final_text(game), parse_mode="HTML")
+    try:
+        await bot.delete_message(chat_id, game["status_msg_id"])
+    except:
+        pass
+    await bot.send_photo(
+        chat_id=chat_id,
+        photo=FSInputFile(IMAGE_FINAL),
+        caption=final_text(game),
+        parse_mode="HTML"
+    )
     active_pograb.pop(chat_id, None)
 
 
@@ -181,11 +187,14 @@ async def advance_turn(chat_id: int, bot, game: dict):
         reply_markup=build_loot_keyboard(game["remaining_loot"]),
         parse_mode="HTML"
     )
-    try: await bot.delete_message(chat_id, game["status_msg_id"])
-    except: pass
+    try:
+        await bot.delete_message(chat_id, game["status_msg_id"])
+    except:
+        pass
     game["status_msg_id"] = new_status.message_id
 
-    if game.get("turn_task"): game["turn_task"].cancel()
+    if game.get("turn_task"):
+        game["turn_task"].cancel()
     game["turn_task"] = asyncio.create_task(turn_timeout_task(chat_id, bot))
 
 
@@ -217,8 +226,10 @@ async def turn_timeout_task(chat_id: int, bot):
 @router.message(Command("bank"))
 async def cmd_bank(message: Message):
     if message.from_user.id != ADMIN_ID:
-        try: await message.delete()
-        except: pass
+        try:
+            await message.delete()
+        except:
+            pass
         return
 
     chat_id = message.chat.id
@@ -226,8 +237,10 @@ async def cmd_bank(message: Message):
         await message.answer("❌ У цьому чаті вже запущена гра!")
         return
 
-    try: await message.delete()
-    except: pass
+    try:
+        await message.delete()
+    except:
+        pass
 
     msg = await message.answer_photo(
         photo=FSInputFile(IMAGE_GUESSING),
@@ -253,10 +266,14 @@ async def pograb_force_start(callback: CallbackQuery):
 
     game.update(phase="guessing", secret=f"{random.randint(0, 99):02d}", round_messages=[])
 
-    await callback.bot.edit_message_caption(
-        chat_id=chat_id, message_id=game["status_msg_id"],
-        caption=status_text(game), reply_markup=build_cancel_keyboard(), parse_mode="HTML"
-    )
+    try:
+        await callback.bot.edit_message_caption(
+            chat_id=chat_id, message_id=game["status_msg_id"],
+            caption=status_text(game), reply_markup=build_cancel_keyboard(), parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
     await callback.answer("Гру запущено! 🔥")
 
 
@@ -273,9 +290,12 @@ async def pograb_cancel(callback: CallbackQuery):
     if not game:
         return
 
-    if game.get("turn_task"): game["turn_task"].cancel()
-    try: await callback.bot.delete_message(chat_id, game["status_msg_id"])
-    except: pass
+    if game.get("turn_task"):
+        game["turn_task"].cancel()
+    try:
+        await callback.bot.delete_message(chat_id, game["status_msg_id"])
+    except:
+        pass
 
     await callback.answer("Гра скасована")
     await callback.message.answer("❌ Пограбування банку скасовано")
@@ -295,11 +315,13 @@ async def handle_pograb_message(message: Message):
         is_admin = user_id == ADMIN_ID
 
         if user_id in game["ranking"]:
-            if not is_admin: await message.delete()
+            if not is_admin:
+                await message.delete()
             return
 
         if len(text) != CODE_LENGTH or not text.isdigit():
-            if not is_admin: await message.delete()
+            if not is_admin:
+                await message.delete()
             return
 
         game["round_messages"].append(message.message_id)
@@ -310,6 +332,10 @@ async def handle_pograb_message(message: Message):
         game["round_messages"].append(resp.message_id)
 
         if text != game["secret"]:
+            return
+
+        # Захист від race condition — якщо одночасно два гравці вгадали
+        if user_id in game["ranking"]:
             return
 
         # Правильна відповідь
@@ -325,17 +351,22 @@ async def handle_pograb_message(message: Message):
         game["round_messages"].append(win.message_id)
 
         for mid in game["round_messages"]:
-            try: await message.bot.delete_message(chat_id, mid)
-            except: pass
+            try:
+                await message.bot.delete_message(chat_id, mid)
+            except:
+                pass
         game["round_messages"] = []
 
         if len(game["ranking"]) < MAX_ROUNDS:
             game["current_round"] += 1
             game["secret"] = f"{random.randint(0, 99):02d}"
-            await message.bot.edit_message_caption(
-                chat_id=chat_id, message_id=game["status_msg_id"],
-                caption=status_text(game), reply_markup=build_cancel_keyboard(), parse_mode="HTML"
-            )
+            try:
+                await message.bot.edit_message_caption(
+                    chat_id=chat_id, message_id=game["status_msg_id"],
+                    caption=status_text(game), reply_markup=build_cancel_keyboard(), parse_mode="HTML"
+                )
+            except Exception:
+                pass
             return
 
         # Всі раунди зіграно — переходимо до пограбування
@@ -346,12 +377,15 @@ async def handle_pograb_message(message: Message):
 
         game.update(phase="looting", current_turn=0)
 
-        await message.bot.edit_message_media(
-            chat_id=chat_id, message_id=game["status_msg_id"],
-            media=InputMediaPhoto(media=FSInputFile(IMAGE_LOOTING), caption=status_text(game), parse_mode="HTML")
-        )
-        new_status = await message.answer(
-            text=status_text(game),
+        # Видаляємо старе статус-повідомлення і надсилаємо нове з фото bank2
+        try:
+            await message.bot.delete_message(chat_id, game["status_msg_id"])
+        except:
+            pass
+
+        new_status = await message.answer_photo(
+            photo=FSInputFile(IMAGE_LOOTING),
+            caption=status_text(game),
             reply_markup=build_loot_keyboard(game["remaining_loot"]),
             parse_mode="HTML"
         )
@@ -432,5 +466,6 @@ async def pograb_take_money(callback: CallbackQuery):
 
     game["current_turn"] += 1
 
-    if game.get("turn_task"): game["turn_task"].cancel()
+    if game.get("turn_task"):
+        game["turn_task"].cancel()
     await advance_turn(chat_id, callback.bot, game)

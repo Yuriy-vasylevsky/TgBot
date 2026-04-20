@@ -222,12 +222,12 @@ async def slot_spin(message: types.Message, state: FSMContext):
     # --- Формування комбінації ---
     if is_win:
         roll = random.random()
-        if roll < 0.01:
+        if roll < 0.001:
             sym = random.choice(symbols)
             reels = [sym, sym, sym]
             multiplier = 20
             outcome = f"🎉 ТРИ {sym} — x20! Джекпот!"
-        elif roll < 0.07:
+        elif roll < 0.09:
             other = random.choice([s for s in symbols if s != "7️⃣"])
             reels = ["7️⃣", "7️⃣", other]
             random.shuffle(reels)
