@@ -227,7 +227,7 @@ async def slot_spin(message: types.Message, state: FSMContext):
             reels = [sym, sym, sym]
             multiplier = 20
             outcome = f"🎉 ТРИ {sym} — x20! Джекпот!"
-        elif roll < 0.09:
+        elif roll < 0.01:
             other = random.choice([s for s in symbols if s != "7️⃣"])
             reels = ["7️⃣", "7️⃣", other]
             random.shuffle(reels)
