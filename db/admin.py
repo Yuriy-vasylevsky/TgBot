@@ -167,23 +167,27 @@ async def get_user_task_progress(user_id: int):
 async def get_daily_winnings_summary() -> dict:
     import re
     async with aiosqlite.connect(DB_PATH) as db:
-        # Кількість виграшів у слотах за сьогодні
+        # Слоти
         cursor = await db.execute(
-            """
-            SELECT COUNT(*) FROM notifications
-            WHERE type = 'slots'
-            AND DATE(created_at) = DATE('now', '+3 hours')
-            """
+            "SELECT COUNT(*) FROM notifications WHERE type = 'slots' AND DATE(created_at) = DATE('now', '+3 hours')"
         )
         slots_count = (await cursor.fetchone())[0]
 
-        # Повідомлення фортуни за сьогодні — парсимо суму
+        # 1 із 3
         cursor = await db.execute(
-            """
-            SELECT message FROM notifications
-            WHERE type = 'fortune'
-            AND DATE(created_at) = DATE('now', '+3 hours')
-            """
+            "SELECT COUNT(*) FROM notifications WHERE type = 'one_of_three' AND DATE(created_at) = DATE('now', '+3 hours')"
+        )
+        one_of_three_count = (await cursor.fetchone())[0]
+
+        # Blackjack
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM notifications WHERE type = 'blackjack' AND DATE(created_at) = DATE('now', '+3 hours')"
+        )
+        blackjack_count = (await cursor.fetchone())[0]
+
+        # Фортуна
+        cursor = await db.execute(
+            "SELECT message FROM notifications WHERE type = 'fortune' AND DATE(created_at) = DATE('now', '+3 hours')"
         )
         fortune_rows = await cursor.fetchall()
 
@@ -193,9 +197,12 @@ async def get_daily_winnings_summary() -> dict:
         if match:
             fortune_total += int(match.group(1))
 
+    fixed_total = (slots_count + one_of_three_count + blackjack_count) * 30
+
     return {
         "slots_count": slots_count,
-        "slots_total": slots_count * 30,
+        "one_of_three_count": one_of_three_count,
+        "blackjack_count": blackjack_count,
         "fortune_total": fortune_total,
-        "grand_total": slots_count * 30 + fortune_total,
+        "grand_total": fixed_total + fortune_total,
     }
