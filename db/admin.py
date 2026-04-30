@@ -162,3 +162,40 @@ async def get_user_task_progress(user_id: int):
             }
             for r in rows
         ]
+    
+
+async def get_daily_winnings_summary() -> dict:
+    import re
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Кількість виграшів у слотах за сьогодні
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*) FROM notifications
+            WHERE type = 'slots'
+            AND DATE(created_at) = DATE('now', '+3 hours')
+            """
+        )
+        slots_count = (await cursor.fetchone())[0]
+
+        # Повідомлення фортуни за сьогодні — парсимо суму
+        cursor = await db.execute(
+            """
+            SELECT message FROM notifications
+            WHERE type = 'fortune'
+            AND DATE(created_at) = DATE('now', '+3 hours')
+            """
+        )
+        fortune_rows = await cursor.fetchall()
+
+    fortune_total = 0
+    for (msg,) in fortune_rows:
+        match = re.search(r'(\d+)\s*грн', msg)
+        if match:
+            fortune_total += int(match.group(1))
+
+    return {
+        "slots_count": slots_count,
+        "slots_total": slots_count * 30,
+        "fortune_total": fortune_total,
+        "grand_total": slots_count * 30 + fortune_total,
+    }
