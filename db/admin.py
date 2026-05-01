@@ -167,42 +167,36 @@ async def get_user_task_progress(user_id: int):
 async def get_daily_winnings_summary() -> dict:
     import re
     async with aiosqlite.connect(DB_PATH) as db:
-        # Слоти
         cursor = await db.execute(
-            "SELECT COUNT(*) FROM notifications WHERE type = 'slots' AND DATE(created_at) = DATE('now', '+3 hours')"
+            """
+            SELECT type, message FROM notifications
+            WHERE type IN ('slots', 'fortune', 'one_of_three', 'blackjack')
+            AND DATE(created_at) = DATE('now', '+3 hours')
+            """
         )
-        slots_count = (await cursor.fetchone())[0]
+        rows = await cursor.fetchall()
 
-        # 1 із 3
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM notifications WHERE type = 'one_of_three' AND DATE(created_at) = DATE('now', '+3 hours')"
-        )
-        one_of_three_count = (await cursor.fetchone())[0]
+    totals = {"slots": 0, "fortune": 0, "one_of_three": 0, "blackjack": 0}
 
-        # Blackjack
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM notifications WHERE type = 'blackjack' AND DATE(created_at) = DATE('now', '+3 hours')"
-        )
-        blackjack_count = (await cursor.fetchone())[0]
+    for (type_, msg) in rows:
+        # Програш — завжди пропускаємо
+        if "❌" in msg:
+            continue
 
-        # Фортуна
-        cursor = await db.execute(
-            "SELECT message FROM notifications WHERE type = 'fortune' AND DATE(created_at) = DATE('now', '+3 hours')"
-        )
-        fortune_rows = await cursor.fetchall()
+        if type_ == "slots" and "✅" in msg:
+            totals["slots"] += 30
 
-    fortune_total = 0
-    for (msg,) in fortune_rows:
-        match = re.search(r'(\d+)\s*грн', msg)
-        if match:
-            fortune_total += int(match.group(1))
+        elif type_ == "fortune":
+            # Формат: "Колесо фортуни: +50 грн (50 грн)"
+            match = re.search(r'\+(\d+)\s*грн', msg)
+            if match:
+                totals["fortune"] += int(match.group(1))
 
-    fixed_total = (slots_count + one_of_three_count + blackjack_count) * 30
+        elif type_ == "one_of_three" and "✅" in msg:
+            totals["one_of_three"] += 30  # вкажи правильну суму якщо інша
 
-    return {
-        "slots_count": slots_count,
-        "one_of_three_count": one_of_three_count,
-        "blackjack_count": blackjack_count,
-        "fortune_total": fortune_total,
-        "grand_total": fixed_total + fortune_total,
-    }
+        elif type_ == "blackjack" and "✅" in msg:
+            totals["blackjack"] += 30  # вкажи правильну суму якщо інша
+
+    grand_total = sum(totals.values())
+    return {**totals, "grand_total": grand_total}
