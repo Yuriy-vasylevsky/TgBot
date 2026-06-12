@@ -85,7 +85,7 @@ async def process_amount(message: Message, state: FSMContext):
         f"sum={amount_grn} грн | payment_id='{payment_id}'"
     )
 
-    your_card = "4441111043425077"
+    your_card = "4441114406854081"
 
     text = (
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
