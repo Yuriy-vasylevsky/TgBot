@@ -78,29 +78,179 @@ async def show_safe(message: Message):
 
 
 
+# @router.message(Command("open"))
+# async def admin_open_cell(message: Message):
+#     if message.from_user.id != ADMIN_ID:
+#         return
+
+#     # ==========================
+#     # ОТРИМУЄМО ГРАВЦЯ + МЕНШЕН
+#     # ==========================
+#     target_user = None
+#     mention = ""
+#     if message.reply_to_message and message.reply_to_message.from_user:
+#         target_user = message.reply_to_message.from_user
+#         if target_user.username:
+#             mention = f"@{target_user.username}"
+#         else:
+#             mention = f"<a href='tg://user?id={target_user.id}'>{target_user.full_name}</a>"
+#         mention = f"<b>{mention}</b> "
+
+#     # ==========================
+#     # ПАРСИНГ + ВСІ ПЕРЕВІРКИ (без змін)
+#     # ==========================
+#     if len(message.text.split()) < 2:
+#         await message.answer(f"{mention}❌ Формат:\n<code>/open 123</code> ...", parse_mode="HTML")
+#         return
+
+#     raw_arg = message.text.split(maxsplit=1)[1].strip()
+#     cleaned = raw_arg.replace(", ", ",").replace(" ,", ",")
+#     parts = cleaned.replace(",", " ").split()
+
+#     cells_to_open = []
+#     for part in parts:
+#         part = part.strip()
+#         if not part: continue
+#         if "-" in part:
+#             try:
+#                 start, end = map(int, part.split("-"))
+#                 if start > end: start, end = end, start
+#                 cells_to_open.extend(range(start, end + 1))
+#             except:
+#                 await message.answer(f"{mention}❌ Некоректний діапазон: {part}", parse_mode="HTML")
+#                 return
+#         else:
+#             try:
+#                 cells_to_open.append(int(part))
+#             except:
+#                 await message.answer(f"{mention}❌ Не число: {part}", parse_mode="HTML")
+#                 return
+
+#     if not cells_to_open:
+#         await message.answer(f"{mention}❌ Не вдалося розпізнати жодного числа", parse_mode="HTML")
+#         return
+
+#     cells_to_open = sorted(set(cells_to_open))
+
+#     if any(c < 1 or c > TOTAL_CELLS for c in cells_to_open):
+#         await message.answer(f"{mention}❌ Клітинки повинні бути від 1 до {TOTAL_CELLS}", parse_mode="HTML")
+#         return
+#     if len(cells_to_open) > 50:
+#         await message.answer(f"{mention}❌ Максимум 50 клітинок за раз", parse_mode="HTML")
+#         return
+
+#     # ==========================
+#     # РОБОТА З БАЗОЮ + ЗАПИС ГРАВЦЯ
+#     # ==========================
+#     state = await load_state()
+#     opened = set(state["opened"])
+#     win_cell = state.get("win_cell", WIN_CELL)
+#     users = state["users"].copy()                     # <-- копія для оновлення
+
+#     already_opened = [c for c in cells_to_open if c in opened]
+#     new_cells = [c for c in cells_to_open if c not in opened]
+
+#     if not new_cells:
+#         await message.answer(f"{mention}⚠️ <b>Всі вказані клітинки вже відкриті!</b>", parse_mode="HTML")
+#         return
+
+#     # === ЗАПИСУЄМО ГРАВЦЯ (якщо є reply) ===
+#     if target_user and new_cells:
+#         user_id = str(target_user.id)
+#         display_name = f"@{target_user.username}" if target_user.username else target_user.full_name
+        
+#         current_count = users.get(user_id, {}).get("count", 0)
+#         users[user_id] = {
+#             "display_name": display_name,           # оновлюється при кожному відкритті
+#             "count": current_count + len(new_cells)
+#         }
+
+#     opened.update(new_cells)
+#     await save_state(opened=opened, win_cell=win_cell, users=users)   # зберігаємо все
+
+#     # ==========================
+#     # ВИГРАШ
+#     # ==========================
+#     if win_cell in new_cells:
+#         await message.answer(
+#             f"{mention}🎉 <b>СЕЙФ ЗЛОМАНО!</b> 🏆\n\n"
+#             f"🔓 Клітинка <b>{win_cell}</b> — ВИГРАШНА!\n"
+#             f"💰 Виграш: <b>2000 грн</b>",
+#             parse_mode="HTML"
+#         )
+#         await message.bot.send_message(
+#             ADMIN_ID,
+#             f"🎉 СЕЙФ ЗЛОМАНО!\nГравець: {mention.strip()}\nКлітинка: {win_cell}",
+#             parse_mode="HTML"
+#         )
+#         return
+
+#     # ==========================
+#     # НЕ ВГАДАЛИ
+#     # ==========================
+#     skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
+#     opened_str = ', '.join(map(str, new_cells))
+
+#     await message.answer(
+#         f"{mention}❌ <b>Не вгадали!</b> ❌\n\n"
+#         f"✅ Перевірено: <b>{len(new_cells)}</b> клітинок\n"
+#         f"Номери: <b>{opened_str}</b>{skipped}",
+#         parse_mode="HTML"
+#     )
+
+
+
 @router.message(Command("open"))
 async def admin_open_cell(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
     # ==========================
-    # ОТРИМУЄМО ГРАВЦЯ + МЕНШЕН
+    # ОБОВ'ЯЗКОВО ПОВИНЕН БУТИ REPLY НА ГРАВЦЯ
     # ==========================
-    target_user = None
-    mention = ""
-    if message.reply_to_message and message.reply_to_message.from_user:
-        target_user = message.reply_to_message.from_user
-        if target_user.username:
-            mention = f"@{target_user.username}"
-        else:
-            mention = f"<a href='tg://user?id={target_user.id}'>{target_user.full_name}</a>"
-        mention = f"<b>{mention}</b> "
+    if not message.reply_to_message or not message.reply_to_message.from_user:
+        await message.answer(
+            "⚠️ Щоб відкрити клітинки, потрібно відповісти командою "
+            "<code>/open ...</code> на повідомлення гравця.\n\n"
+            "Приклад:\n"
+            "1. Гравець пише: <code>15 25 37</code>\n"
+            "2. Адмін робить Reply на це повідомлення\n"
+            "3. Пише: <code>/open 15 25 37</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    # Не дозволяємо відкривати клітинки у відповідь на повідомлення бота
+    if message.reply_to_message.from_user.is_bot:
+        await message.answer(
+            "⚠️ Команда повинна бути відповіддю на повідомлення гравця, а не бота.",
+            parse_mode="HTML"
+        )
+        return
 
     # ==========================
-    # ПАРСИНГ + ВСІ ПЕРЕВІРКИ (без змін)
+    # ОТРИМУЄМО ГРАВЦЯ + МЕНШЕН
+    # ==========================
+    target_user = message.reply_to_message.from_user
+
+    if target_user.username:
+        mention = f"@{target_user.username}"
+    else:
+        mention = (
+            f"<a href='tg://user?id={target_user.id}'>"
+            f"{target_user.full_name}</a>"
+        )
+
+    mention = f"<b>{mention}</b> "
+
+    # ==========================
+    # ПАРСИНГ + ВСІ ПЕРЕВІРКИ
     # ==========================
     if len(message.text.split()) < 2:
-        await message.answer(f"{mention}❌ Формат:\n<code>/open 123</code> ...", parse_mode="HTML")
+        await message.answer(
+            f"{mention}❌ Формат:\n<code>/open 123</code>",
+            parse_mode="HTML"
+        )
         return
 
     raw_arg = message.text.split(maxsplit=1)[1].strip()
@@ -108,35 +258,59 @@ async def admin_open_cell(message: Message):
     parts = cleaned.replace(",", " ").split()
 
     cells_to_open = []
+
     for part in parts:
         part = part.strip()
-        if not part: continue
+
+        if not part:
+            continue
+
         if "-" in part:
             try:
                 start, end = map(int, part.split("-"))
-                if start > end: start, end = end, start
+
+                if start > end:
+                    start, end = end, start
+
                 cells_to_open.extend(range(start, end + 1))
-            except:
-                await message.answer(f"{mention}❌ Некоректний діапазон: {part}", parse_mode="HTML")
+
+            except Exception:
+                await message.answer(
+                    f"{mention}❌ Некоректний діапазон: {part}",
+                    parse_mode="HTML"
+                )
                 return
         else:
             try:
                 cells_to_open.append(int(part))
-            except:
-                await message.answer(f"{mention}❌ Не число: {part}", parse_mode="HTML")
+            except Exception:
+                await message.answer(
+                    f"{mention}❌ Не число: {part}",
+                    parse_mode="HTML"
+                )
                 return
 
     if not cells_to_open:
-        await message.answer(f"{mention}❌ Не вдалося розпізнати жодного числа", parse_mode="HTML")
+        await message.answer(
+            f"{mention}❌ Не вдалося розпізнати жодного числа",
+            parse_mode="HTML"
+        )
         return
 
     cells_to_open = sorted(set(cells_to_open))
 
     if any(c < 1 or c > TOTAL_CELLS for c in cells_to_open):
-        await message.answer(f"{mention}❌ Клітинки повинні бути від 1 до {TOTAL_CELLS}", parse_mode="HTML")
+        await message.answer(
+            f"{mention}❌ Клітинки повинні бути від 1 до {TOTAL_CELLS}",
+            parse_mode="HTML"
+        )
         return
+
     if len(cells_to_open) > 50:
-        await message.answer(f"{mention}❌ Максимум 50 клітинок за раз", parse_mode="HTML")
+        await message.answer(
+            f"{mention}❌ Максимум 50 клітинок за раз",
+            parse_mode="HTML"
+        )
         return
 
     # ==========================
@@ -145,28 +319,43 @@ async def admin_open_cell(message: Message):
     state = await load_state()
     opened = set(state["opened"])
     win_cell = state.get("win_cell", WIN_CELL)
-    users = state["users"].copy()                     # <-- копія для оновлення
+    users = state["users"].copy()
 
     already_opened = [c for c in cells_to_open if c in opened]
     new_cells = [c for c in cells_to_open if c not in opened]
 
     if not new_cells:
-        await message.answer(f"{mention}⚠️ <b>Всі вказані клітинки вже відкриті!</b>", parse_mode="HTML")
+        await message.answer(
+            f"{mention}⚠️ <b>Всі вказані клітинки вже відкриті!</b>",
+            parse_mode="HTML"
+        )
         return
 
-    # === ЗАПИСУЄМО ГРАВЦЯ (якщо є reply) ===
-    if target_user and new_cells:
-        user_id = str(target_user.id)
-        display_name = f"@{target_user.username}" if target_user.username else target_user.full_name
-        
-        current_count = users.get(user_id, {}).get("count", 0)
-        users[user_id] = {
-            "display_name": display_name,           # оновлюється при кожному відкритті
-            "count": current_count + len(new_cells)
-        }
+    # ==========================
+    # ЗАПИСУЄМО ГРАВЦЯ
+    # ==========================
+    user_id = str(target_user.id)
+
+    display_name = (
+        f"@{target_user.username}"
+        if target_user.username
+        else target_user.full_name
+    )
+
+    current_count = users.get(user_id, {}).get("count", 0)
+
+    users[user_id] = {
+        "display_name": display_name,
+        "count": current_count + len(new_cells)
+    }
 
     opened.update(new_cells)
-    await save_state(opened=opened, win_cell=win_cell, users=users)   # зберігаємо все
+
+    await save_state(
+        opened=opened,
+        win_cell=win_cell,
+        users=users
+    )
 
     # ==========================
     # ВИГРАШ
@@ -178,18 +367,27 @@ async def admin_open_cell(message: Message):
             f"💰 Виграш: <b>2000 грн</b>",
             parse_mode="HTML"
         )
+
         await message.bot.send_message(
             ADMIN_ID,
-            f"🎉 СЕЙФ ЗЛОМАНО!\nГравець: {mention.strip()}\nКлітинка: {win_cell}",
+            f"🎉 СЕЙФ ЗЛОМАНО!\n"
+            f"Гравець: {display_name}\n"
+            f"Клітинка: {win_cell}",
             parse_mode="HTML"
         )
+
         return
 
     # ==========================
     # НЕ ВГАДАЛИ
     # ==========================
-    skipped = f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}" if already_opened else ""
-    opened_str = ', '.join(map(str, new_cells))
+    skipped = (
+        f"\n⚠️ Вже були відкриті: {', '.join(map(str, already_opened))}"
+        if already_opened
+        else ""
+    )
+
+    opened_str = ", ".join(map(str, new_cells))
 
     await message.answer(
         f"{mention}❌ <b>Не вгадали!</b> ❌\n\n"
@@ -202,7 +400,5 @@ async def admin_open_cell(message: Message):
 
 
 
-
-
-
-
+# git config --global user.name "Yuriy-vasylevsky"
+# git config --global user.email "yuriy.vasylevsky@gmail.com"
