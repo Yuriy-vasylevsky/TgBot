@@ -20,7 +20,7 @@ TOKEN = os.getenv("TOKEN")
 MONO_TOKEN = os.getenv("MONO_TOKEN")
 MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
-
+MONO_CARD = os.getenv("MONO_CARD")
 # ====================== НАЛАШТУВАННЯ ФОРТУНИ ======================
   # Скільки промо потрібно для одного обертання колеса
 

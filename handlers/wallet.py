@@ -14,7 +14,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import monobank
-from handlers.config import MONO_TOKEN, MONO_ACCOUNT
+from handlers.config import MONO_TOKEN, MONO_ACCOUNT, MONO_CARD
 
 from db import (
     get_balance,
@@ -85,12 +85,12 @@ async def process_amount(message: Message, state: FSMContext):
         f"sum={amount_grn} грн | payment_id='{payment_id}'"
     )
 
-    your_card = "4441114406854081"
+    
 
     text = (
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
         f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n"
-        f"<b>{your_card}</b>\n\n"
+        f"<b>{MONO_CARD}</b>\n\n"
         f"⚠️ Коментар не обов'язковий!\n\n"
         f"Після оплати натисни кнопку нижче"
     )
