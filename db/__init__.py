@@ -89,4 +89,18 @@ from .admin import (
     ensure_ban_table,
 )
 
+
+
+# ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+from .check import (
+    add_check_code,
+    delete_check_code,
+    get_checks_stats,
+    clear_all_checks,
+    get_checks_count,
+    get_free_check,
+    remove_check,
+)
 __all__ = [name for name in globals() if not name.startswith("_")]

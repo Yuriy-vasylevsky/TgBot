@@ -11,9 +11,9 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
         keyboard = [
             ["🎮 Ігри", "🎯 Winrate"],
             ["🤞 Згенерувати промо", "🎟 Активні Promo"],
-            ["👥 Список користувачів"],
+            ["👥 Список користувачів", "🎮 Грати"],
             ["📜 Історія сповіщень", "💰 Гаманець"],
-            ["➕ Додати код"],
+            ["➕ Додати код", "💳 Чеки"],
             ["⚙️⚙️⚙️", "⚙️ Адмін панель"],
         ]
     else:
@@ -33,6 +33,25 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
         resize_keyboard=True,
+    )
+
+
+# ==========================
+# меню чеків
+# ==========================
+
+
+def checks_menu():
+    keyboard = [
+        ["🏆 Чек 100 Champion", "🏆 Чек 200 Champion"],
+        ["🎰 Чек 100 Matic", "🎰 Чек 200 Matic"],
+        ["📊 Чеки", "🧹 Очистити всі чеки"],
+        ["🔙 Назад до головного меню"]
+    ]
+
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        resize_keyboard=True
     )
 
 

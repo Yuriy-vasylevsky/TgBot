@@ -26,3 +26,6 @@ async def admin_panel2(message: types.Message):
         await message.answer("🔐 Адмін панель", reply_markup=admin_menu2())
     else:
         await message.answer("⛔ У вас немає доступу")
+
+
+

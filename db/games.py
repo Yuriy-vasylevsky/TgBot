@@ -190,3 +190,12 @@ async def get_promo(user_id: int) -> int:
         async with db.execute("SELECT games_played FROM users WHERE user_id = ?", (user_id,)) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+        
+
+
+
+
+
+# Код для додавання чеків
+
+

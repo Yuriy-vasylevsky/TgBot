@@ -200,3 +200,5 @@ async def get_daily_winnings_summary() -> dict:
 
     grand_total = sum(totals.values())
     return {**totals, "grand_total": grand_total}
+
+

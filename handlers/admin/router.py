@@ -13,10 +13,11 @@ from .cards import router as cards_router
 from .weekly_tasks import router as weekly_tasks_router
 from .notifications import router as notifications_router
 from .safe import router as safe_router
-
+from .checks import router as admin_checks_router
 router = Router(name="admin")
 
 # Підключаємо всі підроутери
+router.include_router(admin_checks_router) 
 router.include_router(base_router)
 router.include_router(winrate_router)
 router.include_router(users_router)
@@ -29,5 +30,5 @@ router.include_router(cards_router)
 router.include_router(weekly_tasks_router)
 router.include_router(notifications_router)
 router.include_router(safe_router)
-
+ # Підключаємо роутер для чеків
 __all__ = ["router"]

@@ -15,7 +15,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 import monobank
 from handlers.config import MONO_TOKEN, MONO_ACCOUNT, MONO_CARD
-
+from handlers.config import ADMIN_ID
 from db import (
     get_balance,
     add_pending_payment,
@@ -89,9 +89,8 @@ async def process_amount(message: Message, state: FSMContext):
 
     text = (
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
-        f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n"
-        f"<b>{MONO_CARD}</b>\n\n"
-        f"⚠️ Коментар не обов'язковий!\n\n"
+        f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n\n"
+        f"<code>{MONO_CARD}</code>\n\n"
         f"Після оплати натисни кнопку нижче"
     )
 
@@ -198,13 +197,26 @@ async def check_payment(event: Message | CallbackQuery):
                 f"⚠️ Платіж НЕ ЗНАЙДЕНО! user_id={user_id} | "
                 f"payment_id='{payment_id}' | шукали: {target_amount_grn} грн за {time_window}s"
             )
+            kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="🔄 Перевірити платіж",
+                            callback_data="wallet_check"
+                        )
+                    ]
+                ]
+            )
+
             await message.answer(
                 f"❌ Платіж ще не знайдено.\n\n"
                 f"Переконайся:\n"
-                f"✓ Отправив точно <b>{target_amount_grn} грн</b>\n"
-                f"✓ На правильну картку: <b>4441111043425077</b>\n"
+                f"✓ Відправив точно <b>{target_amount_grn} грн</b>\n"
+                f"✓ На правильну картку: <b>{MONO_CARD}</b>\n"
                 f"✓ Платіж успішно обробився\n\n"
-                f"Почекай 1–2 хвилини і натисни кнопку знову."
+                f"Почекай 1–2 хвилини і натисни кнопку нижче.",
+                parse_mode="HTML",
+                reply_markup=kb
             )
             return
 
@@ -218,16 +230,45 @@ async def check_payment(event: Message | CallbackQuery):
         await add_to_balance(user_id, target_amount_grn)
         await remove_pending_payment(user_id)
 
+  
+
+        await message.bot.send_message(
+            ADMIN_ID,
+            f"💰 Поповнення балансу\n\n"
+            f"👤 Username: @{event.from_user.username or '-'}\n"
+            f"💵 Сума: <b>{target_amount_grn} грн</b>\n"
+            f"💳 Новий баланс: <b>{await get_balance(user_id)} грн</b>",
+            parse_mode="HTML"
+)
+
+
         tx_hold = tx.get("hold", False)
         tx_description = tx.get("description", "")
 
         status_msg = " (холд ще тримається)" if tx_hold else ""
 
-        await message.answer(
-            f"✅ Платіж зараховано{status_msg}!\n\n"
-            f"Сума: {target_amount_grn} грн\n"
-            f"Новий баланс: {await get_balance(user_id)} грн"
+        from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+        play_kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🎮 Грати")]
+            ],
+            resize_keyboard=True
         )
+
+        await message.answer(
+            f"✅ Платіж зараховано!\n\n"
+            f"💰 Сума: {target_amount_grn} грн\n"
+            f"💳 Новий баланс: {await get_balance(user_id)} грн",
+            reply_markup=play_kb
+        )
+
+        # await message.answer(
+        #     # f"✅ Платіж зараховано{status_msg}!\n\n"
+        #     f"✅ Платіж зараховано!\n\n"
+        #     f"Сума: {target_amount_grn} грн\n"
+        #     f"Новий баланс: {await get_balance(user_id)} грн"
+        # )
 
         logging.info(
             f"✅ ПЛАТІЖ ЗАРАХОВАНО! user_id={user_id} | "
