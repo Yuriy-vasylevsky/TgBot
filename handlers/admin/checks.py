@@ -41,27 +41,27 @@ CHECK_TABLES = {
     "🎰 Чек 100 Matic": "matic_checks_100",
     "🎰 Чек 200 Matic": "matic_checks_200",
 }
-
+from handlers.menu import checks_menu
 
 # =========================
 # МЕНЮ ЧЕКІВ (ВАЖЛИВО FIXED)
 # =========================
-def checks_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🏆 Чек 100 Champion"),
-             KeyboardButton(text="🏆 Чек 200 Champion")],
+# def checks_menu():
+#     return ReplyKeyboardMarkup(
+#         keyboard=[
+#             [KeyboardButton(text="🏆 Чек 100 Champion"),
+#              KeyboardButton(text="🏆 Чек 200 Champion")],
 
-            [KeyboardButton(text="🎰 Чек 100 Matic"),
-             KeyboardButton(text="🎰 Чек 200 Matic")],
+#             [KeyboardButton(text="🎰 Чек 100 Matic"),
+#              KeyboardButton(text="🎰 Чек 200 Matic")],
 
-            [KeyboardButton(text="📊 Чеки"),
-             KeyboardButton(text="🧹 Очистити всі чеки")],
+#             [KeyboardButton(text="📊 Чеки"),
+#              KeyboardButton(text="🧹 Очистити всі чеки")],
 
-            [KeyboardButton(text="🔙 Назад до головного меню")]
-        ],
-        resize_keyboard=True
-    )
+#             [KeyboardButton(text="🔙 Назад до головного меню")]
+#         ],
+#         resize_keyboard=True
+#     )
 
 
 @router.message(CheckFSM.waiting_for_code, F.text == "❌ Скасувати")
