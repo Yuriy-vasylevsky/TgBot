@@ -7,12 +7,23 @@ from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining  # Імпортуємо функції кулдауну (або з іншого файлу, де вони є)
 import aiosqlite
-from db import DB_PATH
+from db import DB_PATH, get_balance, add_to_balance
+
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+
+
 
 router = Router(name="admin_users")
 
 USERS_PER_PAGE = 10
 MAX_ACTIONS_TO_SHOW = 20
+
+
+class BalanceFSM(StatesGroup):
+    add_amount = State()
+    remove_amount = State()
+
 
 
 def parse_dt_safe(dt_str: str | None) -> datetime:
@@ -179,6 +190,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     games_played = user.get("games_played", 0)
     games_won = user.get("games_won", 0)
+    balance = await get_balance(user_id)
     winrate = round(games_won / games_played * 100) if games_played > 0 else 0
 
     actions = user.get("last_actions", "")
@@ -202,6 +214,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"🕒 Активність: {last_active}\n\n"
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
         # f"🏆 Виграно: <b>{games_won}</b>  ({winrate}%)\n\n"
+        f"💰 Баланс: <b>{balance}</b> грн\n"
         f"{cooldown_text}\n\n"
         f"<b>Останні дії (до {MAX_ACTIONS_TO_SHOW}):</b>\n"
         f"{actions_text}\n"
@@ -211,6 +224,17 @@ async def show_user_detail(callback: types.CallbackQuery):
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
     kb.button(text="🔄 Скинути кулдаун", callback_data=f"ask_reset:{user_id}:{from_page}")
 
+    kb.button(
+        text="💰 Поповнити баланс",
+        callback_data=f"balance_add:{user_id}:{from_page}"
+    )
+
+    kb.button(
+        text="💸 Зняти баланс",
+        callback_data=f"balance_remove:{user_id}:{from_page}"
+    )
+
+    
     try:
         await callback.message.edit_text(
             text,
@@ -275,3 +299,105 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
 
     # Оновлюємо деталі користувача
     await show_user_detail(callback) 
+
+
+
+@router.callback_query(F.data.startswith("balance_add:"))
+async def balance_add_start(
+    callback: types.CallbackQuery,
+    state: FSMContext
+):
+    if callback.from_user.id != ADMIN_ID:
+        return
+
+    _, user_id, page = callback.data.split(":")
+
+    await state.update_data(
+        user_id=int(user_id),
+        page=int(page)
+    )
+
+    await state.set_state(BalanceFSM.add_amount)
+
+    await callback.message.answer(
+        "💰 Введіть суму для поповнення балансу:"
+    )
+
+    await callback.answer()
+
+
+@router.message(BalanceFSM.add_amount)
+async def balance_add_finish(
+    message: types.Message,
+    state: FSMContext
+):
+    try:
+        amount = int(message.text)
+    except:
+        await message.answer("❌ Введіть число")
+        return
+
+    data = await state.get_data()
+
+    user_id = data["user_id"]
+
+    await add_to_balance(user_id, amount)
+
+    balance = await get_balance(user_id)
+
+    await message.answer(
+        f"✅ Баланс поповнено на {amount} грн\n\n"
+        f"💰 Новий баланс: {balance} грн"
+    )
+
+    await state.clear()
+
+
+@router.callback_query(F.data.startswith("balance_remove:"))
+async def balance_remove_start(
+    callback: types.CallbackQuery,
+    state: FSMContext
+):
+    if callback.from_user.id != ADMIN_ID:
+        return
+
+    _, user_id, page = callback.data.split(":")
+
+    await state.update_data(
+        user_id=int(user_id),
+        page=int(page)
+    )
+
+    await state.set_state(BalanceFSM.remove_amount)
+
+    await callback.message.answer(
+        "💸 Введіть суму для списання:"
+    )
+
+    await callback.answer()
+
+@router.message(BalanceFSM.remove_amount)
+async def balance_remove_finish(
+    message: types.Message,
+    state: FSMContext
+):
+    try:
+        amount = int(message.text)
+    except:
+        await message.answer("❌ Введіть число")
+        return
+
+    data = await state.get_data()
+
+    user_id = data["user_id"]
+
+    await add_to_balance(user_id, -amount)
+
+    balance = await get_balance(user_id)
+
+    await message.answer(
+        f"✅ Списано {amount} грн\n\n"
+        f"💰 Новий баланс: {balance} грн"
+    )
+
+    await state.clear()
