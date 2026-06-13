@@ -125,7 +125,7 @@ async def generate_promocodes(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "cancel_promo_gen")
 async def cancel_promo_gen(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("❌ Створення промокодів скасовано.")
+    await callback.message.answer("❌ Створення промокодів скасовано.")
     await callback.message.answer(
         "🔙 Повертаємось у головне меню.",
         reply_markup=main_menu(is_admin=callback.from_user.id == ADMIN_ID),

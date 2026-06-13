@@ -14,7 +14,7 @@ from db.check import add_check_code, get_checks_stats, clear_all_checks
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from db import get_balance, add_to_balance
-from db.check import get_checks_count, get_free_check, remove_check
+from db.check import get_checks_count, get_free_check, remove_check, get_checks_total_balance
 
 
 
@@ -64,6 +64,20 @@ def checks_menu():
     )
 
 
+@router.message(CheckFSM.waiting_for_code, F.text == "❌ Скасувати")
+async def cancel_add_code(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await state.clear()
+
+    await message.answer(
+        "❌ Додавання чека скасовано",
+        reply_markup=checks_menu()
+    )
+
+
+
 # =========================
 # ВІДКРИТИ МЕНЮ
 # =========================
@@ -86,9 +100,17 @@ async def choose_type(message: Message, state: FSMContext):
     await state.update_data(table=CHECK_TABLES[message.text])
     await state.set_state(CheckFSM.waiting_for_code)
 
+    cancel_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="❌ Скасувати")]
+        ],
+        resize_keyboard=True
+    )
+
     await message.answer(
-        "📩 Відправ код у форматі:\n"
-        "11-22-33-44-55-66-77"
+        "📩 Відправ код у форматі: 00-00-00-00-00-00-00\n",
+        # "00-00-00-00-00-00-00",
+        reply_markup=cancel_kb
     )
 
 
@@ -110,31 +132,59 @@ async def save_code(message: Message, state: FSMContext):
     table = data["table"]
 
     await add_check_code(table, code)
-    await state.clear()
 
-    await message.answer(
-        f"✅ Код додано:\n<code>{code}</code>",
-        parse_mode="HTML",
-        reply_markup=checks_menu()
+    cancel_kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="❌ Скасувати")]
+        ],
+        resize_keyboard=True
     )
 
+    await message.answer(
+        f"✅ Код додано:\n<code>{code}</code>\n\n"
+        f"📩 Надішли наступний код:",
+        parse_mode="HTML",
+        reply_markup=cancel_kb
+    )
 
 # =========================
 # СТАТИСТИКА
 # =========================
+
 @router.message(F.text == "📊 Чеки")
 async def checks_stats(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
 
     stats = await get_checks_stats()
+    total_balance = await get_checks_total_balance()
 
     text = "💳 <b>Статистика чеків</b>\n\n"
 
     for name, count in stats.items():
         text += f"{name}: <b>{count}</b>\n"
 
+    text += (
+        "\n"
+        f"💰 <b>Баланс чеків:</b> {total_balance} грн"
+    )
+
     await message.answer(text, parse_mode="HTML")
+
+
+# @router.message(F.text == "📊 Чеки")
+# async def checks_stats(message: Message):
+#     if message.from_user.id != ADMIN_ID:
+#         return
+
+#     stats = await get_checks_stats()
+
+#     text = "💳 <b>Статистика чеків</b>\n\n"
+
+#     for name, count in stats.items():
+#         text += f"{name}: <b>{count}</b>\n"
+
+#     await message.answer(text, parse_mode="HTML")
 
 
 # =========================
@@ -248,13 +298,17 @@ async def play_menu(message: Message):
         resize_keyboard=True
     )
 
-    # інлайн кнопка поповнення
+    # інлайн кнопки
     inline_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="💰 Поповнити баланс",
+                    text="💰 Поповнити",
                     callback_data="wallet_topup"
+                ),
+                InlineKeyboardButton(
+                    text="👨‍💼 Касир",
+                    url="https://t.me/KaSSa_4444"
                 )
             ]
         ]
@@ -267,7 +321,7 @@ async def play_menu(message: Message):
     )
 
     await message.answer(
-        "🎮 Меню гри",
+        "💰 Вивід через касира в робочий час з 9:00 до 00:00",
         reply_markup=kb
     )
 

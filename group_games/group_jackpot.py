@@ -155,7 +155,7 @@ async def jackpot_press(callback: CallbackQuery):
             [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{required})", callback_data="jackpot_press")]
         ])
 
-        await callback.message.edit_text(
+        await callback.message.answer(
             f"🎰 <b>Лови JACKPOT!</b>\n\n"
             f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
             f"{get_starters_text(game['starters'])}\n\n"
@@ -172,7 +172,7 @@ async def jackpot_press(callback: CallbackQuery):
         [InlineKeyboardButton(text="💰 ЗАБРАТИ 1 ГРН", callback_data="jackpot_take")]
     ])
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         f"🎰 <b>Лови JACKPOT!</b>\n\n"
         f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
         f"{get_starters_text(game['starters'])}\n\n"
@@ -274,7 +274,7 @@ async def jackpot_take(callback: CallbackQuery):
     game["active"] = False
     winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
         f"{user.mention_html()} забрав <b>{amount} грн</b>!\n\n"
         f"🔒 Наступний ПУСК для тебе буде доступний через {COOLDOWN_HOURS} годин.",

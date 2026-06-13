@@ -99,3 +99,16 @@ async def remove_check(table: str, code: str):
             (code,)
         )
         await db.commit()
+
+
+async def get_checks_total_balance():
+    stats = await get_checks_stats()
+
+    total = (
+        stats.get("🏆 Чек 100 Champion", 0) * 100 +
+        stats.get("🏆 Чек 200 Champion", 0) * 200 +
+        stats.get("🎰 Чек 100 Matic", 0) * 100 +
+        stats.get("🎰 Чек 200 Matic", 0) * 200
+    )
+
+    return total

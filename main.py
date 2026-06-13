@@ -240,14 +240,14 @@ async def confirm_reset_gifts(message: types.Message):
 
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
-    await callback.message.edit_text("🔄 Скидаємо...")
+    await callback.message.answer("🔄 Скидаємо...")
     await reset_all_gifts()
-    await callback.message.edit_text("✅ Усі подарунки скинуто.")
+    await callback.message.answer("✅ Усі подарунки скинуто.")
 
 
 @dp.callback_query(F.data == "cancel_reset_gifts")
 async def cancel_reset_gifts(callback: types.CallbackQuery):
-    await callback.message.edit_text("❌ Скасовано.")
+    await callback.message.answer("❌ Скасовано.")
 
 
 # ==========================

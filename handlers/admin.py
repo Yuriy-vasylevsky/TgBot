@@ -311,7 +311,7 @@
 #     user = next((u for u in users if u["user_id"] == user_id), None)
 
 #     if not user:
-#         await callback.message.edit_text("Користувача вже немає в базі.")
+#         await callback.message.answer("Користувача вже немає в базі.")
 #         return
 
 #     # ─── Формуємо текст профілю ────────────────────────────────
@@ -346,7 +346,7 @@
 #     # можна додати ще кнопки: бан, видати бонуси, переглянути платежі тощо
 
 #     try:
-#         await callback.message.edit_text(
+#         await callback.message.answer(
 #             text,
 #             parse_mode="HTML",
 #             reply_markup=kb.as_markup(),
@@ -618,7 +618,7 @@
 #     data = await state.get_data()
 #     text = data.get("update_text", "")
 
-#     await callback.message.edit_text("📤 Починаю оновлення меню...")
+#     await callback.message.answer("📤 Починаю оновлення меню...")
 
 #     async with aiosqlite.connect("users.db") as conn:
 #         async with conn.execute("SELECT user_id FROM users") as cur:
@@ -661,7 +661,7 @@
 # @router.callback_query(F.data == "cancel_menu_update")
 # async def cancel_menu_update(callback: types.CallbackQuery, state: FSMContext):
 #     await state.clear()
-#     await callback.message.edit_text("❌ Оновлення меню скасовано.")
+#     await callback.message.answer("❌ Оновлення меню скасовано.")
 #     await callback.answer()
 
 
@@ -785,7 +785,7 @@
 # async def cancel_promo_gen(callback: types.CallbackQuery, state: FSMContext):
 #     """Обробка натискання кнопки 'Відмінити'"""
 #     await state.clear()
-#     await callback.message.edit_text(
+#     await callback.message.answer(
 #         "❌ Створення промокодів скасовано.",
 #     )
 #     await callback.message.answer(
@@ -1413,7 +1413,7 @@
 #         await db.execute("DELETE FROM user_tasks WHERE task_id = ?", (task_id,))
 #         await db.commit()
 
-#     await callback.message.edit_text(
+#     await callback.message.answer(
 #         f"✅ Завдання <b>ID {task_id}</b> видалено.", parse_mode="HTML"
 #     )
 #     await callback.answer("Завдання видалено!")

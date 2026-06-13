@@ -52,7 +52,7 @@ async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     text = data.get("update_text", "")
 
-    await callback.message.edit_text("📤 Починаю оновлення меню...")
+    await callback.message.answer("📤 Починаю оновлення меню...")
 
     async with aiosqlite.connect(DB_PATH) as conn:  # або DB_PATH, якщо імпортуєш
         async with conn.execute("SELECT user_id FROM users") as cur:
@@ -95,5 +95,5 @@ async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "cancel_menu_update")
 async def cancel_menu_update(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text("❌ Оновлення меню скасовано.")
+    await callback.message.answer("❌ Оновлення меню скасовано.")
     await callback.answer()

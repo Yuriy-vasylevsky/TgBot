@@ -108,7 +108,7 @@ async def delete_selected_task(callback: types.CallbackQuery):
         await db.execute("DELETE FROM user_tasks WHERE task_id = ?", (task_id,))
         await db.commit()
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         f"✅ Завдання <b>ID {task_id}</b> видалено.", parse_mode="HTML"
     )
     await callback.answer("Завдання видалено!")

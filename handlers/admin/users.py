@@ -180,7 +180,7 @@ async def show_user_detail(callback: types.CallbackQuery):
     user = next((u for u in users if u["user_id"] == user_id), None)
 
     if not user:
-        await callback.message.edit_text("Користувача вже немає в базі.")
+        await callback.message.answer("Користувача вже немає в базі.")
         return
 
     full_name = user.get("full_name") or "—"
@@ -236,7 +236,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     
     try:
-        await callback.message.edit_text(
+        await callback.message.answer(
             text,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -269,7 +269,7 @@ async def ask_reset_cooldown(callback: types.CallbackQuery):
     kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}")
 
     try:
-        await callback.message.edit_text(
+        await callback.message.answer(
             text,
             reply_markup=kb.as_markup(),
             disable_web_page_preview=True,

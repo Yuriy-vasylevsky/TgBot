@@ -57,7 +57,7 @@ async def wallet_menu(message: Message):
 # ==================== ПОПОВНЕННЯ ====================
 @router.callback_query(F.data == "wallet_topup")
 async def start_topup(callback: CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Введіть суму поповнення в гривнях (від 200 грн):")
+    await callback.message.answer("Введіть суму поповнення в гривнях (від 200 грн):")
     await state.set_state(WalletStates.enter_amount)
     await callback.answer()
 

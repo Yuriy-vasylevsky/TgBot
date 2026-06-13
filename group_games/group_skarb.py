@@ -325,7 +325,7 @@ async def skarb_join(callback: CallbackQuery):
         f"Адмін може запустити гру кнопкою нижче"
     )
 
-    await callback.message.edit_text(
+    await callback.message.answer(
         text=text,
         reply_markup=keyboard,
         parse_mode="HTML"
@@ -426,7 +426,7 @@ async def skarb_click(callback: CallbackQuery):
             f"{user.mention_html()} знайшов {WIN_CARD} і забирає <b>{PRIZE_AMOUNT} грн</b>!\n\n"
         )
 
-        await callback.message.edit_text(
+        await callback.message.answer(
             text=final_text,
             reply_markup=build_grid_keyboard(game, disabled=True),
             parse_mode="HTML"
@@ -453,7 +453,7 @@ async def skarb_click(callback: CallbackQuery):
                 parse_mode="HTML"
             )
 
-        await callback.message.edit_text(
+        await callback.message.answer(
             f"<b>🃏 ТУЗ ЧІРВА ЗАХОВАНО НА ПОЛІ 8×8! 🃏</b>\n\n"
             f"Приз — <b>{PRIZE_AMOUNT} грн</b>\n\n"
             f"{get_starters_text(game)}\n\n"
@@ -467,7 +467,7 @@ async def skarb_click(callback: CallbackQuery):
         await callback.answer("💥 БОМБА! Втратив життя!", show_alert=True)
 
         if len(game["eliminated"]) == len(game["participants"]):
-            await callback.message.edit_text(
+            await callback.message.answer(
                 f"<b>💥 УСІ УЧАСНИКИ ВИБУХНУЛИ! ГРА ЗАКІНЧЕНА БЕЗ ПЕРЕМОЖЦЯ 😔</b>\n\n"
                 f"Приз {PRIZE_AMOUNT} грн ніхто не забрав.\n"
                 f"Спробуйте ще раз новою грою!",
@@ -490,7 +490,7 @@ async def skarb_click(callback: CallbackQuery):
             game["participants"][user_id]["lives"] += 1
             await callback.answer(f"+1 життя! Тепер у тебе {game['participants'][user_id]['lives']} ❤️", show_alert=True)
 
-            await callback.message.edit_text(
+            await callback.message.answer(
                 f"<b>🃏 ТУЗ ЧІРВА ЗАХОВАНО НА ПОЛІ 8×8! 🃏</b>\n\n"
                 f"Приз — <b>{PRIZE_AMOUNT} грн</b>\n\n"
                 f"{get_starters_text(game)}\n\n"
