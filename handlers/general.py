@@ -210,6 +210,36 @@ from db import DB_PATH
 # ________________________________________________________________________________________________________
 
 
+# @router.message(F.text == "📜 Перегляд кодів")
+# async def view_codes_handler(message: types.Message):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT id, casino_type, code, used FROM casino_codes"
+#         )
+#         codes = await cursor.fetchall()
+
+#     if not codes:
+#         await message.answer(
+#             "⚠️ Немає жодного коду в базі.", reply_markup=main_menu(is_admin=True)
+#         )
+#         return
+
+#     text_lines = ["📜 <b>Список кодів:</b>\n"]
+#     for code_id, casino_type, code, used in codes:
+#         status = "✅ використаний" if used else "🆓 вільний"
+#         text_lines.append(f"<b>{casino_type}</b> — <code>{code}</code> — {status}")
+#     text = "\n".join(text_lines)
+
+#     keyboard = ReplyKeyboardMarkup(
+#         keyboard=[
+#             [KeyboardButton(text="🧹 Очистити всі коди")],
+#             [KeyboardButton(text="⬅️ Назад в адмінку")],
+#         ],
+#         resize_keyboard=True,
+#     )
+
+#     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
+
 @router.message(F.text == "📜 Перегляд кодів")
 async def view_codes_handler(message: types.Message):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -224,14 +254,24 @@ async def view_codes_handler(message: types.Message):
         )
         return
 
+    total = len(codes)
+    used_count = sum(1 for _, _, _, used in codes if used)
+    free_count = total - used_count
+    total_price = free_count * 30
+
     text_lines = ["📜 <b>Список кодів:</b>\n"]
     for code_id, casino_type, code, used in codes:
         status = "✅ використаний" if used else "🆓 вільний"
         text_lines.append(f"<b>{casino_type}</b> — <code>{code}</code> — {status}")
+
+    text_lines.append(f"\n📊 <b>Всього:</b> {total} | 🆓 Вільних: {free_count} | ✅ Використаних: {used_count}")
+    text_lines.append(f"💰 <b>Вартість вільних кодів:</b> {total_price} грн")
+
     text = "\n".join(text_lines)
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="🗑 Видалити використані коди")],
             [KeyboardButton(text="🧹 Очистити всі коди")],
             [KeyboardButton(text="⬅️ Назад в адмінку")],
         ],
@@ -241,6 +281,39 @@ async def view_codes_handler(message: types.Message):
     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 
+@router.message(F.text == "🗑 Видалити використані коди")
+async def ask_delete_used_codes(message: types.Message):
+    confirm_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="✅ Так, видалити використані"),
+                KeyboardButton(text="❌ Ні, скасувати"),
+            ],
+        ],
+        resize_keyboard=True,
+    )
+    await message.answer(
+        "⚠️ Видалити всі <b>використані</b> коди?",
+        parse_mode="HTML",
+        reply_markup=confirm_keyboard,
+    )
+
+
+@router.message(F.text == "✅ Так, видалити використані")
+async def delete_used_codes(message: types.Message):
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM casino_codes WHERE used = 1")
+        (count,) = await cursor.fetchone()
+        await db.execute("DELETE FROM casino_codes WHERE used = 1")
+        await db.commit()
+
+    await message.answer(
+        f"🗑 Видалено <b>{count}</b> використаних кодів.",
+        parse_mode="HTML",
+        reply_markup=main_menu(is_admin=True)
+    )
+
+    
 @router.message(F.text == "🧹 Очистити всі коди")
 async def ask_clear_codes(message: types.Message):
     confirm_keyboard = ReplyKeyboardMarkup(
