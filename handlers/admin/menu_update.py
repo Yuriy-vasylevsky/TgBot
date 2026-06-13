@@ -7,7 +7,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from db import has_claimed_gift
-
+from db.core import DB_PATH
 router = Router(name="admin_menu_update")
 
 
@@ -54,7 +54,7 @@ async def confirm_menu_update(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text("📤 Починаю оновлення меню...")
 
-    async with aiosqlite.connect("users.db") as conn:  # або DB_PATH, якщо імпортуєш
+    async with aiosqlite.connect(DB_PATH) as conn:  # або DB_PATH, якщо імпортуєш
         async with conn.execute("SELECT user_id FROM users") as cur:
             rows = await cur.fetchall()
 

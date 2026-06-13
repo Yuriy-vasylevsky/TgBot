@@ -193,9 +193,9 @@ async def cancel_clear(message: Message, state: FSMContext):
 # ТАБЛИЦІ І ЦІНИ
 # =========================
 CHECKS = {
-    "🏆 Champion 100": ("champion_checks_100", 10),
+    "🏆 Champion 100": ("champion_checks_100", 100),
     "🏆 Champion 200": ("champion_checks_200", 200),
-    "🎰 Matic 100": ("matic_checks_100", 10),
+    "🎰 Matic 100": ("matic_checks_100", 100),
     "🎰 Matic 200": ("matic_checks_200", 200),
 }
 
