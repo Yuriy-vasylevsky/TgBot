@@ -209,13 +209,15 @@ async def show_user_detail(callback: types.CallbackQuery):
     issued = await get_issued_checks_for_user(user_id)
 
     if issued:
+        total_checks_sum = sum(ch["price"] for ch in issued)
         checks_lines = []
         for ch in issued:
             dt = format_time_kyiv(ch["issued_at"])
             checks_lines.append(f"• {ch['check_type']} | <code>{ch['code']}</code> | {dt}")
         checks_block = "\n".join(checks_lines)
     else:
-        checks_block = "🏆 Ще німа"
+        total_checks_sum = 0
+        checks_block = "ще німа"
 
     actions_limit_label = MAX_ACTIONS_EXPANDED if show_all_actions else MAX_ACTIONS_TO_SHOW
 
@@ -227,7 +229,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
         f"💰 Баланс: <b>{balance}</b> грн\n"
         f"{cooldown_text}\n\n"
-        f"🎁 <b>Видані чеки (2 дні):</b>\n"
+        f"🎁 <b>Видані чеки ({total_checks_sum} грн):</b>\n"
         f"{checks_block}\n\n"
         f"<b>Останні дії (до {actions_limit_label}):</b>\n"
         f"{actions_text}\n"
