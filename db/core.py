@@ -127,7 +127,8 @@ async def init_db():
                 "notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, full_name TEXT, type TEXT, message TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "blackjack_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, is_win INTEGER)",
                 "settings (key TEXT PRIMARY KEY, value REAL)",
-                "issued_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, check_type TEXT NOT NULL, code TEXT NOT NULL, price INTEGER NOT NULL, issued_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))"
+                "issued_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, check_type TEXT NOT NULL, code TEXT NOT NULL, price INTEGER NOT NULL, issued_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
+                "referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referred_id INTEGER NOT NULL UNIQUE, was_existing_user INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, bonus_given INTEGER DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now')))",
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")

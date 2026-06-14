@@ -38,6 +38,8 @@ from db import (
     remove_pending_payment,
     get_balance,
     DB_PATH,
+    is_referred,       
+    add_referral, 
 )
 
 from middlewares.middleware import BanMiddleware, SaveUserMiddleware
@@ -64,6 +66,9 @@ from handlers.stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin.router import router as admin_router
 from handlers.profile import router as profile_router
+from handlers.referral import router as referral_router
+
+
 
 from games import (
     slot_router,
@@ -128,7 +133,7 @@ dp.include_router(rewards_router)
 dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
 dp.include_router(simple_win_router)
-
+dp.include_router(referral_router)
 
 # Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
@@ -186,22 +191,58 @@ def generate_promocode(length: int = 8) -> str:
 # ==========================
 # КОМАНДИ
 # ==========================
+# @dp.message(Command("start"), F.chat.type == "private")
+# async def cmd_start(message: types.Message):
+#     user_id = message.from_user.id
+#     is_admin = user_id == ADMIN_ID
+#     gift_claimed = await has_claimed_gift(user_id)
+
+#     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
+#     photo = types.FSInputFile("images/4444.jpg")
+
+#     await message.answer_photo(
+#         photo=photo,
+#         caption=f"👋 Привіт, {message.from_user.full_name}!\n\nЛаскаво просимо до гри 🎮",
+#         reply_markup=keyboard,
+#     )
+
+from db import is_referred, add_referral, user_exists
+
 @dp.message(Command("start"), F.chat.type == "private")
-async def cmd_start(message: types.Message):
+async def cmd_start(message: types.Message, is_new_user: bool = True):
     user_id = message.from_user.id
+    args = message.text.split()
+
+    if len(args) > 1 and args[1].startswith("ref_"):
+        try:
+            referrer_id = int(args[1].replace("ref_", ""))
+
+            if referrer_id != user_id and not await is_referred(user_id):
+                was_existing = not is_new_user  # ← використовуємо з middleware
+
+                await add_referral(referrer_id, user_id, was_existing_user=was_existing)
+
+                if was_existing:
+                    await message.answer(
+                        "ℹ️ Ви вже зареєстровані в боті, тому бонус другу не нараховується"
+                    )
+                else:
+                    await message.answer(
+                        "👋 Вас запросив друг! Поповніть баланс через бот "
+                        "і кожен з вас отримає бонус 50 грн 🎁"
+                    )
+        except ValueError:
+            pass
+
     is_admin = user_id == ADMIN_ID
     gift_claimed = await has_claimed_gift(user_id)
-
     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
     photo = types.FSInputFile("images/4444.jpg")
-
     await message.answer_photo(
         photo=photo,
         caption=f"👋 Привіт, {message.from_user.full_name}!\n\nЛаскаво просимо до гри 🎮",
         reply_markup=keyboard,
     )
-
-
 @dp.message(F.text == "🎁 Подарунок")
 async def gift_command(message: types.Message):
     user_id = message.from_user.id

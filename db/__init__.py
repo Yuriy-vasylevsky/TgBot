@@ -110,5 +110,13 @@ from .check import (
     remove_check,
 )
 
+from .referral import (
+    create_referral_tables,
+    add_referral,
+    get_referrals,
+    is_referred,
+    mark_referral_paid,
+    user_exists
+)
 
 __all__ = [name for name in globals() if not name.startswith("_")]

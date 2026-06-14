@@ -25,6 +25,7 @@ from db import (
     mark_tx_used,
     is_tx_used, 
     add_payment_log, 
+    mark_referral_paid, 
 )
 
 router = Router(name="wallet")
@@ -67,7 +68,7 @@ async def start_topup(callback: CallbackQuery, state: FSMContext):
 async def process_amount(message: Message, state: FSMContext):
     try:
         amount_grn = int(message.text)
-        if amount_grn < 200:
+        if amount_grn < 1:
             await message.answer("❌ Мінімум 200 грн")
             return
     except:
@@ -282,6 +283,27 @@ async def check_payment(event: Message | CallbackQuery):
             f"tx_id='{tx_id}' | time_diff={best_match_diff}s | "
             f"from='{tx_description}'{status_msg}"
         )
+
+
+        referrer_id = await mark_referral_paid(user_id)
+        if referrer_id:
+            # бонус тому хто запросив
+            await add_to_balance(referrer_id, 50)
+            await message.bot.send_message(
+                referrer_id,
+                f"🎉 Ваш реферал поповнив баланс!\n"
+                f"💰 Вам нараховано <b>50 грн</b>",
+                parse_mode="HTML"
+            )
+
+            # бонус тому кого запросили — тільки всередині if referrer_id!
+            await add_to_balance(user_id, 50)
+            await message.bot.send_message(
+                user_id,
+                f"🎁 Вам нараховано бонус <b>50 грн</b> за реєстрацію по запрошенню друга!\n"
+                f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
+                parse_mode="HTML"
+            )
 
     except monobank.TooManyRequests:
         logging.warning(f"⚠️ Ліміт запитів Monobank для user_id={user_id}")
