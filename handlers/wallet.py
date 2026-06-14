@@ -68,7 +68,7 @@ async def start_topup(callback: CallbackQuery, state: FSMContext):
 async def process_amount(message: Message, state: FSMContext):
     try:
         amount_grn = int(message.text)
-        if amount_grn < 1:
+        if amount_grn < 200:
             await message.answer("❌ Мінімум 200 грн")
             return
     except:
