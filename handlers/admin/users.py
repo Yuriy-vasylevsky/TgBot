@@ -251,7 +251,7 @@ async def show_user_detail(callback: types.CallbackQuery):
     kb.adjust(2, 2, 1)
 
     try:
-        await callback.message.answer(
+        await callback.message.edit_text(
             text,
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -283,7 +283,7 @@ async def ask_reset_cooldown(callback: types.CallbackQuery):
     kb.adjust(2)
 
     try:
-        await callback.message.answer(
+        await callback.message.edit_text(
             "Ви впевнені, що хочете скинути кулдаун для цього користувача?",
             reply_markup=kb.as_markup(),
             disable_web_page_preview=True,
@@ -330,26 +330,7 @@ async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# @router.message(BalanceFSM.add_amount)
-# async def balance_add_finish(message: types.Message, state: FSMContext):
-#     try:
-#         amount = int(message.text)
-#     except:
-#         await message.answer("❌ Введіть число")
-#         return
 
-#     data = await state.get_data()
-#     user_id = data["user_id"]
-
-#     await add_to_balance(user_id, amount)
-#     balance = await get_balance(user_id)
-
-#     await message.answer(
-#         f"✅ Баланс поповнено на {amount} грн\n\n"
-#         f"💰 Новий баланс: {balance} грн"
-#     )
-
-#     await state.clear()
 @router.message(BalanceFSM.add_amount)
 async def balance_add_finish(message: types.Message, state: FSMContext):
     try:
