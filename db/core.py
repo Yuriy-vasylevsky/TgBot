@@ -110,6 +110,7 @@ async def init_db():
             # Інші таблиці
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",
+                "payment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, amount INTEGER, comment TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "game_stats (game_name TEXT PRIMARY KEY, total_games INTEGER DEFAULT 0, wins INTEGER DEFAULT 0)",
                 "slot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, result TEXT, final_balance INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "casino_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, casino_type TEXT, code TEXT, used INTEGER DEFAULT 0, assigned_to INTEGER, assigned_at DATETIME)",
@@ -125,7 +126,8 @@ async def init_db():
                 "safe_state (key TEXT PRIMARY KEY, value TEXT)",
                 "notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, full_name TEXT, type TEXT, message TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "blackjack_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, is_win INTEGER)",
-                "settings (key TEXT PRIMARY KEY, value REAL)"
+                "settings (key TEXT PRIMARY KEY, value REAL)",
+                "issued_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, check_type TEXT NOT NULL, code TEXT NOT NULL, price INTEGER NOT NULL, issued_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))"
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
@@ -143,5 +145,7 @@ async def init_db():
             print("🎉 База даних ініціалізована!")
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR in init_db: {e}", exc_info=True)
+
+
 
 

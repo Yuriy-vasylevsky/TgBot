@@ -1,29 +1,29 @@
 
+
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
 from db import get_all_users_info
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
-from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining  # Імпортуємо функції кулдауну (або з іншого файлу, де вони є)
+from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
 from db import DB_PATH, get_balance, add_to_balance
-
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-
+from db import get_issued_checks_for_user
 
 
 router = Router(name="admin_users")
 
-USERS_PER_PAGE = 10
-MAX_ACTIONS_TO_SHOW = 20
+USERS_PER_PAGE = 7
+MAX_ACTIONS_TO_SHOW = 7
+MAX_ACTIONS_EXPANDED = 20
 
 
 class BalanceFSM(StatesGroup):
     add_amount = State()
     remove_amount = State()
-
 
 
 def parse_dt_safe(dt_str: str | None) -> datetime:
@@ -45,8 +45,8 @@ def format_time_kyiv(dt_str: str | None) -> str:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(timezone(timedelta(hours=2)))  # Київ UTC+2
-        now = datetime.now(timezone(timedelta(hours=2)))
+        local = dt.astimezone(timezone(timedelta(hours=3)))
+        now = datetime.now(timezone(timedelta(hours=3)))
 
         if local.date() == now.date():
             return f"сьогодні о {local:%H:%M}"
@@ -77,7 +77,7 @@ async def build_users_keyboard(users: list[dict], page: int) -> InlineKeyboardBu
         kb.row(
             types.InlineKeyboardButton(
                 text=f"{idx}. {name_short}",
-                callback_data=f"user_detail:{user_id}:{page}"
+                callback_data=f"user_detail:{user_id}:{page}:0"
             )
         )
 
@@ -98,11 +98,11 @@ async def build_users_keyboard(users: list[dict], page: int) -> InlineKeyboardBu
     if nav_row:
         kb.row(*nav_row)
 
-    kb.row(
-        types.InlineKeyboardButton(
-            text="⟲ Оновити список", callback_data=f"users_list:{page}"
-        )
-    )
+    # kb.row(
+    #     types.InlineKeyboardButton(
+    #         text="⟲ Оновити список", callback_data=f"users_list:{page}"
+    #     )
+    # )
 
     return kb
 
@@ -153,7 +153,6 @@ async def paginate_users_list(callback: types.CallbackQuery):
 
 
 async def reset_promo_cooldown(user_id: int):
-    """Скидає кулдаун промокоду для користувача"""
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "UPDATE users SET promo_cooldown_until = NULL WHERE user_id = ?",
@@ -169,9 +168,10 @@ async def show_user_detail(callback: types.CallbackQuery):
         return
 
     try:
-        _, user_id_str, from_page_str = callback.data.split(":")
-        user_id = int(user_id_str)
-        from_page = int(from_page_str)
+        parts = callback.data.split(":")
+        user_id = int(parts[1])
+        from_page = int(parts[2])
+        show_all_actions = len(parts) > 3 and parts[3] == "1"
     except:
         await callback.answer("Помилка обробки", show_alert=True)
         return
@@ -185,17 +185,16 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     full_name = user.get("full_name") or "—"
     username = user.get("username") or "—"
-    reg_date = format_time_kyiv(user.get("registered_at"))
     last_active = format_time_kyiv(user.get("last_active"))
 
     games_played = user.get("games_played", 0)
-    games_won = user.get("games_won", 0)
     balance = await get_balance(user_id)
-    winrate = round(games_won / games_played * 100) if games_played > 0 else 0
 
     actions = user.get("last_actions", "")
     actions_list = [a.strip() for a in actions.split("|") if a.strip()]
-    actions_show = actions_list[-MAX_ACTIONS_TO_SHOW:]
+
+    limit = MAX_ACTIONS_EXPANDED if show_all_actions else MAX_ACTIONS_TO_SHOW
+    actions_show = actions_list[-limit:]
     actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
 
     # Статус кулдауну
@@ -206,35 +205,49 @@ async def show_user_detail(callback: types.CallbackQuery):
             h, m = remaining
             cooldown_text = f"⏳ Кулдаун: {h} год {m} хв"
 
+    # Видані чеки за 2 дні
+    issued = await get_issued_checks_for_user(user_id)
+
+    if issued:
+        checks_lines = []
+        for ch in issued:
+            dt = format_time_kyiv(ch["issued_at"])
+            checks_lines.append(f"• {ch['check_type']} | <code>{ch['code']}</code> | {dt}")
+        checks_block = "\n".join(checks_lines)
+    else:
+        checks_block = "🏆 Ще німа"
+
+    actions_limit_label = MAX_ACTIONS_EXPANDED if show_all_actions else MAX_ACTIONS_TO_SHOW
+
     text = (
         f"👤 <b>{full_name}</b>\n"
         f"{'@' if username != '—' else ''}{username}\n\n"
         f"🆔 <code>{user_id}</code>\n"
-        # f"📅 Реєстрація: {reg_date}\n"
         f"🕒 Активність: {last_active}\n\n"
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
-        # f"🏆 Виграно: <b>{games_won}</b>  ({winrate}%)\n\n"
         f"💰 Баланс: <b>{balance}</b> грн\n"
         f"{cooldown_text}\n\n"
-        f"<b>Останні дії (до {MAX_ACTIONS_TO_SHOW}):</b>\n"
+        f"🎁 <b>Видані чеки (2 дні):</b>\n"
+        f"{checks_block}\n\n"
+        f"<b>Останні дії (до {actions_limit_label}):</b>\n"
         f"{actions_text}\n"
     )
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
+
+    kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
+    kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
     kb.button(text="🔄 Скинути кулдаун", callback_data=f"ask_reset:{user_id}:{from_page}")
 
-    kb.button(
-        text="💰 Поповнити баланс",
-        callback_data=f"balance_add:{user_id}:{from_page}"
-    )
+    if show_all_actions:
+        kb.button(text="▲ Сховати дії", callback_data=f"user_detail:{user_id}:{from_page}:0")
+    else:
+        kb.button(text="▼ Більше дій", callback_data=f"user_detail:{user_id}:{from_page}:1")
 
-    kb.button(
-        text="💸 Зняти баланс",
-        callback_data=f"balance_remove:{user_id}:{from_page}"
-    )
+    kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
 
-    
+    kb.adjust(2, 2, 1)
+
     try:
         await callback.message.answer(
             text,
@@ -262,20 +275,19 @@ async def ask_reset_cooldown(callback: types.CallbackQuery):
         await callback.answer("Помилка обробки", show_alert=True)
         return
 
-    text = "Ви впевнені, що хочете скинути кулдаун для цього користувача?"
-
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Так, скинути", callback_data=f"do_reset:{user_id}:{from_page}")
-    kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}")
+    kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}:0")
+    kb.adjust(2)
 
     try:
         await callback.message.answer(
-            text,
+            "Ви впевнені, що хочете скинути кулдаун для цього користувача?",
             reply_markup=kb.as_markup(),
             disable_web_page_preview=True,
         )
     except Exception:
-        await callback.message.answer(text)
+        await callback.message.answer("Ви впевнені, що хочете скинути кулдаун?")
 
     await callback.answer()
 
@@ -297,40 +309,47 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
     await reset_promo_cooldown(user_id)
     await callback.answer("✅ Кулдаун скинуто!", show_alert=True)
 
-    # Оновлюємо деталі користувача
-    await show_user_detail(callback) 
-
+    # підміняємо callback.data щоб show_user_detail коректно розпарсив
+    callback.data = f"user_detail:{user_id}:{from_page}:0"
+    await show_user_detail(callback)
 
 
 @router.callback_query(F.data.startswith("balance_add:"))
-async def balance_add_start(
-    callback: types.CallbackQuery,
-    state: FSMContext
-):
+async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
 
     _, user_id, page = callback.data.split(":")
 
-    await state.update_data(
-        user_id=int(user_id),
-        page=int(page)
-    )
-
+    await state.update_data(user_id=int(user_id), page=int(page))
     await state.set_state(BalanceFSM.add_amount)
 
-    await callback.message.answer(
-        "💰 Введіть суму для поповнення балансу:"
-    )
-
+    await callback.message.answer("💰 Введіть суму для поповнення балансу:")
     await callback.answer()
 
 
+# @router.message(BalanceFSM.add_amount)
+# async def balance_add_finish(message: types.Message, state: FSMContext):
+#     try:
+#         amount = int(message.text)
+#     except:
+#         await message.answer("❌ Введіть число")
+#         return
+
+#     data = await state.get_data()
+#     user_id = data["user_id"]
+
+#     await add_to_balance(user_id, amount)
+#     balance = await get_balance(user_id)
+
+#     await message.answer(
+#         f"✅ Баланс поповнено на {amount} грн\n\n"
+#         f"💰 Новий баланс: {balance} грн"
+#     )
+
+#     await state.clear()
 @router.message(BalanceFSM.add_amount)
-async def balance_add_finish(
-    message: types.Message,
-    state: FSMContext
-):
+async def balance_add_finish(message: types.Message, state: FSMContext):
     try:
         amount = int(message.text)
     except:
@@ -338,11 +357,9 @@ async def balance_add_finish(
         return
 
     data = await state.get_data()
-
     user_id = data["user_id"]
 
     await add_to_balance(user_id, amount)
-
     balance = await get_balance(user_id)
 
     await message.answer(
@@ -350,37 +367,35 @@ async def balance_add_finish(
         f"💰 Новий баланс: {balance} грн"
     )
 
+    # сповіщення юзеру
+    try:
+        await message.bot.send_message(
+            user_id,
+            f"💰 Вам нараховано <b>{amount} грн</b>\n\n"
+            f"💳 Ваш баланс: <b>{balance} грн</b>",
+            parse_mode="HTML"
+        )
+    except Exception:
+        await message.answer("⚠️ Не вдалось надіслати сповіщення користувачу")
+
     await state.clear()
 
-
 @router.callback_query(F.data.startswith("balance_remove:"))
-async def balance_remove_start(
-    callback: types.CallbackQuery,
-    state: FSMContext
-):
+async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
 
     _, user_id, page = callback.data.split(":")
 
-    await state.update_data(
-        user_id=int(user_id),
-        page=int(page)
-    )
-
+    await state.update_data(user_id=int(user_id), page=int(page))
     await state.set_state(BalanceFSM.remove_amount)
 
-    await callback.message.answer(
-        "💸 Введіть суму для списання:"
-    )
-
+    await callback.message.answer("💸 Введіть суму для списання:")
     await callback.answer()
 
+
 @router.message(BalanceFSM.remove_amount)
-async def balance_remove_finish(
-    message: types.Message,
-    state: FSMContext
-):
+async def balance_remove_finish(message: types.Message, state: FSMContext):
     try:
         amount = int(message.text)
     except:
@@ -388,11 +403,9 @@ async def balance_remove_finish(
         return
 
     data = await state.get_data()
-
     user_id = data["user_id"]
 
     await add_to_balance(user_id, -amount)
-
     balance = await get_balance(user_id)
 
     await message.answer(

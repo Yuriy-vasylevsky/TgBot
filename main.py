@@ -282,6 +282,13 @@ async def set_commands():
     )
 
 
+import asyncio
+from db import cleanup_old_payment_logs
+
+async def run_cleanup_loop():
+    while True:
+        await cleanup_old_payment_logs()
+        await asyncio.sleep(60 * 60)
 # ==========================
 # ЗАПУСК
 # ==========================
@@ -290,6 +297,7 @@ async def main():
     await set_commands()
 
     # asyncio.create_task(background_payment_checker())
+    asyncio.create_task(run_cleanup_loop()) 
     asyncio.create_task(run_api())
 
     logging.info("🚀 Бот успішно запущений!")

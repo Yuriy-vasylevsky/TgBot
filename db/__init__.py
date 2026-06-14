@@ -18,6 +18,12 @@ from .wallet import (
     remove_pending_payment,
     mark_tx_used,
     is_tx_used,
+    add_payment_log,
+    get_payment_logs,
+    cleanup_old_payment_logs,
+    get_payment_logs_by_date,
+    log_check_issued,
+    get_issued_checks_for_user,
 )
 
 # ==================== USERS ====================
@@ -103,4 +109,6 @@ from .check import (
     get_free_check,
     remove_check,
 )
+
+
 __all__ = [name for name in globals() if not name.startswith("_")]

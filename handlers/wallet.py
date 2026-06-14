@@ -23,7 +23,8 @@ from db import (
     remove_pending_payment,
     add_to_balance,
     mark_tx_used,
-    is_tx_used,  # ← НОВОЕ!
+    is_tx_used, 
+    add_payment_log, 
 )
 
 router = Router(name="wallet")
@@ -230,7 +231,12 @@ async def check_payment(event: Message | CallbackQuery):
         await add_to_balance(user_id, target_amount_grn)
         await remove_pending_payment(user_id)
 
-  
+        await add_payment_log(
+        user_id=user_id,
+        username=event.from_user.username or "-",
+        amount=target_amount_grn,
+        comment=payment_id
+    )
 
         await message.bot.send_message(
             ADMIN_ID,

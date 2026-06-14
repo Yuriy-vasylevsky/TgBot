@@ -76,3 +76,133 @@ async def is_tx_used(tx_id: str) -> bool:
         )
         row = await result.fetchone()
         return row is not None
+    
+
+# Історія поповнень через бот 
+
+async def add_payment_log(
+    user_id: int,
+    username: str | None,
+    amount: int,
+    comment: str = ""
+):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO payment_logs
+            (user_id, username, amount, comment)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                username,
+                amount,
+                comment
+            )
+        )
+        await db.commit()
+        
+
+async def get_payment_logs(page=1, per_page=20):
+    offset = (page - 1) * per_page
+
+    async with aiosqlite.connect(DB_PATH) as db:
+
+        cur = await db.execute(
+            """
+            SELECT
+                user_id,
+                username,
+                amount,
+                comment,
+                created_at
+            FROM payment_logs
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (per_page, offset)
+        )
+
+        rows = await cur.fetchall()
+
+        cur = await db.execute(
+            "SELECT COUNT(*) FROM payment_logs"
+        )
+
+        total = (await cur.fetchone())[0]
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+
+    return rows, total_pages
+
+
+async def cleanup_old_payment_logs():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            DELETE FROM payment_logs
+            WHERE created_at < DATETIME('now', '+3 hours', '-2 days')
+        """)
+        await db.commit()
+
+async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
+    """date_offset: 0 = сьогодні, 1 = вчора"""
+    offset = (page - 1) * per_page
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            """
+            SELECT user_id, username, amount, comment, created_at
+            FROM payment_logs
+            WHERE DATE(created_at, '+3 hours') =
+                  DATE('now', '+3 hours', ? || ' days')
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            """,
+            (f"-{date_offset}" if date_offset else "0", per_page, offset)
+        )
+        rows = await cur.fetchall()
+
+        cur = await db.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(amount), 0)
+            FROM payment_logs
+            WHERE DATE(created_at, '+3 hours') =
+                  DATE('now', '+3 hours', ? || ' days')
+            """,
+            (f"-{date_offset}" if date_offset else "0",)
+        )
+        total, day_total = await cur.fetchone()
+
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return rows, total_pages, day_total
+
+
+async def log_check_issued(user_id: int, check_type: str, code: str, price: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT INTO issued_checks (user_id, check_type, code, price, issued_at)
+            VALUES (?, ?, ?, ?, DATETIME('now'))
+            """,
+            (user_id, check_type, code, price)
+        )
+        await db.commit()
+
+
+async def get_issued_checks_for_user(user_id: int) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            """
+            SELECT check_type, code, price, issued_at
+            FROM issued_checks
+            WHERE user_id = ?
+              AND issued_at >= DATETIME('now', '-2 days')
+            ORDER BY issued_at DESC
+            """,
+            (user_id,)
+        )
+        rows = await cur.fetchall()
+    return [
+        {"check_type": r[0], "code": r[1], "price": r[2], "issued_at": r[3]}
+        for r in rows
+    ]
