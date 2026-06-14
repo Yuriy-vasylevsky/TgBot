@@ -238,11 +238,16 @@ async def check_payment(event: Message | CallbackQuery):
         amount=target_amount_grn,
         comment=payment_id
     )
+        user_name = (
+            f"@{event.from_user.username}"
+            if event.from_user.username
+            else event.from_user.full_name
+        )
 
         await message.bot.send_message(
             ADMIN_ID,
             f"💰 Поповнення балансу\n\n"
-            f"👤 Username: @{event.from_user.username or '-'}\n"
+            f"👤 Користувач: {user_name}\n"
             f"💵 Сума: <b>{target_amount_grn} грн</b>\n"
             f"💳 Новий баланс: <b>{await get_balance(user_id)} грн</b>",
             parse_mode="HTML"
