@@ -402,16 +402,6 @@ async def cancel_topup(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# @router.message(WalletStates.enter_amount)
-# async def process_amount(message: Message, state: FSMContext):
-#     try:
-#         amount_grn = int(message.text)
-#         if amount_grn < MIN_SUM:
-#             await message.answer(f"❌ Мінімум {MIN_SUM} грн")
-#             return
-#     except Exception:
-#         await message.answer("Введи тільки число ")
-#         return
 
 @router.message(WalletStates.enter_amount)
 async def process_amount(message: Message, state: FSMContext):
@@ -574,12 +564,6 @@ async def check_payment(event: Message | CallbackQuery):
         await add_to_balance(user_id, target_amount_grn)
         await remove_pending_payment(user_id)
 
-        # await add_payment_log(
-        #     user_id=user_id,
-        #     username=event.from_user.username or "-",
-        #     amount=target_amount_grn,
-        #     comment=payment_id,
-        # )
 
         await add_payment_log(
             user_id=user_id,

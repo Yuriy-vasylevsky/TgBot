@@ -258,6 +258,7 @@ from db import (
     has_claimed_gift,
     increment_games_played,
     DB_PATH,  # ← імпортуємо DB_PATH з db.py, а не з handlers.config
+    get_winrate,
 )
 from handlers.states import PromoFSM, EnterPromoFSM
 from handlers.menu import main_menu
@@ -324,11 +325,11 @@ async def ask_promo_count(message: types.Message, state: FSMContext):
     )
 
     await message.answer(
-        "🔢 Введіть або виберіть кількість промокодів для генерації:",
+        "🔢 Введіть кількість промокодів :",
         reply_markup=num_kb,
     )
     await message.answer(
-        "👇 Якщо передумали, натисніть нижче:",
+        "👇 або відмініть генерацію",
         reply_markup=cancel_kb,
     )
 
@@ -354,10 +355,12 @@ async def generate_promocodes(message: types.Message, state: FSMContext):
         generated.append(code)
 
     text = "\n".join(generated)
-    total = count * PROMO_PRICE
+    current_winrate = await get_winrate()
+    winrate_percent = round(current_winrate * 100)
+
     await message.answer(
         f"✅ Згенеровано {count} промокодів:\n\n<code>{text}</code>\n\n"
-        f"💰 Вартість: {count} × {PROMO_PRICE} грн = <b>{total} грн</b>",
+        f"🎯 Winrate: <b>{winrate_percent}%</b>",
         parse_mode="HTML",
         reply_markup=main_menu(is_admin=True),
     )
@@ -383,12 +386,18 @@ async def show_promocodes(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
     codes = await list_promocodes()
+    
+    current_winrate = await get_winrate()
+    winrate_percent = round(current_winrate * 100)
+
     if not codes:
-        await message.answer("❌ Немає активних промокодів")
+        await message.answer(
+            f"❌ Немає активних промокодів\n\n🎯 Winrate: <b>{winrate_percent}%</b>",
+            parse_mode="HTML",
+        )
         return
 
     count = len(codes)
-    total = count * PROMO_PRICE
     formatted_codes = "\n".join([f"🎟️ <code>{code}</code>" for code in codes])
 
     builder = InlineKeyboardBuilder()
@@ -400,7 +409,7 @@ async def show_promocodes(message: types.Message):
         f"🎟 <b>Активні промокоди:</b>\n\n"
         f"{formatted_codes}\n\n"
         f"📦 Кількість: <b>{count} шт</b>\n"
-        f"💰 Вартість: <b>{count} × {PROMO_PRICE} грн = {total} грн</b>",
+        f"🎯 Winrate: <b>{winrate_percent}%</b>",
         reply_markup=builder.as_markup(),
         parse_mode="HTML",
     )

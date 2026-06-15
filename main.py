@@ -191,20 +191,6 @@ def generate_promocode(length: int = 8) -> str:
 # ==========================
 # КОМАНДИ
 # ==========================
-# @dp.message(Command("start"), F.chat.type == "private")
-# async def cmd_start(message: types.Message):
-#     user_id = message.from_user.id
-#     is_admin = user_id == ADMIN_ID
-#     gift_claimed = await has_claimed_gift(user_id)
-
-#     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
-#     photo = types.FSInputFile("images/4444.jpg")
-
-#     await message.answer_photo(
-#         photo=photo,
-#         caption=f"👋 Привіт, {message.from_user.full_name}!\n\nЛаскаво просимо до гри 🎮",
-#         reply_markup=keyboard,
-#     )
 
 from db import is_referred, add_referral, user_exists
 
