@@ -101,7 +101,6 @@ async def add_payment_log(
             )
         )
         await db.commit()
-        
 
 async def get_payment_logs(page=1, per_page=20):
     offset = (page - 1) * per_page
@@ -145,7 +144,6 @@ async def cleanup_old_payment_logs():
         await db.commit()
 
 async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
-    """date_offset: 0 = сьогодні, 1 = вчора"""
     offset = (page - 1) * per_page
 
     async with aiosqlite.connect(DB_PATH) as db:
@@ -155,7 +153,7 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
             FROM payment_logs
             WHERE DATE(created_at, '+3 hours') =
                   DATE('now', '+3 hours', ? || ' days')
-            ORDER BY id DESC
+            ORDER BY id ASC       -- ← було DESC, стало ASC
             LIMIT ? OFFSET ?
             """,
             (f"-{date_offset}" if date_offset else "0", per_page, offset)
@@ -175,7 +173,6 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
 
     total_pages = max(1, (total + per_page - 1) // per_page)
     return rows, total_pages, day_total
-
 
 async def log_check_issued(user_id: int, check_type: str, code: str, price: int):
     async with aiosqlite.connect(DB_PATH) as db:

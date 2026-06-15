@@ -574,12 +574,21 @@ async def check_payment(event: Message | CallbackQuery):
         await add_to_balance(user_id, target_amount_grn)
         await remove_pending_payment(user_id)
 
+        # await add_payment_log(
+        #     user_id=user_id,
+        #     username=event.from_user.username or "-",
+        #     amount=target_amount_grn,
+        #     comment=payment_id,
+        # )
+
         await add_payment_log(
             user_id=user_id,
-            username=event.from_user.username or "-",
+            username=event.from_user.username if event.from_user.username else event.from_user.full_name,
             amount=target_amount_grn,
-            comment=payment_id,
+            comment=payment_id
         )
+
+
 
         user_name = (
             f"@{event.from_user.username}"
