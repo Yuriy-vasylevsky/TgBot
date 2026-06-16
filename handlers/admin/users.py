@@ -431,9 +431,9 @@ async def show_all_balances(message: types.Message):
         lines.append(f"{medal} {name} · {username}\n    └ {bal_str}")
 
     text = (
-        f"┌─────────────────────────\n"
-        f"│  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
-        f"└─────────────────────────\n\n"
+        f"┌──────────────\n"
+        f"  │  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
+        f"└──────────────\n\n"
         + "\n\n".join(lines)
         + f"\n\n{'─' * 25}\n"
         f"👥 Гравців з балансом: <b>{len(users)}</b>\n"
@@ -449,15 +449,15 @@ async def show_all_balances(message: types.Message):
                 chunk = ""
             chunk += line + "\n\n"
         header = (
-            f"┌─────────────────────────\n"
-            f"│  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
-            f"└─────────────────────────\n\n"
+            f"┌──────────────\n"
+            f"  │  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
+            f"└──────────────\n\n"
         )
         footer = (
-            f"\n{'─' * 25}\n"
+            f"\n{'─' * 10}\n"
             f"👥 Гравців: <b>{len(users)}</b>\n"
             f"💵 Загальна сума: <b>{total} грн</b>\n"
-            f"{'─' * 25}"
+            f"{'─' * 10}"
         )
         chunks[-1] += footer
         for idx, ch in enumerate(chunks):
