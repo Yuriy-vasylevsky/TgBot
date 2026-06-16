@@ -58,7 +58,7 @@ def build_profile_text(user_id, username, full_name, balance, weekly_coupons) ->
         # f"   {balance_bar}\n"
         # f"   <b>{balance} грн</b>\n"
         f"━━━━━━━━━━━━\n\n"
-        f"🎟 <b>Зібрано PROMO :</b> <code>{weekly_coupons}</code>\n"
+        f"<b>Зібрано PROMO :</b> <code>{weekly_coupons}</code>\n"
         f"{promo_icons}\n"
     )
 
@@ -110,8 +110,8 @@ async def build_checks_text(user_id: int) -> str:
                 f"└ 💰 {ch['price']} грн · ⏰ {time_str}\n\n"
             )
 
-    total_all = sum(ch["price"] for items in buckets.values() for ch, _ in items)
-    result += f"━━━━━━━━━━━━\n💵 Всього витрачено: <b>{total_all} грн</b>"
+    # total_all = sum(ch["price"] for items in buckets.values() for ch, _ in items)
+    # result += f"━━━━━━━━━━━━\n💵 Всього витрачено: <b>{total_all} грн</b>"
 
     return result
 
