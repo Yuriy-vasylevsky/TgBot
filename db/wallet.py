@@ -146,17 +146,23 @@ async def cleanup_old_payment_logs():
 async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
     offset = (page - 1) * per_page
 
+    # Рахуємо київську дату в Python, а не в SQLite
+    from datetime import datetime, timedelta, timezone
+
+    KYIV_OFFSET = timezone(timedelta(hours=3))
+    kyiv_now = datetime.now(KYIV_OFFSET)
+    target_date = (kyiv_now - timedelta(days=date_offset)).strftime("%Y-%m-%d")
+
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
             """
             SELECT user_id, username, amount, comment, created_at
             FROM payment_logs
-            WHERE DATE(created_at, '+3 hours') =
-                  DATE('now', '+3 hours', ? || ' days')
-            ORDER BY id ASC       -- ← було DESC, стало ASC
+            WHERE DATE(created_at, '+3 hours') = ?
+            ORDER BY id ASC
             LIMIT ? OFFSET ?
             """,
-            (f"-{date_offset}" if date_offset else "0", per_page, offset)
+            (target_date, per_page, offset)
         )
         rows = await cur.fetchall()
 
@@ -164,10 +170,9 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
             """
             SELECT COUNT(*), COALESCE(SUM(amount), 0)
             FROM payment_logs
-            WHERE DATE(created_at, '+3 hours') =
-                  DATE('now', '+3 hours', ? || ' days')
+            WHERE DATE(created_at, '+3 hours') = ?
             """,
-            (f"-{date_offset}" if date_offset else "0",)
+            (target_date,)
         )
         total, day_total = await cur.fetchone()
 

@@ -352,7 +352,7 @@ from db import (
 
 router = Router(name="wallet")
 
-MIN_SUM = 1
+MIN_SUM = 200
 
 class WalletStates(StatesGroup):
     enter_amount = State()
