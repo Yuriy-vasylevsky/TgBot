@@ -207,3 +207,20 @@ async def get_issued_checks_for_user(user_id: int) -> list[dict]:
         {"check_type": r[0], "code": r[1], "price": r[2], "issued_at": r[3]}
         for r in rows
     ]
+
+
+async def get_all_balances() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT u.user_id, u.balance, u.full_name, u.username
+            FROM users u
+            WHERE u.balance > 0
+            ORDER BY u.balance DESC
+            """
+        )
+        rows = await cursor.fetchall()
+    return [
+        {"user_id": r[0], "balance": r[1], "full_name": r[2], "username": r[3]}
+        for r in rows
+    ]

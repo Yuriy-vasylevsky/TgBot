@@ -24,6 +24,7 @@ from .wallet import (
     get_payment_logs_by_date,
     log_check_issued,
     get_issued_checks_for_user,
+    get_all_balances,
 )
 
 # ==================== USERS ====================

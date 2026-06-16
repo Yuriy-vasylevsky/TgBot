@@ -11,7 +11,7 @@ import aiosqlite
 from db import DB_PATH, get_balance, add_to_balance
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from db import get_issued_checks_for_user
+from db import get_issued_checks_for_user, get_all_balances
 
 
 router = Router(name="admin_users")
@@ -397,3 +397,70 @@ async def balance_remove_finish(message: types.Message, state: FSMContext):
     )
 
     await state.clear()
+
+
+@router.message(F.text == "💰 Баланси гравців")
+async def show_all_balances(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    users = await get_all_balances()
+
+    if not users:
+        await message.answer("💸 У всіх гравців баланс 0 грн")
+        return
+
+    total = sum(u["balance"] for u in users)
+    lines = []
+
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+    for i, u in enumerate(users, start=1):
+        name = (u.get("full_name") or "Без імені")[:20]
+        username = f"@{u['username']}" if u.get("username") else f"<code>{u['user_id']}</code>"
+        medal = medals.get(i, f"{i}.")
+        balance = u["balance"]
+
+        if balance >= 1000:
+            bal_str = f"<b>{balance} грн</b> 🔥"
+        elif balance >= 500:
+            bal_str = f"<b>{balance} грн</b> ⚡️"
+        else:
+            bal_str = f"<b>{balance} грн</b>"
+
+        lines.append(f"{medal} {name} · {username}\n    └ {bal_str}")
+
+    text = (
+        f"┌─────────────────────────\n"
+        f"│  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
+        f"└─────────────────────────\n\n"
+        + "\n\n".join(lines)
+        + f"\n\n{'─' * 25}\n"
+        f"👥 Гравців з балансом: <b>{len(users)}</b>\n"
+        f"💵 Загальна сума: <b>{total} грн</b>\n"
+        f"{'─' * 25}"
+    )
+
+    if len(text) > 4000:
+        chunks, chunk = [], ""
+        for line in lines:
+            if len(chunk) + len(line) > 3900:
+                chunks.append(chunk)
+                chunk = ""
+            chunk += line + "\n\n"
+        header = (
+            f"┌─────────────────────────\n"
+            f"│  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n"
+            f"└─────────────────────────\n\n"
+        )
+        footer = (
+            f"\n{'─' * 25}\n"
+            f"👥 Гравців: <b>{len(users)}</b>\n"
+            f"💵 Загальна сума: <b>{total} грн</b>\n"
+            f"{'─' * 25}"
+        )
+        chunks[-1] += footer
+        for idx, ch in enumerate(chunks):
+            await message.answer((header if idx == 0 else "") + ch, parse_mode="HTML")
+    else:
+        await message.answer(text, parse_mode="HTML")
