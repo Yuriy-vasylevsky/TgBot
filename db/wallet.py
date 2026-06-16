@@ -146,7 +146,6 @@ async def cleanup_old_payment_logs():
 async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
     offset = (page - 1) * per_page
 
-    # Рахуємо київську дату в Python, а не в SQLite
     from datetime import datetime, timedelta, timezone
 
     KYIV_OFFSET = timezone(timedelta(hours=3))
@@ -158,7 +157,7 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
             """
             SELECT user_id, username, amount, comment, created_at
             FROM payment_logs
-            WHERE DATE(created_at, '+3 hours') = ?
+            WHERE DATE(created_at) = ?
             ORDER BY id ASC
             LIMIT ? OFFSET ?
             """,
@@ -170,7 +169,7 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
             """
             SELECT COUNT(*), COALESCE(SUM(amount), 0)
             FROM payment_logs
-            WHERE DATE(created_at, '+3 hours') = ?
+            WHERE DATE(created_at) = ?
             """,
             (target_date,)
         )
