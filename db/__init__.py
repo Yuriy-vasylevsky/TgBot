@@ -25,6 +25,7 @@ from .wallet import (
     log_check_issued,
     get_issued_checks_for_user,
     get_all_balances,
+    mark_tx_used
 )
 
 # ==================== USERS ====================
