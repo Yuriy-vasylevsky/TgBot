@@ -351,7 +351,7 @@ from db import (
 
 router = Router(name="wallet")
 
-MIN_SUM = 1
+MIN_SUM = 200
 
 class WalletStates(StatesGroup):
     enter_amount = State()
@@ -442,7 +442,7 @@ async def process_amount(message: Message, state: FSMContext):
         f"За посиланням: {MONO_JAR_LINK}\n\n"
 
         f"Чи на карту : <code>{MONO_JAR_CARD}</code>\n\n"
-        f"Після оплати натисни кнопку нижче"
+        f"❗Після оплати натисни кнопку "Перевірити платіж" "
     )
 
     kb = InlineKeyboardMarkup(
