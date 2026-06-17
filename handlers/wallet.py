@@ -440,9 +440,8 @@ async def process_amount(message: Message, state: FSMContext):
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
         f"Перекажіть <b>точно</b> цю суму на БАНКУ Monobank:\n\n"
         f"За посиланням: {MONO_JAR_LINK}\n\n"
-
         f"Чи на карту : <code>{MONO_JAR_CARD}</code>\n\n"
-        f"❗Після оплати натисни кнопку "Перевірити платіж" "
+        f"❗Після оплати натисни кнопку «Перевірити платіж»"
     )
 
     kb = InlineKeyboardMarkup(
