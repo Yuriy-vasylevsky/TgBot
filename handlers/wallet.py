@@ -334,9 +334,8 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
 import monobank
-from handlers.config import MONO_TOKEN, MONO_ACCOUNT, MONO_CARD
+from handlers.config import MONO_TOKEN, MONO_ACCOUNT, MONO_CARD, MONO_JAR_LINK, MONO_JAR_CARD
 from handlers.config import ADMIN_ID
 from db import (
     get_balance,
@@ -352,7 +351,7 @@ from db import (
 
 router = Router(name="wallet")
 
-MIN_SUM = 200
+MIN_SUM = 1
 
 class WalletStates(StatesGroup):
     enter_amount = State()
@@ -430,10 +429,19 @@ async def process_amount(message: Message, state: FSMContext):
         f"sum={amount_grn} грн | payment_id='{payment_id}'"
     )
 
+    # text = (
+    #     f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
+    #     f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n\n"
+    #     f"<code>{MONO_CARD}</code>\n\n"
+    #     f"Після оплати натисни кнопку нижче"
+    # )
+
     text = (
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
-        f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n\n"
-        f"<code>{MONO_CARD}</code>\n\n"
+        f"Перекажіть <b>точно</b> цю суму на БАНКУ Monobank:\n\n"
+        f"За посиланням: {MONO_JAR_LINK}\n\n"
+
+        f"Чи на карту : <code>{MONO_JAR_CARD}</code>\n\n"
         f"Після оплати натисни кнопку нижче"
     )
 
@@ -551,7 +559,7 @@ async def check_payment(event: Message | CallbackQuery):
                 f"✓ Відправив точно <b>{target_amount_grn} грн</b>\n"
                 f"✓ На правильну картку: <b>{MONO_CARD}</b>\n"
                 f"✓ Платіж успішно обробився\n\n"
-                f"Почекай 1–2 хвилини і натисни кнопку нижче.",
+                f"Почекай 1–2 хвилини і натисни кнопку нижче ",
                 parse_mode="HTML",
                 reply_markup=kb,
             )

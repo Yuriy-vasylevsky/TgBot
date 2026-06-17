@@ -24,7 +24,7 @@ class AddCodeFSM(StatesGroup):
 # ======================
 # ДОДАВАННЯ КОДУ (для адміна)
 # ======================
-@router.message(F.text == "➕ Додати код")
+@router.message(F.text == "➕ Додати промокод")
 async def ask_code_type(message: Message):
     if message.from_user.id != ADMIN_ID:
         await message.answer("⛔ Тільки адміністратор.")

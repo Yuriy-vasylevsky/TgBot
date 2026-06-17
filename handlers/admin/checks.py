@@ -2,7 +2,7 @@
 import re
 
 from aiogram import Router, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
@@ -56,7 +56,18 @@ async def cancel_add_code(message: Message, state: FSMContext):
 async def open_checks(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
-    await message.answer("💳 Меню чеків", reply_markup=checks_menu())
+
+    stats = await get_checks_stats()
+    total_balance = await get_checks_total_balance()
+
+    text = "💳 <b>Меню чеків</b>\n\n📊 <b>Наявні чеки:</b>\n\n"
+
+    for name, count in stats.items():
+        text += f"{name}: <b>{count}</b>\n"
+
+    text += f"\n💰 <b>Баланс чеків:</b> {total_balance} грн"
+
+    await message.answer(text, parse_mode="HTML", reply_markup=checks_menu())
 
 
 @router.message(F.text.in_(CHECK_TABLES.keys()))
@@ -122,46 +133,57 @@ async def checks_stats(message: Message):
 
     text += f"\n💰 <b>Баланс чеків:</b> {total_balance} грн"
 
-    await message.answer(text, parse_mode="HTML")
-
-
-@router.message(F.text == "🧹 Очистити всі чеки")
-async def ask_clear(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✅ Так, видалити")],
-            [KeyboardButton(text="❌ Скасувати")]
-        ],
-        resize_keyboard=True
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🧹 Очистити всі чеки", callback_data="clear_checks_ask")]
+        ]
     )
 
-    await state.set_state(ClearChecksFSM.confirm)
-    await message.answer(
+    await message.answer(text, parse_mode="HTML", reply_markup=kb)
+
+
+@router.callback_query(F.data == "clear_checks_ask")
+async def ask_clear(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Так, видалити", callback_data="clear_checks_confirm"),
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="clear_checks_cancel"),
+            ]
+        ]
+    )
+
+    await callback.message.edit_text(
         "⚠️ Точно видалити ВСІ чеки?\nЦю дію НЕ можна скасувати!",
         reply_markup=kb
     )
+    await callback.answer()
 
 
-@router.message(ClearChecksFSM.confirm, F.text == "✅ Так, видалити")
-async def confirm_clear(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+@router.callback_query(F.data == "clear_checks_confirm")
+async def confirm_clear(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
         return
 
     await clear_all_checks()
-    await state.clear()
-    await message.answer("🧹 Всі чеки видалено!", reply_markup=checks_menu())
+
+    await callback.message.edit_text("🧹 Всі чеки видалено!")
+    await callback.answer("Готово!", show_alert=True)
 
 
-@router.message(ClearChecksFSM.confirm, F.text == "❌ Скасувати")
-async def cancel_clear(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
+@router.callback_query(F.data == "clear_checks_cancel")
+async def cancel_clear(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
         return
 
-    await state.clear()
-    await message.answer("❌ Скасовано", reply_markup=checks_menu())
+    await callback.message.edit_text("❌ Скасовано")
+    await callback.answer()
 
 
 @router.message(F.text == "🎮 Грати")

@@ -21,6 +21,16 @@ MONO_TOKEN = os.getenv("MONO_TOKEN")
 MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 MONO_CARD = os.getenv("MONO_CARD")
+
+import os
+
+
+MONO_JAR_SEND_ID = os.getenv("MONO_JAR_SEND_ID")
+MONO_JAR_LINK = f"https://send.monobank.ua/{MONO_JAR_SEND_ID}" if MONO_JAR_SEND_ID else None
+MONO_JAR_CARD = os.getenv("MONO_JAR_CARD")
+  
+
+
 # ====================== НАЛАШТУВАННЯ ФОРТУНИ ======================
   # Скільки промо потрібно для одного обертання колеса
 
