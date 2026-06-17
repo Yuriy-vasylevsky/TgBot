@@ -172,6 +172,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         user_id = int(parts[1])
         from_page = int(parts[2])
         show_all_actions = len(parts) > 3 and parts[3] == "1"
+        show_yesterday = len(parts) > 4 and parts[4] == "1"
     except:
         await callback.answer("Помилка обробки", show_alert=True)
         return
@@ -190,14 +191,18 @@ async def show_user_detail(callback: types.CallbackQuery):
     games_played = user.get("games_played", 0)
     balance = await get_balance(user_id)
 
+    # ==================== ДІЇ ====================
     actions = user.get("last_actions", "")
     actions_list = [a.strip() for a in actions.split("|") if a.strip()]
 
-    limit = MAX_ACTIONS_EXPANDED if show_all_actions else MAX_ACTIONS_TO_SHOW
-    actions_show = actions_list[-limit:]
-    actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
+    if show_all_actions:
+        actions_show = actions_list[-MAX_ACTIONS_EXPANDED:]
+        actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
+        actions_block = f"<b>Останні дії (до {MAX_ACTIONS_EXPANDED}):</b>\n{actions_text}\n"
+    else:
+        actions_block = ""
 
-    # Статус кулдауну
+    # ==================== КУЛДАУН ====================
     cooldown_text = "❌ Немає кулдауну"
     if await is_promo_on_cooldown(user_id):
         remaining = await get_promo_cooldown_remaining(user_id)
@@ -205,22 +210,43 @@ async def show_user_detail(callback: types.CallbackQuery):
             h, m = remaining
             cooldown_text = f"⏳ Кулдаун: {h} год {m} хв"
 
-    # Видані чеки за 2 дні
+    # ==================== ЧЕКИ ====================
     issued = await get_issued_checks_for_user(user_id)
 
-    if issued:
-        total_checks_sum = sum(ch["price"] for ch in issued)
-        checks_lines = []
-        for ch in issued:
+    kyiv_tz = timezone(timedelta(hours=3))
+    now_kyiv = datetime.now(kyiv_tz)
+    today = now_kyiv.date()
+    yesterday = (now_kyiv - timedelta(days=1)).date()
+
+    def get_check_date(ch):
+        try:
+            dt = datetime.fromisoformat(ch["issued_at"])
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(kyiv_tz).date()
+        except:
+            return None
+
+    today_checks = [ch for ch in issued if get_check_date(ch) == today]
+    yesterday_checks = [ch for ch in issued if get_check_date(ch) == yesterday]
+
+    def format_checks(checks):
+        if not checks:
+            return "немає"
+        lines = []
+        for ch in checks:
             dt = format_time_kyiv(ch["issued_at"])
-            checks_lines.append(f"• {ch['check_type']} | <code>{ch['code']}</code> | {dt}")
-        checks_block = "\n".join(checks_lines)
-    else:
-        total_checks_sum = 0
-        checks_block = "ще німа"
+            lines.append(f"• {ch['check_type']} | <code>{ch['code']}</code> | {dt}")
+        return "\n".join(lines)
 
-    actions_limit_label = MAX_ACTIONS_EXPANDED if show_all_actions else MAX_ACTIONS_TO_SHOW
+    today_sum = sum(ch["price"] for ch in today_checks)
+    yesterday_sum = sum(ch["price"] for ch in yesterday_checks)
 
+    checks_block = f"🎁 <b>Чеки сьогодні ({today_sum} грн):</b>\n{format_checks(today_checks)}\n"
+    if show_yesterday:
+        checks_block += f"\n🗓 <b>Чеки вчора ({yesterday_sum} грн):</b>\n{format_checks(yesterday_checks)}\n"
+
+    # ==================== ТЕКСТ ====================
     text = (
         f"👤 <b>{full_name}</b>\n"
         f"{'@' if username != '—' else ''}{username}\n\n"
@@ -229,26 +255,30 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
         f"💰 Баланс: <b>{balance}</b> грн\n"
         f"{cooldown_text}\n\n"
-        f"🎁 <b>Видані чеки ({total_checks_sum} грн):</b>\n"
-        f"{checks_block}\n\n"
-        f"<b>Останні дії (до {actions_limit_label}):</b>\n"
-        f"{actions_text}\n"
+        f"{checks_block}\n"
+        f"{actions_block}"
     )
 
+    # ==================== КНОПКИ ====================
     kb = InlineKeyboardBuilder()
 
     kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
     kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
     kb.button(text="🔄 Скинути кулдаун", callback_data=f"ask_reset:{user_id}:{from_page}")
 
-    if show_all_actions:
-        kb.button(text="▲ Сховати дії", callback_data=f"user_detail:{user_id}:{from_page}:0")
+    if show_yesterday:
+        kb.button(text="▲ Сховати вчорашні", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:0")
     else:
-        kb.button(text="▼ Більше дій", callback_data=f"user_detail:{user_id}:{from_page}:1")
+        kb.button(text="🗓 Чеки вчора", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:1")
+
+    if show_all_actions:
+        kb.button(text="▲ Сховати дії", callback_data=f"user_detail:{user_id}:{from_page}:0:{1 if show_yesterday else 0}")
+    else:
+        kb.button(text="▼ Останні дії", callback_data=f"user_detail:{user_id}:{from_page}:1:{1 if show_yesterday else 0}")
 
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
 
-    kb.adjust(2, 2, 1)
+    kb.adjust(2, 1, 2, 1)
 
     try:
         await callback.message.edit_text(
@@ -261,7 +291,6 @@ async def show_user_detail(callback: types.CallbackQuery):
         await callback.message.answer(text, parse_mode="HTML")
 
     await callback.answer()
-
 
 @router.callback_query(F.data.startswith("ask_reset:"))
 async def ask_reset_cooldown(callback: types.CallbackQuery):
