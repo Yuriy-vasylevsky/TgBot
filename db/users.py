@@ -264,3 +264,5 @@ async def set_promo_cooldown(user_id: int, hours: int = 12):
             (future_str, user_id)
         )
         await db.commit()
+
+

@@ -260,11 +260,13 @@ async def show_user_detail(callback: types.CallbackQuery):
     )
 
     # ==================== КНОПКИ ====================
+# ==================== КНОПКИ ====================
     kb = InlineKeyboardBuilder()
 
     kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
     kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
-    kb.button(text="🔄 Скинути кулдаун", callback_data=f"ask_reset:{user_id}:{from_page}")
+    kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}") 
+    kb.button(text="➕1 промо", callback_data=f"ask_add_promo:{user_id}:{from_page}") # <-- НОВА
 
     if show_yesterday:
         kb.button(text="▲ Сховати вчорашні", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:0")
@@ -278,7 +280,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
 
-    kb.adjust(2, 1, 2, 1)
+    kb.adjust(2, 2, 2, 1)
 
     try:
         await callback.message.edit_text(
@@ -493,3 +495,118 @@ async def show_all_balances(message: types.Message):
             await message.answer((header if idx == 0 else "") + ch, parse_mode="HTML")
     else:
         await message.answer(text, parse_mode="HTML")
+
+
+
+
+
+@router.callback_query(F.data.startswith("ask_add_promo:"))
+async def ask_add_promo(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except Exception:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Так, додати", callback_data=f"do_add_promo:{user_id}:{from_page}")
+    kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}:0")
+    kb.adjust(2)
+
+    try:
+        await callback.message.edit_text(
+            "Додати 1 промо цьому користувачу?",
+            reply_markup=kb.as_markup(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        await callback.message.answer("Додати 1 промо цьому користувачу?")
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("do_add_promo:"))
+async def do_add_promo(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except Exception:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET games_played = games_played + 1 WHERE user_id = ?",
+            (user_id,)
+        )
+        await db.commit()
+
+    await callback.answer("✅ Додано 1 промо!", show_alert=True)
+    await show_user_detail(callback.model_copy(update={"data": f"user_detail:{user_id}:{from_page}:0"}))
+
+
+@router.callback_query(F.data.startswith("ask_remove_promo:"))
+async def ask_remove_promo(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except Exception:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Так, відняти", callback_data=f"do_remove_promo:{user_id}:{from_page}")
+    kb.button(text="❌ Ні", callback_data=f"user_detail:{user_id}:{from_page}:0")
+    kb.adjust(2)
+
+    try:
+        await callback.message.edit_text(
+            "Відняти 1 промо у цього користувача?",
+            reply_markup=kb.as_markup(),
+            disable_web_page_preview=True,
+        )
+    except Exception:
+        await callback.message.answer("Відняти 1 промо у цього користувача?")
+
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("do_remove_promo:"))
+async def do_remove_promo(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except Exception:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE users SET games_played = MAX(0, games_played - 1) WHERE user_id = ?",
+            (user_id,)
+        )
+        await db.commit()
+
+    await callback.answer("✅ Знято 1 промо!", show_alert=True)
+    await show_user_detail(callback.model_copy(update={"data": f"user_detail:{user_id}:{from_page}:0"}))
