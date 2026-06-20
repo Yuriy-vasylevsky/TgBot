@@ -45,7 +45,7 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
 
 def checks_menu():
     keyboard = [
-        ["🏆 Чек 100 Champion", "🏆 Чек 200 Champion"],
+        # ["🏆 Чек 100 Champion", "🏆 Чек 200 Champion"],
         ["🎰 Чек 100 Matic", "🎰 Чек 200 Matic"],
         ["➕ Додати промокод"],
         ["📜 Перегляд кодів", "📊 Чеки"],
