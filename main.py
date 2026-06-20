@@ -333,3 +333,9 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
+# Перезапустити бота: systemctl restart tgbot
+# Зупинити: systemctl stop tgbot
+# Подивитись логи: journalctl -u tgbot -f
+# Оновити код після змін у GitHub: cd /root/tgbot/tgbot && git pull && systemctl restart tgbot

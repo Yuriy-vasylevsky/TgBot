@@ -367,13 +367,22 @@ async def download_db(message: types.Message):
         await message.answer("⛔ Ця команда доступна лише адміну.")
         return
 
-    db_path = Path(__file__).resolve().parent.parent / "users.db"
+    # Шукаємо базу і в /data (Railway volume), і поруч з кодом (запасний варіант)
+    possible_paths = [
+        Path("/data/users.db"),
+        Path(__file__).resolve().parent.parent / "users.db",
+    ]
 
-    if not db_path.exists():
-        await message.answer("⚠️ Файл бази даних не знайдено.")
+    db_path = next((p for p in possible_paths if p.exists()), None)
+
+    if db_path is None:
+        await message.answer(
+            "⚠️ Файл бази даних не знайдено. Перевірені шляхи:\n"
+            + "\n".join(str(p) for p in possible_paths)
+        )
         return
 
     await message.answer("⏳ Готую базу даних до відправки...")
     await message.answer_document(
-        FSInputFile(db_path), caption="📦 База даних користувачів"
+        FSInputFile(db_path), caption=f"📦 База даних користувачів\n📍 {db_path}"
     )
