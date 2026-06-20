@@ -503,7 +503,7 @@ async def process_close_check(message: Message, state: FSMContext):
 
 
 from handlers.casino_api import close_invoice, check_invoice
-from db import get_active_champion_checks   # або імпортуй з db
+from db import get_active_champion_checks   
 
 class CheckCloseFSM(StatesGroup):
     waiting_for_close = State()  # не обов'язково, але можна
