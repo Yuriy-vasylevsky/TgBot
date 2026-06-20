@@ -7,3 +7,4 @@ aiofiles==23.2.1
 monobank  # або python-monobank
 python-dotenv  # для .env
 aiosqlite  # якщо db.py на SQLite, або asyncpg якщо PostgreSQL
+httpx>=0.27.0
