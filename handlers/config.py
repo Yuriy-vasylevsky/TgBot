@@ -29,6 +29,12 @@ MONO_JAR_SEND_ID = os.getenv("MONO_JAR_SEND_ID")
 MONO_JAR_LINK = f"https://send.monobank.ua/{MONO_JAR_SEND_ID}" if MONO_JAR_SEND_ID else None
 MONO_JAR_CARD = os.getenv("MONO_JAR_CARD")
   
+CASINO_API_BASE = "https://chcwhite.net"   
+CASINO_TR_PREFIX = "BOT_"  
+
+
+CASINO_PUBLIC_KEY = os.getenv("CASINO_PUBLIC_KEY")
+CASINO_SECRET_KEY = os.getenv("CASINO_SECRET_KEY")
 
 
 # ====================== НАЛАШТУВАННЯ ФОРТУНИ ======================

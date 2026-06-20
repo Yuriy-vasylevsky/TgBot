@@ -358,9 +358,9 @@ async def notify_reward_progress(bot, user_id: int, username: str | None, full_n
 
         await bot.send_message(
             user_id,
-            f"🎉 Вітаємо! Ви можете отримати промокод!\n"
-            f"Всього сьогодні: {new_promo_tier} промокод(ів).\n"
-            f"До наступного промокоду залишилось {remaining} грн.",
+            f"🎉 Вітаємо! Ви можете отримати промокод!\n",
+            # f"Всього сьогодні: {new_promo_tier} промокод(ів).\n"
+            # f"До наступного промокоду залишилось {remaining} грн.",
             parse_mode="HTML",
         )
         if ADMIN_ID:
@@ -381,8 +381,8 @@ async def notify_reward_progress(bot, user_id: int, username: str | None, full_n
         await bot.send_message(
             user_id,
             f"💸 Вітаємо! Вам доступно відкат <b>{gained} грн</b> "
-            f"({int(CASHBACK_PERCENT * 100)}% з {CASHBACK_GOAL} грн).\n"
-            f"До наступного відкату залишилось {remaining} грн.",
+            f"({int(CASHBACK_PERCENT * 100)}% з {CASHBACK_GOAL} грн).\n",
+            # f"До наступного відкату залишилось {remaining} грн.",
             parse_mode="HTML",
         )
         if ADMIN_ID:
@@ -394,3 +394,7 @@ async def notify_reward_progress(bot, user_id: int, username: str | None, full_n
 
     if new_promo_tier > old_promo_tier or new_cashback_tier > old_cashback_tier:
         await set_reward_tiers(user_id, today_str, new_promo_tier, new_cashback_tier)
+
+
+
+
