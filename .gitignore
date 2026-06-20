@@ -159,6 +159,6 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# users.db
-# safe_state.json
-# *.db
+users.db
+safe_state.json
+*.db
