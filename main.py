@@ -349,3 +349,9 @@ if __name__ == "__main__":
 # systemctl status tgbot     # перевірити стан
 
 # 77.42.71.244	
+
+# lTWMUl0FnG9yLS34bCLevmmK3W95ULmPupySbFDI28lWvb8S5GqJPIhWdX4hR2r7
+
+# cd /root/safe-250-web
+
+# systemctl start safe-250-web

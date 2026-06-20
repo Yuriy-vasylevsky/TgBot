@@ -65,7 +65,7 @@ async def show_safe(message: Message):
         f"🔒 <b>СЕЙФ 250</b> 🔒\n\n"
         f"🔓 Відкрито: <b>{len(state['opened'])}</b> / {TOTAL_CELLS}\n"
         f"🏆 Виграшний номер: <b>❓❓❓</b>\n\n"
-        f"🔗 <a href='https://safe-250-web-production.up.railway.app'>Переглянути Сейф</a>",
+        f"🔗 <a href='http://77.42.71.244:8080/'>Переглянути Сейф</a>",
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
