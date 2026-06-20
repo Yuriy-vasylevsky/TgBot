@@ -502,30 +502,49 @@ async def process_close_check(message: Message, state: FSMContext):
     await state.clear()
 
 
-from handlers.casino_api import close_invoice, check_invoice
-from db import get_active_champion_checks   
 
-class CheckCloseFSM(StatesGroup):
-    waiting_for_close = State()  # не обов'язково, але можна
+
+
+
+
+
+
+
+
+
+
+# ==================== ЗАКРИТТЯ ЧЕКА CHAMPION ====================
+
+from handlers.casino_api import close_invoice
+from db import get_issued_checks_for_user, add_to_balance
 
 
 @router.message(F.text == "🔒 Закрити чек")
 async def show_my_checks(message: Message):
-    checks = await get_active_champion_checks(message.from_user.id)
+    user_id = message.from_user.id
+    checks = await get_issued_checks_for_user(user_id)
+    
+    # Фільтруємо тільки Champion чеки
+    champion_checks = [ch for ch in checks if "Champion" in ch.get("check_type", "")]
 
-    if not checks:
-        await message.answer("У вас немає активних чеків Champion з балансом.")
+    if not champion_checks:
+        await message.answer("❌ У вас немає виданих чеків Champion.")
         return
 
-    text = "🔒 **Ваші активні чеки Champion**\n\nОберіть, який закрити:\n\n"
-
+    text = "🔒 **Ваші чеки Champion**\n\nОберіть, який хочете закрити:\n\n"
     buttons = []
-    for i, ch in enumerate(checks, 1):
-        text += f"{i}. <code>{ch['code']}</code> — 💰 {ch['remaining']:.0f} грн\n"
-        buttons.append([InlineKeyboardButton(
-            text=f"Закрити {ch['remaining']:.0f} грн",
-            callback_data=f"close_champ_{ch['code']}"
-        )])
+
+    for ch in champion_checks:
+        code = ch["code"]
+        price = ch.get("price", "?")
+        short_code = code[-6:]  # останні 6 цифр для зручності
+        text += f"🔑 <code>{code}</code> — {price} грн\n"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"Закрити •••{short_code}",
+                callback_data=f"close_champ_{code}"
+            )
+        ])
 
     buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="close_cancel")])
 
@@ -541,21 +560,24 @@ async def process_close_check(callback: CallbackQuery):
     invoice = callback.data.removeprefix("close_champ_")
     user_id = callback.from_user.id
 
-    # Додаткова перевірка
-    checks = await get_active_champion_checks(user_id)
-    if not any(ch["code"] == invoice for ch in checks):
-        await callback.answer("Цей чек вам не належить або вже закритий.", show_alert=True)
+    # Перевірка власності чека
+    user_checks = await get_issued_checks_for_user(user_id)
+    if not any(ch["code"] == invoice for ch in user_checks):
+        await callback.answer("❌ Цей чек вам не належить!", show_alert=True)
         return
+
+    await callback.answer("🔄 Закриваємо чек...")
 
     result = await close_invoice(invoice)
 
     if not result or not result.get("success"):
-        await callback.answer("❌ Помилка закриття. Спробуйте пізніше.", show_alert=True)
+        await callback.message.edit_text("❌ Не вдалося закрити чек. Спробуйте пізніше або зверніться до адміністратора.")
         return
 
-    remaining = int(result["sum"])
+    remaining = int(result.get("sum", 0))
 
-    await add_to_balance(user_id, remaining)
+    if remaining > 0:
+        await add_to_balance(user_id, remaining)
 
     await callback.message.edit_text(
         f"✅ Чек <code>{invoice}</code> успішно закрито!\n\n"
@@ -563,17 +585,15 @@ async def process_close_check(callback: CallbackQuery):
         parse_mode="HTML"
     )
 
-    # Повідомлення адміну
+    # Лог адміну
     await callback.bot.send_message(
         ADMIN_ID,
-        f"🔒 Користувач закрив чек\n\n"
+        f"🔒 Користувач закрив чек Champion\n\n"
         f"👤 {callback.from_user.full_name} (@{callback.from_user.username or '—'})\n"
         f"🔑 Чек: <code>{invoice}</code>\n"
         f"💰 Повернено: <b>{remaining} грн</b>",
         parse_mode="HTML"
     )
-
-    await callback.answer("Готово!", show_alert=True)
 
 
 @router.callback_query(F.data == "close_cancel")
