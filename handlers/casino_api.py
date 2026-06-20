@@ -207,3 +207,42 @@ async def close_invoice(invoice: str) -> dict | None:
         except Exception as e:
             logger.exception(f"Exception при закритті чека {invoice}: {e}")
             return None
+        
+
+async def add_to_invoice(invoice: str, sum_grn: float) -> dict | None:
+    """Поповнює вже існуючий чек"""
+    endpoint = "/api/invoice/add"
+    params = {
+        "invoice": invoice,
+        "sum": round(float(sum_grn), 2)
+    }
+
+    url, tr = _build_url(endpoint, params)
+
+    logger.info(f"→ Поповнення чека {invoice} на {sum_grn} грн")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(url)
+            logger.info(f"← Статус: {resp.status_code}")
+
+            if "application/json" not in resp.headers.get("content-type", ""):
+                logger.error(f"Не JSON: {resp.text[:300]}")
+                return None
+
+            data = resp.json()
+            logger.info(f"Add to invoice response: {data}")
+
+            if data.get("success"):
+                return {
+                    "success": True,
+                    "invoice": data.get("invoice"),
+                    "new_sum": float(data.get("sum", 0)),
+                }
+            else:
+                logger.error(f"Помилка поповнення: {data.get('message')}")
+                return None
+
+        except Exception as e:
+            logger.exception(f"Exception add_to_invoice: {e}")
+            return None

@@ -143,6 +143,7 @@ async def play_menu(message: Message):
         keyboard=[
             [KeyboardButton(text="🏆 Champion"), KeyboardButton(text="🎰 Matic")],
             [KeyboardButton(text="🔒 Закрити чек")],
+             [KeyboardButton(text="💵 Поповнити чек")],
             [KeyboardButton(text="🔙 Назад до головного меню")]
         ],
         resize_keyboard=True
@@ -542,4 +543,143 @@ async def process_close_check(callback: CallbackQuery):
 @router.callback_query(F.data == "close_cancel")
 async def close_cancel(callback: CallbackQuery):
     await callback.message.edit_text("❌ Закриття чека скасовано.")
+    await callback.answer()
+
+
+
+
+
+# ==================== ПОПОВНЕННЯ ЧЕКА CHAMPION ====================
+
+from handlers.casino_api import add_to_invoice, check_invoice
+from db import get_issued_checks_for_user, add_to_balance
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+
+
+class AddToCheckFSM(StatesGroup):
+    waiting_for_amount = State()
+
+
+@router.message(F.text == "💵 Поповнити чек")
+async def show_checks_to_topup(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    checks = await get_issued_checks_for_user(user_id)
+    
+    champion_checks = [ch for ch in checks if "Champion" in ch.get("check_type", "")]
+
+    if not champion_checks:
+        await message.answer("❌ У вас немає виданих чеків Champion.")
+        return
+
+    text = "💵 **Оберіть чек для поповнення**\n\n"
+    buttons = []
+    active_count = 0
+
+    for ch in champion_checks:
+        code = ch["code"]
+        status = await check_invoice(code)
+        
+        if not status or not status.get("success"):
+            continue
+            
+        remaining = float(status.get("sum", 0))
+        # Показуємо навіть якщо 0, але не закриті (якщо API дозволяє)
+        active_count += 1
+        short = code[-6:]
+        
+        text += f"🔑 <code>{code}</code> — 💰 {remaining:.0f} грн\n"
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"Поповнити •••{short} ({remaining:.0f} грн)",
+                callback_data=f"topup_champ_{code}"
+            )
+        ])
+
+    if active_count == 0:
+        await message.answer("❌ Немає доступних чеків для поповнення.")
+        return
+
+    buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="topup_cancel")])
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("topup_champ_"))
+async def start_topup_check(callback: CallbackQuery, state: FSMContext):
+    invoice = callback.data.removeprefix("topup_champ_")
+    
+    await state.update_data(invoice=invoice)
+    await state.set_state(AddToCheckFSM.waiting_for_amount)
+
+    await callback.message.edit_text(
+        f"💵 Введіть суму поповнення для чека <code>{invoice}</code>\n"
+        f"(від 10 грн)",
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.message(AddToCheckFSM.waiting_for_amount)
+async def process_topup_amount(message: Message, state: FSMContext):
+    try:
+        amount = int(message.text)
+        if amount < 10:
+            await message.answer("❌ Мінімальна сума поповнення — 10 грн")
+            return
+    except:
+        await message.answer("❌ Введіть число")
+        return
+
+    data = await state.get_data()
+    invoice = data.get("invoice")
+
+    user_id = message.from_user.id
+    balance = await get_balance(user_id)
+
+    if balance < amount:
+        await message.answer("❌ Недостатньо коштів на балансі.")
+        await state.clear()
+        return
+
+    # Поповнюємо чек
+    result = await add_to_invoice(invoice, amount)
+
+    if not result or not result.get("success"):
+        await message.answer("❌ Не вдалося поповнити чек. Спробуйте пізніше.")
+        await state.clear()
+        return
+
+    # Списуємо з балансу користувача
+    await add_to_balance(user_id, -amount)
+
+    new_sum = result.get("new_sum", amount)
+
+    await message.answer(
+        f"✅ Чек <code>{invoice}</code> успішно поповнено на <b>{amount} грн</b>\n\n"
+        f"Новий баланс чека: <b>{new_sum:.0f} грн</b>",
+        parse_mode="HTML"
+    )
+
+    # Повідомлення адміну
+    await message.bot.send_message(
+        ADMIN_ID,
+        f"💵 Користувач поповнив чек\n\n"
+        f"👤 {message.from_user.full_name} (@{message.from_user.username or '—'})\n"
+        f"🔑 Чек: <code>{invoice}</code>\n"
+        f"💰 Поповнено: <b>{amount} грн</b>",
+        parse_mode="HTML"
+    )
+
+    await state.clear()
+
+
+@router.callback_query(F.data == "topup_cancel")
+async def topup_cancel(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Поповнення скасовано.")
     await callback.answer()
