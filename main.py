@@ -335,7 +335,19 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
+
+# ssh root@77.42.71.244
+# mPLmmcFnpcmK
+
 # Перезапустити бота: systemctl restart tgbot
 # Зупинити: systemctl stop tgbot
 # Подивитись логи: journalctl -u tgbot -f
 # Оновити код після змін у GitHub: cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
+
+
+# systemctl restart tgbot    # перезапустити
+# systemctl stop tgbot       # зупинити
+# systemctl start tgbot      # запустити
+# systemctl status tgbot     # перевірити стан
+
+# 77.42.71.244	

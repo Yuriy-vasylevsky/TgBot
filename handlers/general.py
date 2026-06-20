@@ -355,3 +355,38 @@ async def back_to_admin(message: types.Message):
     await message.answer(
         "🔧 Повернення в адмін-меню:", reply_markup=main_menu(is_admin=True)
     )
+
+
+from aiogram import Router, F, types
+from aiogram.types import FSInputFile
+from handlers.config import ADMIN_ID
+from pathlib import Path
+
+
+@router.message(F.text == "📦 Скачати БД")
+async def download_db(message: types.Message):
+    """Відправляє адміну файл бази даних users.db"""
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ Ця команда доступна лише адміну.")
+        return
+
+    # Шукаємо базу за кількома можливими шляхами
+    possible_paths = [
+        Path("/data/users.db"),                                    # Railway volume (абсолютний)
+        Path(__file__).resolve().parent.parent / "data" / "users.db",  # відносний "data/users.db"
+        Path(__file__).resolve().parent.parent / "users.db",       # старий варіант (для Hetzner)
+    ]
+
+    db_path = next((p for p in possible_paths if p.exists()), None)
+
+    if db_path is None:
+        await message.answer(
+            "⚠️ Файл бази даних не знайдено. Перевірені шляхи:\n"
+            + "\n".join(str(p) for p in possible_paths)
+        )
+        return
+
+    await message.answer("⏳ Готую базу даних до відправки...")
+    await message.answer_document(
+        FSInputFile(db_path), caption=f"📦 База даних користувачів\n📍 {db_path}"
+    )
