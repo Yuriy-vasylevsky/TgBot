@@ -339,8 +339,6 @@ if __name__ == "__main__":
 # ssh root@77.42.71.244
 # mPLmmcFnpcmK
 
-# Перезапустити бота: systemctl restart tgbot
-# Зупинити: systemctl stop tgbot
 # Подивитись логи: journalctl -u tgbot -f
 # Оновити код після змін у GitHub: cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
 
