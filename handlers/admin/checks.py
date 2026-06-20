@@ -367,10 +367,11 @@ async def download_db(message: types.Message):
         await message.answer("⛔ Ця команда доступна лише адміну.")
         return
 
-    # Шукаємо базу і в /data (Railway volume), і поруч з кодом (запасний варіант)
+    # Шукаємо базу за кількома можливими шляхами
     possible_paths = [
-        Path("/data/users.db"),
-        Path(__file__).resolve().parent.parent / "users.db",
+        Path("/data/users.db"),                                    # Railway volume (абсолютний)
+        Path(__file__).resolve().parent.parent / "data" / "users.db",  # відносний "data/users.db"
+        Path(__file__).resolve().parent.parent / "users.db",       # старий варіант (для Hetzner)
     ]
 
     db_path = next((p for p in possible_paths if p.exists()), None)
