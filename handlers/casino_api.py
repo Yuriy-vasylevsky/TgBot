@@ -169,3 +169,39 @@ async def close_invoice(invoice: str) -> dict | None:
         except Exception as e:
             logger.exception(f"Exception при закритті чека {invoice}: {e}")
             return None
+        
+
+async def close_invoice(invoice: str) -> dict | None:
+    """Закриває рахунок Champion і повертає залишок"""
+    endpoint = "/api/invoice/close"
+    params = {"invoice": invoice}
+
+    url, tr = _build_url(endpoint, params)
+
+    logger.info(f"→ Закриття чека {invoice}: {url}")
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        try:
+            resp = await client.get(url)
+            logger.info(f"← Статус закриття: {resp.status_code}")
+
+            if "application/json" not in resp.headers.get("content-type", ""):
+                logger.error(f"Не JSON при закритті: {resp.text[:300]}")
+                return None
+
+            data = resp.json()
+            logger.info(f"Close response: {data}")
+
+            if data.get("success"):
+                return {
+                    "success": True,
+                    "invoice": data.get("invoice"),
+                    "sum": float(data.get("sum", 0)),  # залишок
+                }
+            else:
+                logger.error(f"Помилка закриття: {data.get('message')}")
+                return None
+
+        except Exception as e:
+            logger.exception(f"Exception close_invoice {invoice}: {e}")
+            return None

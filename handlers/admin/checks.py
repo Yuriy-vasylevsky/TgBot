@@ -500,3 +500,83 @@ async def process_close_check(message: Message, state: FSMContext):
         await message.answer(f"✅ Чек <code>{invoice}</code> закрито. Залишок: 0 грн.")
 
     await state.clear()
+
+
+from handlers.casino_api import close_invoice, check_invoice
+from db import get_active_champion_checks   # або імпортуй з db
+
+class CheckCloseFSM(StatesGroup):
+    waiting_for_close = State()  # не обов'язково, але можна
+
+
+@router.message(F.text == "🔒 Закрити чек")
+async def show_my_checks(message: Message):
+    checks = await get_active_champion_checks(message.from_user.id)
+
+    if not checks:
+        await message.answer("У вас немає активних чеків Champion з балансом.")
+        return
+
+    text = "🔒 **Ваші активні чеки Champion**\n\nОберіть, який закрити:\n\n"
+
+    buttons = []
+    for i, ch in enumerate(checks, 1):
+        text += f"{i}. <code>{ch['code']}</code> — 💰 {ch['remaining']:.0f} грн\n"
+        buttons.append([InlineKeyboardButton(
+            text=f"Закрити {ch['remaining']:.0f} грн",
+            callback_data=f"close_champ_{ch['code']}"
+        )])
+
+    buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="close_cancel")])
+
+    await message.answer(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+    )
+
+
+@router.callback_query(F.data.startswith("close_champ_"))
+async def process_close_check(callback: CallbackQuery):
+    invoice = callback.data.removeprefix("close_champ_")
+    user_id = callback.from_user.id
+
+    # Додаткова перевірка
+    checks = await get_active_champion_checks(user_id)
+    if not any(ch["code"] == invoice for ch in checks):
+        await callback.answer("Цей чек вам не належить або вже закритий.", show_alert=True)
+        return
+
+    result = await close_invoice(invoice)
+
+    if not result or not result.get("success"):
+        await callback.answer("❌ Помилка закриття. Спробуйте пізніше.", show_alert=True)
+        return
+
+    remaining = int(result["sum"])
+
+    await add_to_balance(user_id, remaining)
+
+    await callback.message.edit_text(
+        f"✅ Чек <code>{invoice}</code> успішно закрито!\n\n"
+        f"💰 Повернено на баланс: <b>{remaining} грн</b>",
+        parse_mode="HTML"
+    )
+
+    # Повідомлення адміну
+    await callback.bot.send_message(
+        ADMIN_ID,
+        f"🔒 Користувач закрив чек\n\n"
+        f"👤 {callback.from_user.full_name} (@{callback.from_user.username or '—'})\n"
+        f"🔑 Чек: <code>{invoice}</code>\n"
+        f"💰 Повернено: <b>{remaining} грн</b>",
+        parse_mode="HTML"
+    )
+
+    await callback.answer("Готово!", show_alert=True)
+
+
+@router.callback_query(F.data == "close_cancel")
+async def close_cancel(callback: CallbackQuery):
+    await callback.message.edit_text("❌ Скасовано")
+    await callback.answer()

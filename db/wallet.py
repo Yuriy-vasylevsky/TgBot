@@ -303,3 +303,30 @@ async def get_all_balances() -> list[dict]:
         {"user_id": r[0], "balance": r[1], "full_name": r[2], "username": r[3]}
         for r in rows
     ]
+
+
+
+from handlers.casino_api import close_invoice, check_invoice
+
+
+async def get_active_champion_checks(user_id: int) -> list[dict]:
+    """Повертає тільки Champion чеки користувача + актуальний баланс з API"""
+    checks = await get_issued_checks_for_user(user_id)
+    
+    active = []
+    for check in checks:
+        if "Champion" not in check["check_type"]:
+            continue
+            
+        invoice = check["code"]
+        status = await check_invoice(invoice)  # перевіряємо актуальний баланс
+        
+        if status and status.get("success"):
+            remaining = float(status.get("sum", 0))
+            if remaining > 0:  # тільки з грошима
+                active.append({
+                    **check,
+                    "remaining": remaining
+                })
+    
+    return active
