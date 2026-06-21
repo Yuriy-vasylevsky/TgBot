@@ -109,14 +109,12 @@ def uah_to_kopecks(amount_uah) -> int:
     return int(round(float(amount_uah) * 100))
 
 
-# ==================== Підпис (з детальним логуванням) ====================
+# ==================== Підпис з дебагом ====================
 def verify_signature(method_name: str, params: dict) -> bool:
     received_sign = str(params.get("sign", "")).strip()
 
-    filtered = {
-        k: v for k, v in params.items()
-        if k != "sign" and k != "meta" and not str(k).startswith("partner.")
-    }
+    filtered = {k: v for k, v in params.items() 
+                if k != "sign" and k != "meta" and not str(k).startswith("partner.")}
 
     joined = "&".join(f"{k}={filtered[k]}" for k in sorted(filtered.keys()))
     raw = f"{joined}&{method_name}&{GIS_PARTNER_ID}&{GIS_SECRET_KEY}"
@@ -124,13 +122,12 @@ def verify_signature(method_name: str, params: dict) -> bool:
     expected = hashlib.md5(raw.encode("utf-8")).hexdigest()
 
     if expected != received_sign:
-        log.error("❌ BAD SIGNATURE for %s", method_name)
-        log.error("Received: %s", received_sign)
-        log.error("Expected: %s", expected)
-        log.error("Raw: %s", raw)
+        log.error(f"❌ BAD SIGNATURE | {method_name}")
+        log.error(f"Received: {received_sign}")
+        log.error(f"Expected: {expected}")
         return False
 
-    log.info("✅ Signature OK for %s", method_name)
+    log.info(f"✅ Signature OK | {method_name}")
     return True
 
 
@@ -146,12 +143,14 @@ def make_response(method: str, status: int, response: dict | None = None) -> dic
 async def handle_check_session(request: web.Request):
     params = await request.json()
     method = "check.session"
+    log.info(f"→ [check.session] session={params.get('session')}")
 
     if not verify_signature(method, params):
         return web.json_response(make_response(method, 500), status=200)
 
     session = await get_gis_session(params.get("session", ""))
     if not session or session.get("closed"):
+        log.warning("Session not found or closed")
         return web.json_response(make_response(method, 500), status=200)
 
     user_balance = await get_balance(session["user_id"])
@@ -168,6 +167,7 @@ async def handle_check_session(request: web.Request):
 async def handle_check_balance(request: web.Request):
     params = await request.json()
     method = "check.balance"
+    log.info(f"→ [check.balance] session={params.get('session')}")
 
     if not verify_signature(method, params):
         return web.json_response(make_response(method, 500), status=200)
@@ -187,6 +187,7 @@ async def handle_check_balance(request: web.Request):
 async def handle_withdraw_bet(request: web.Request):
     params = await request.json()
     method = "withdraw.bet"
+    log.info(f"→ [withdraw.bet] session={params.get('session')} trx={params.get('trx_id')}")
 
     if not verify_signature(method, params):
         return web.json_response(make_response(method, 500), status=200)
@@ -226,6 +227,7 @@ async def handle_withdraw_bet(request: web.Request):
 async def handle_deposit_win(request: web.Request):
     params = await request.json()
     method = "deposit.win"
+    log.info(f"→ [deposit.win] session={params.get('session')} trx={params.get('trx_id')}")
 
     if not verify_signature(method, params):
         return web.json_response(make_response(method, 500), status=200)
