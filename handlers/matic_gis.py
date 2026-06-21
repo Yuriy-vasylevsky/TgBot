@@ -20,18 +20,19 @@ log = logging.getLogger(__name__)
 # УВАГА! Ці URL — різні!
 # =============================================
 
-# 1. URL твого webhook (той, що ти вказував в особистому кабінеті GIS)
-GIS_WEBHOOK_BASE = "http://77.42.71.244:3000"
+# =============================================
+# НАЛАШТУВАННЯ GIS
+# =============================================
 
-# 2. URL GIS-платформи (той, з якого приходять вебхуки + init.session)
-#    ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-GIS_PLATFORM_URL = "https://billing.superplat.pw"  # ←←← СЮДИ РЕАЛЬНИЙ!
+GIS_PARTNER_ID = "alb2"                    # ←←← СКОРІШ ЗА ВСЕ ЦЕ ТВІЙ ID (з назви Alb2)
+
+GIS_PLATFORM_URL = "https://billing.superplat.pw"   # або https://superplat.pw
 
 GIS_API_URL = f"{GIS_PLATFORM_URL}/api/gisv2/"
 GIS_INIT_SESSION_URL = GIS_API_URL + "init.session"
 GIS_CLOSE_SESSION_URL = GIS_API_URL + "close.session"
 
-GIS_GAME_ID = 0                     # ← Зміни на реальний ID гри Matic
+GIS_GAME_ID = 0                            # ←←← ОБОВ'ЯЗКОВО змінити на реальний ID гри Matic!
 GIS_DEFAULT_CURRENCY = "UAH"
 
 
@@ -48,7 +49,7 @@ async def matic_menu(message: Message):
 
     payload = {
         "currency": GIS_DEFAULT_CURRENCY,
-        "game.id": GIS_GAME_ID,
+        # "game.id": GIS_GAME_ID,
         "partner.alias": GIS_PARTNER_ID,
         "partner.session": session_id,
     }
