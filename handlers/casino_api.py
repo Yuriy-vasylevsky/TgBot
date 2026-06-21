@@ -246,3 +246,47 @@ async def add_to_invoice(invoice: str, sum_grn: float) -> dict | None:
         except Exception as e:
             logger.exception(f"Exception add_to_invoice: {e}")
             return None
+        
+
+
+
+
+
+
+
+
+# import aiohttp
+# import hashlib
+# import time
+# import uuid
+# from typing import Optional, Dict
+
+# MATIC_API_URL = "https://demo.superomatic.biz"   # заміни на продакшн
+# PARTNER_ALIAS = "http://77.42.71.244:3000"
+# SECRET_KEY = "rbi9sshgtrhcnjlm970hgcep37ckrm97gthhtyju36nj1jfngt2g5f9"   # з особистого кабінету
+
+
+# async def create_matic_session(user_id: int, amount: int) -> Optional[Dict]:
+#     """Створення реальної ігрової сесії (чек)"""
+#     url = f"{MATIC_API_URL}/init.session"
+
+#     partner_session = f"user_{user_id}_{int(time.time())}"   # унікальний
+
+#     payload = {
+#         "partner.alias": PARTNER_ALIAS,
+#         "partner.session": partner_session,
+#         "game.id": 1,                    # ← змінити на потрібну гру
+#         "currency": "UAH",               # або RUB/EUR
+#         # amount тут не передається напряму — баланс контролюється на твоїй стороні через /check.balance тощо
+#     }
+
+#     async with aiohttp.ClientSession() as session:
+#         async with session.post(url, json=payload) as resp:
+#             if resp.status != 200:
+#                 return None
+#             data = await resp.json()
+#             if data.get("status") == 200:
+#                 data["success"] = True
+#                 data["session_id"] = partner_session
+#                 return data
+#             return None

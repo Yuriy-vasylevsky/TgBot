@@ -67,7 +67,7 @@ from handlers.general import router as general_router
 from handlers.admin.router import router as admin_router
 from handlers.profile import router as profile_router
 from handlers.referral import router as referral_router
-
+from handlers.matic_gis import router as matic_gis_router
 
 
 from games import (
@@ -134,6 +134,7 @@ dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
 dp.include_router(simple_win_router)
 dp.include_router(referral_router)
+dp.include_router(matic_gis_router)
 
 # Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
