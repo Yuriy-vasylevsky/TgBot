@@ -16,20 +16,15 @@ from handlers.gis_webhook import (
 router = Router(name="matic_gis")
 log = logging.getLogger(__name__)
 
-
 # =============================================
-# НАЛАШТУВАННЯ GIS (оновлено за відповіддю підтримки)
+# НАЛАШТУВАННЯ GIS
 # =============================================
-
-GIS_PARTNER_ID = "Alb2"                    # ← логін, а не Subagent
-
 GIS_PLATFORM_URL = "https://api.superplat.pw"
-
-GIS_API_URL = "https://api.superplat.pw/api/gisv2/"   # ← пряма адреса від підтримки
+GIS_API_URL = "https://api.superplat.pw/api/gisv2/"
 GIS_INIT_SESSION_URL = GIS_API_URL + "init.session"
 GIS_CLOSE_SESSION_URL = GIS_API_URL + "close.session"
 
-GIS_GAME_ID = 522                  # поки 0, потім замінимо
+GIS_GAME_ID = 522
 GIS_DEFAULT_CURRENCY = "UAH"
 
 
@@ -44,12 +39,15 @@ async def matic_menu(message: Message):
 
     session_id = uuid.uuid4().hex
 
+    # ←←← СТВОРЮЄМО СЕСІЮ В БАЗІ ДО ЗАПИТУ ДО GIS
+    await create_gis_session(session_id=session_id, user_id=user_id, currency=GIS_DEFAULT_CURRENCY)
+
     payload = {
-            "currency": GIS_DEFAULT_CURRENCY,
-            "game.id": GIS_GAME_ID,           # обов'язково має бути
-            "partner.alias": GIS_PARTNER_ID,  # "Alb2"
-            "partner.session": session_id,
-        }
+        "currency": GIS_DEFAULT_CURRENCY,
+        "game.id": GIS_GAME_ID,
+        "partner.alias": GIS_PARTNER_ID,
+        "partner.session": session_id,
+    }
 
     try:
         async with aiohttp.ClientSession() as http:
@@ -61,20 +59,16 @@ async def matic_menu(message: Message):
                 if resp.status != 200:
                     text = await resp.text()
                     log.error("GIS init.session HTTP %d: %s", resp.status, text[:500])
-                    await message.answer(
-                        f"❌ Помилка сервера GIS (HTTP {resp.status})", 
-                        parse_mode="HTML"
-                    )
+                    await message.answer(f"❌ Помилка сервера GIS (HTTP {resp.status})")
                     return
-                
                 data = await resp.json()
     except aiohttp.ClientConnectorError:
-        log.error("Cannot connect to GIS platform at %s", GIS_INIT_SESSION_URL)
-        await message.answer("❌ Не вдалося підключитися до GIS платформи. Перевірте налаштування.")
+        log.error("Cannot connect to GIS platform")
+        await message.answer("❌ Не вдалося підключитися до GIS платформи.")
         return
-    except Exception as e:
+    except Exception:
         log.exception("GIS init.session failed")
-        await message.answer("❌ Технічна помилка при запуску гри. Спробуйте пізніше.")
+        await message.answer("❌ Технічна помилка при запуску гри.")
         return
 
     response = data.get("response") or {}
@@ -87,8 +81,6 @@ async def matic_menu(message: Message):
         return
 
     game_url = f"{client_dist}?t={token}"
-
-    await create_gis_session(session_id=session_id, user_id=user_id, currency=GIS_DEFAULT_CURRENCY)
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -104,6 +96,7 @@ async def matic_menu(message: Message):
         parse_mode="HTML",
         reply_markup=kb
     )
+
 
 # === Закриття сесії ===
 async def close_matic_session(target_message: Message, user_id: int, session_id: str):
