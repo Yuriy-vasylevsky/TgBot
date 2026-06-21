@@ -10,7 +10,7 @@ from db import get_balance, add_to_balance
 log = logging.getLogger(__name__)
 
 # === Дані партнера ===
-GIS_PARTNER_ID = "Subagent"  # Зміни, якщо в тебе інший
+GIS_PARTNER_ID = "Alb2"
 GIS_SECRET_KEY = "rbi9sshgtrhcnjlm970hgcep37ckrm97gthhtyju36nj1jfngt2g5f9"
 
 GIS_DB_PATH = "gis.db"
@@ -109,17 +109,29 @@ def uah_to_kopecks(amount_uah) -> int:
     return int(round(float(amount_uah) * 100))
 
 
-# ==================== Підпис ====================
+# ==================== Підпис (з детальним логуванням) ====================
 def verify_signature(method_name: str, params: dict) -> bool:
-    received_sign = str(params.get("sign", ""))
+    received_sign = str(params.get("sign", "")).strip()
 
-    filtered = {k: v for k, v in params.items() if k != "sign" and k != "meta" and not str(k).startswith("partner.")}
+    filtered = {
+        k: v for k, v in params.items()
+        if k != "sign" and k != "meta" and not str(k).startswith("partner.")
+    }
 
     joined = "&".join(f"{k}={filtered[k]}" for k in sorted(filtered.keys()))
     raw = f"{joined}&{method_name}&{GIS_PARTNER_ID}&{GIS_SECRET_KEY}"
     
     expected = hashlib.md5(raw.encode("utf-8")).hexdigest()
-    return expected == received_sign
+
+    if expected != received_sign:
+        log.error("❌ BAD SIGNATURE for %s", method_name)
+        log.error("Received: %s", received_sign)
+        log.error("Expected: %s", expected)
+        log.error("Raw: %s", raw)
+        return False
+
+    log.info("✅ Signature OK for %s", method_name)
+    return True
 
 
 def make_response(method: str, status: int, response: dict | None = None) -> dict:
@@ -136,21 +148,20 @@ async def handle_check_session(request: web.Request):
     method = "check.session"
 
     if not verify_signature(method, params):
-        log.warning("GIS check.session: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     session = await get_gis_session(params.get("session", ""))
-    if not session or session["closed"]:
+    if not session or session.get("closed"):
         return web.json_response(make_response(method, 500), status=200)
 
     user_balance = await get_balance(session["user_id"])
 
     return web.json_response(make_response(method, 200, {
         "id_player": str(session["user_id"]),
-        "game_id": 0,  # буде перезаписано платформою
+        "game_id": 0,
         "currency": session["currency"],
         "balance": uah_to_kopecks(user_balance),
-        "denomination": 100,   # 1.00 грн
+        "denomination": 100,
     }), status=200)
 
 
@@ -159,11 +170,10 @@ async def handle_check_balance(request: web.Request):
     method = "check.balance"
 
     if not verify_signature(method, params):
-        log.warning("GIS check.balance: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     session = await get_gis_session(params.get("session", ""))
-    if not session or session["closed"]:
+    if not session or session.get("closed"):
         return web.json_response(make_response(method, 500), status=200)
 
     balance_kopecks = uah_to_kopecks(await get_balance(session["user_id"]))
@@ -179,7 +189,6 @@ async def handle_withdraw_bet(request: web.Request):
     method = "withdraw.bet"
 
     if not verify_signature(method, params):
-        log.warning("GIS withdraw.bet: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     session_id = params.get("session", "")
@@ -187,7 +196,7 @@ async def handle_withdraw_bet(request: web.Request):
     amount_kopecks = int(params.get("amount", 0))
 
     session = await get_gis_session(session_id)
-    if not session or session["closed"]:
+    if not session or session.get("closed"):
         return web.json_response(make_response(method, 500), status=200)
 
     existing = await get_processed_trx(trx_id)
@@ -219,7 +228,6 @@ async def handle_deposit_win(request: web.Request):
     method = "deposit.win"
 
     if not verify_signature(method, params):
-        log.warning("GIS deposit.win: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     session_id = params.get("session", "")
@@ -254,7 +262,6 @@ async def handle_trx_cancel(request: web.Request):
     method = "trx.cancel"
 
     if not verify_signature(method, params):
-        log.warning("GIS trx.cancel: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     trx_id = str(params.get("trx_id", ""))
@@ -265,7 +272,7 @@ async def handle_trx_cancel(request: web.Request):
         return web.json_response(make_response(method, 500), status=200)
 
     trx = await get_processed_trx(trx_id)
-    if trx and trx["kind"] == "withdraw.bet" and not trx["cancelled"]:
+    if trx and trx["kind"] == "withdraw.bet" and not trx.get("cancelled"):
         amount_uah = kopecks_to_uah(trx["amount_kopecks"])
         await add_to_balance(session["user_id"], amount_uah)
         await mark_trx_cancelled(trx_id)
@@ -278,7 +285,6 @@ async def handle_trx_complete(request: web.Request):
     method = "trx.complete"
 
     if not verify_signature(method, params):
-        log.warning("GIS trx.complete: bad signature")
         return web.json_response(make_response(method, 500), status=200)
 
     trx_id = str(params.get("trx_id", ""))
