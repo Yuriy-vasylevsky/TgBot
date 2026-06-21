@@ -5,10 +5,12 @@ import asyncio
 import random
 import string
 import os
+import time
 from datetime import datetime, timedelta
 
+import monobank
 from aiohttp import web
-
+ 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
@@ -16,10 +18,10 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.types import (
     BotCommand,
     BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats,
     BotCommandScopeAllChatAdministrators,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    BotCommandScopeAllGroupChats,
 )
 
 import handlers.config as config
@@ -59,12 +61,14 @@ from group_games.group_vote_prize import router as vote_router
 from group_games.group_minefield import router as minefield_router
 from group_games.bank import router as bank_router
 
+
 from handlers.stats import router as stats_router
 from handlers.general import router as general_router
 from handlers.admin.router import router as admin_router
 from handlers.profile import router as profile_router
 from handlers.referral import router as referral_router
-from handlers.matic_gis import router as matic_gis_router
+# from handlers.ma import router as matic_gis_router
+
 
 from games import (
     slot_router,
@@ -89,7 +93,7 @@ except OSError:
     sys.exit(0)
 
 # ==========================
-# ЛОГИ
+# НАЛАШТУВАННЯ ЛОГІВ ТА БАЗИ
 # ==========================
 logging.basicConfig(level=logging.INFO)
 print(f"📁 DB_PATH = {DB_PATH}")
@@ -103,7 +107,7 @@ bot = Bot(
 )
 dp = Dispatcher()
 
-# Підключаємо роутери
+# Підключаємо роутери (тільки один раз!)
 dp.include_router(bank_router)
 dp.include_router(minefield_router)
 dp.include_router(vote_router)
@@ -130,9 +134,9 @@ dp.include_router(blackjack_router)
 dp.include_router(wallet_router)
 dp.include_router(simple_win_router)
 dp.include_router(referral_router)
-dp.include_router(matic_gis_router)
+# dp.include_router(matic_gis_router)
 
-# Мідлвари
+# Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 dp.message.middleware(SaveUserMiddleware())
@@ -140,19 +144,21 @@ dp.message.middleware(SaveUserMiddleware())
 ADMIN_ID = config.ADMIN_ID
 
 # ==========================
-# ВЕБ-СЕРВЕР (Safe API + GIS Webhooks)
+# API ДЛЯ ВЕБ-АПУ СЕЙФА (порт 3000)
 # ==========================
 async def safe_api(request):
-    from group_games.group_safe import load_state
+    from group_games.group_safe import load_state   # ← тут твій оновлений load_state
+    
     state = await load_state()
 
     response = web.json_response({
         "opened": state.get("opened", []),
         "total": 250,
-        "win_cell": state.get("win_cell", 198),
-        "users": state.get("users", {})
+        "win_cell": state.get("win_cell", 198),      # ← додано (корисно)
+        "users": state.get("users", {})              # ← САМЕ ГОЛОВНЕ для лідерборду!
     })
 
+    # CORS (залишаємо як було)
     origin = request.headers.get("Origin", "*")
     response.headers["Access-Control-Allow-Origin"] = origin
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
@@ -162,29 +168,17 @@ async def safe_api(request):
     return response
 
 
-async def create_web_app():
+async def run_api():
     app = web.Application()
-
-    # Safe API
     app.router.add_get("/api/safe", safe_api)
     app.router.add_options("/api/safe", safe_api)
 
-    # GIS Webhooks
-    from handlers.gis_webhook import setup_gis_routes, init_gis_db
-    await init_gis_db()                    # Ініціалізація gis.db
-    setup_gis_routes(app)                  # Реєстрація GIS роутів
-
-    logging.info("🌐 Веб-сервер запущено (Safe API + GIS Webhooks)")
-    return app
-
-
-async def run_web_server():
-    app = await create_web_app()
+    port = int(os.environ.get("PORT", 3000))
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "0.0.0.0", 3000)
+    site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logging.info("✅ Web server (порт 3000) успішно запущений")
+    logging.info(f"🌐 Safe API запущено на порту {port}")
 
 
 # ==========================
@@ -198,6 +192,9 @@ def generate_promocode(length: int = 8) -> str:
 # ==========================
 # КОМАНДИ
 # ==========================
+
+from db import is_referred, add_referral, user_exists
+
 @dp.message(Command("start"), F.chat.type == "private")
 async def cmd_start(message: types.Message, is_new_user: bool = True):
     user_id = message.from_user.id
@@ -208,13 +205,19 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
             referrer_id = int(args[1].replace("ref_", ""))
 
             if referrer_id != user_id and not await is_referred(user_id):
-                was_existing = not is_new_user
+                was_existing = not is_new_user  # ← використовуємо з middleware
+
                 await add_referral(referrer_id, user_id, was_existing_user=was_existing)
 
                 if was_existing:
-                    await message.answer("ℹ️ Ви вже зареєстровані в боті, тому бонус другу не нараховується")
+                    await message.answer(
+                        "ℹ️ Ви вже зареєстровані в боті, тому бонус другу не нараховується"
+                    )
                 else:
-                    await message.answer("👋 Вас запросив друг! Поповніть баланс і отримайте бонус 50 грн 🎁")
+                    await message.answer(
+                        "👋 Вас запросив друг! Поповніть баланс через бот "
+                        "і кожен з вас отримає бонус 50 грн 🎁"
+                    )
         except ValueError:
             pass
 
@@ -227,8 +230,6 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
         caption=f"👋 Привіт, {message.from_user.full_name}!\n\nЛаскаво просимо до гри 🎮",
         reply_markup=keyboard,
     )
-
-
 @dp.message(F.text == "🎁 Подарунок")
 async def gift_command(message: types.Message):
     user_id = message.from_user.id
@@ -249,7 +250,9 @@ async def gift_command(message: types.Message):
     await message.answer("Меню оновлено ⬇️", reply_markup=keyboard)
 
 
-# Скидання подарунків (адмін)
+# ==========================
+# СКИДАННЯ ПОДАРУНКІВ (АДМІН)
+# ==========================
 @dp.message(F.text == "🎁 Скинути подарунки")
 async def confirm_reset_gifts(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -276,7 +279,7 @@ async def cancel_reset_gifts(callback: types.CallbackQuery):
 
 
 # ==========================
-# КОМАНДИ
+# КОМАНДИ ТА МЕНЮ
 # ==========================
 async def set_commands():
     await bot.set_my_commands(
@@ -299,7 +302,7 @@ async def set_commands():
         BotCommand(command="skarb", description="💎 Найди скарб"),
         BotCommand(command="/vote_prize", description="Голосування"),
         BotCommand(command="/minefield", description="Промо борьба"),
-        BotCommand(command="/bank", description="Банк"),
+        BotCommand(command="/bank", description="Банк "),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
@@ -307,13 +310,13 @@ async def set_commands():
     )
 
 
+import asyncio
+from db import cleanup_old_payment_logs
+
 async def run_cleanup_loop():
-    from db import cleanup_old_payment_logs
     while True:
         await cleanup_old_payment_logs()
         await asyncio.sleep(60 * 60)
-
-
 # ==========================
 # ЗАПУСК
 # ==========================
@@ -321,15 +324,18 @@ async def main():
     await init_db()
     await set_commands()
 
-    asyncio.create_task(run_cleanup_loop())
-    asyncio.create_task(run_web_server())   # ← Головна зміна
+    # asyncio.create_task(background_payment_checker())
+    asyncio.create_task(run_cleanup_loop()) 
+    asyncio.create_task(run_api())
 
-    logging.info("🚀 Бот успішно запущений з GIS інтеграцією!")
+    logging.info("🚀 Бот успішно запущений!")
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
     asyncio.run(main())
+
+
 
 #    ssh root@77.42.71.244
 #    mPLmmcFnpcmK
@@ -338,10 +344,10 @@ if __name__ == "__main__":
 #    Оновити код після змін у GitHub:    cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
 
 
-#         systemctl restart tgbot    # перезапустити
-#         systemctl stop tgbot       # зупинити
-#         systemctl start tgbot      # запустити
-#         systemctl status tgbot     # перевірити стан
+# systemctl restart tgbot    # перезапустити
+# systemctl stop tgbot       # зупинити
+# systemctl start tgbot      # запустити
+# systemctl status tgbot     # перевірити стан
 
 # 77.42.71.244	
 
