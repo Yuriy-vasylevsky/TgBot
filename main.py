@@ -337,11 +337,11 @@ if __name__ == "__main__":
 
 
 
-# ssh root@77.42.71.244
-# mPLmmcFnpcmK
+#    ssh root@77.42.71.244
+#    mPLmmcFnpcmK
 
-# Подивитись логи: journalctl -u tgbot -f
-# Оновити код після змін у GitHub: cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
+#    Подивитись логи:     journalctl -u tgbot -f
+#    Оновити код після змін у GitHub:    cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
 
 
 # systemctl restart tgbot    # перезапустити

@@ -1,6 +1,3 @@
-# ==========================
-
-
 """
 Клієнтська частина GIS-інтеграції: кнопка "🎰 Matic" запускає реальну ігрову
 сесію на стороні Платформи.
@@ -39,8 +36,12 @@ router = Router(name="matic_gis")
 log = logging.getLogger(__name__)
 
 # === Налаштування підключення до GIS-платформи ===
-GIS_INIT_SESSION_URL = "http://77.42.71.244:3000/init.session"   # TODO: реальний хост Платформи
-GIS_CLOSE_SESSION_URL = "http://77.42.71.244:3000/close.session"  # TODO: реальний хост Платформи
+# apiUrl — базовий шлях API Платформи, формат підтверджений офіційним прикладом
+# інтеграції (super-omatic/php-gisv2/config.sample.php): "{домен}/api/gisv2/"
+# TODO: підставити реальний домен, виданий Платформою (НЕ адресу свого сервера!)
+GIS_API_URL = "https://PLATFORM_DOMAIN/api/gisv2/"
+GIS_INIT_SESSION_URL = GIS_API_URL + "init.session"
+GIS_CLOSE_SESSION_URL = GIS_API_URL + "close.session"
 GIS_GAME_ID = 0                                                # TODO: id гри Matic на Платформі
 GIS_DEFAULT_CURRENCY = "UAH"
 
