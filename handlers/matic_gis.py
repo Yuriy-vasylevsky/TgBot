@@ -62,17 +62,21 @@ async def matic_menu(message: Message):
             ) as resp:
                 if resp.status != 200:
                     text = await resp.text()
-                    log.error("GIS init.session HTTP %d: %s", resp.status, text)
-                    await message.answer("❌ Помилка сервера GIS (HTTP %d)", resp.status)
+                    log.error("GIS init.session HTTP %d: %s", resp.status, text[:500])
+                    await message.answer(
+                        f"❌ Помилка сервера GIS (HTTP {resp.status})", 
+                        parse_mode="HTML"
+                    )
                     return
+                
                 data = await resp.json()
     except aiohttp.ClientConnectorError:
-        log.error("Cannot connect to GIS platform")
-        await message.answer("❌ Не вдалося підключитися до GIS платформи.")
+        log.error("Cannot connect to GIS platform at %s", GIS_INIT_SESSION_URL)
+        await message.answer("❌ Не вдалося підключитися до GIS платформи. Перевірте налаштування.")
         return
     except Exception as e:
         log.exception("GIS init.session failed")
-        await message.answer("❌ Технічна помилка при запуску гри.")
+        await message.answer("❌ Технічна помилка при запуску гри. Спробуйте пізніше.")
         return
 
     response = data.get("response") or {}
@@ -102,7 +106,6 @@ async def matic_menu(message: Message):
         parse_mode="HTML",
         reply_markup=kb
     )
-
 
 # === Закриття сесії ===
 async def close_matic_session(target_message: Message, user_id: int, session_id: str):
