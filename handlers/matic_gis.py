@@ -24,7 +24,7 @@ GIS_API_URL = "https://api.superplat.pw/api/gisv2/"
 GIS_INIT_SESSION_URL = GIS_API_URL + "init.session"
 GIS_CLOSE_SESSION_URL = GIS_API_URL + "close.session"
 
-GIS_GAME_ID = 522
+GIS_GAME_ID = 0
 GIS_DEFAULT_CURRENCY = "UAH"
 
 
