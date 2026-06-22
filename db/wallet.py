@@ -287,6 +287,13 @@ async def get_issued_checks_for_user(user_id: int) -> list[dict]:
         for r in rows
     ]
 
+async def delete_issued_check(code: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM issued_checks WHERE code = ?",
+            (code,)
+        )
+        await db.commit()
 
 async def get_all_balances() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:

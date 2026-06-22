@@ -10,7 +10,7 @@ from aiogram.fsm.state import StatesGroup, State
 from handlers.config import ADMIN_ID
 from handlers.profile import notify_reward_progress
 from db.check import get_checks_stats, clear_all_checks, get_checks_total_balance
-from db import get_balance, add_to_balance, log_check_issued
+from db import get_balance, add_to_balance, log_check_issued, delete_issued_check
 from db import get_issued_checks_for_user
 from handlers.menu import checks_menu
 from handlers.casino_api import create_invoice, create_matic_checks, close_invoice, check_invoice, add_to_invoice
@@ -20,6 +20,7 @@ router = Router(name="admin_checks")
 
 class CheckFSM(StatesGroup):
     waiting_for_custom_amount = State()      # Champion
+    waiting_for_custom_matic_amount = State()
     waiting_for_amount_topup = State()       # Поповнення
 
 
@@ -81,8 +82,12 @@ def matic_amount_kb() -> InlineKeyboardMarkup:
             [
                 InlineKeyboardButton(text="100 грн", callback_data="matic_amt_100"),
                 InlineKeyboardButton(text="200 грн", callback_data="matic_amt_200"),
+                InlineKeyboardButton(text="250 грн", callback_data="matic_amt_250"),
             ],
-            [InlineKeyboardButton(text="❌ Скасувати", callback_data="matic_cancel")]
+            [
+                InlineKeyboardButton(text="✏️ Інша сума", callback_data="matic_amt_custom"),
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="matic_cancel")
+            ]
         ]
     )
 
@@ -205,12 +210,21 @@ async def issue_matic_check(target_message: Message, user, amount: int, code: st
         parse_mode="HTML"
     )
 
+    # await target_message.answer(
+    #     f"✅ <b>Чек Matic видано!</b>\n\n"
+    #     f"🔑 Код: <code>{code}</code>\n"
+    #     f"💰 Залишок: {await get_balance(user_id)} грн",
+    #     parse_mode="HTML"
+    # )
+
     await target_message.answer(
         f"✅ <b>Чек Matic видано!</b>\n\n"
-        f"🔑 Код: <code>{code}</code>\n"
+        # f"🔑 Код: <code>{code}</code>\n"
+        f"🔗 https://code.greenhost.pw/?c={code}\n\n"
         f"💰 Залишок: {await get_balance(user_id)} грн",
-        parse_mode="HTML"
-    )
+        parse_mode="HTML",
+        disable_web_page_preview=True
+)
 
     await target_message.answer("🎰 Matic меню:", reply_markup=matic_main_kb())
 
@@ -256,6 +270,45 @@ async def process_custom_champion(message: Message, state: FSMContext):
     await issue_champion_check(message, message.from_user, amount)
 
 
+
+
+
+
+@router.message(CheckFSM.waiting_for_custom_matic_amount)
+async def process_custom_matic(message: Message, state: FSMContext):
+    try:
+        amount = int(message.text)
+        if amount < 50:
+            await message.answer("❌ Мінімум 50 грн")
+            return
+    except:
+        await message.answer("❌ Введіть число")
+        return
+
+    if await get_balance(message.from_user.id) < amount:
+        await message.answer("❌ Недостатньо коштів")
+        await state.clear()
+        return
+
+    await state.clear()
+    await message.answer("🔄 Генеруємо...")
+    try:
+        result = await create_matic_checks(amount=amount, count=1)
+        if result.get("created", 0) > 0 and result.get("codes"):
+            code_info = result["codes"][0]
+            code = code_info.get("code") or code_info.get("login") or code_info.get("key") or str(code_info)
+            await issue_matic_check(message, message.from_user, amount, code)
+        else:
+            await message.answer("❌ Не вдалося створити Matic чек")
+    except Exception as e:
+        await message.answer(f"❌ Помилка: {e}")
+
+
+
+
+
+
+
 @router.callback_query(F.data == "champ_cancel")
 async def champion_cancel(callback: CallbackQuery, state: FSMContext):
     await state.clear()
@@ -264,8 +317,16 @@ async def champion_cancel(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data.startswith("matic_amt_"))
-async def matic_pick_amount(callback: CallbackQuery):
-    amount = int(callback.data.removeprefix("matic_amt_"))
+async def matic_pick_amount(callback: CallbackQuery, state: FSMContext):
+    value = callback.data.removeprefix("matic_amt_")
+
+    if value == "custom":
+        await state.set_state(CheckFSM.waiting_for_custom_matic_amount)
+        await callback.message.edit_text("🎰 Введіть суму Matic (від 50 грн):")
+        await callback.answer()
+        return
+
+    amount = int(value)
     if await get_balance(callback.from_user.id) < amount:
         await callback.answer("❌ Недостатньо коштів", show_alert=True)
         return
@@ -425,6 +486,10 @@ async def show_my_matic_checks(message: Message):
         try:
             remaining = await matic_api.get_balance_by_code(code)
 
+            if remaining < 0:
+                await delete_issued_check(code)  # чек вже неактивний — прибираємо з бази
+                continue
+
             if remaining <= 0:
                 continue
 
@@ -456,8 +521,6 @@ async def show_my_matic_checks(message: Message):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
 
-
-
     
 @router.message(F.text == "💵 Поповнити чек Matic")
 async def show_matic_to_topup(message: Message, state: FSMContext):
@@ -476,6 +539,11 @@ async def show_matic_to_topup(message: Message, state: FSMContext):
         code = ch["code"]
         try:
             remaining = await matic_api.get_balance_by_code(code)
+
+            if remaining < 0:
+                await delete_issued_check(code)  # чек вже неактивний — прибираємо з бази
+                continue
+
             short = code[-6:]
             text += f"🔑 <code>{code}</code> — 💰 {remaining:.0f} грн\n"
             buttons.append([
@@ -498,7 +566,6 @@ async def show_matic_to_topup(message: Message, state: FSMContext):
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
-
 
 # ==================== CALLBACKS ЗАКРИТТЯ ====================
 
@@ -546,6 +613,8 @@ async def process_close_matic(callback: CallbackQuery):
 
         if remaining > 0:
             await add_to_balance(user_id, int(remaining))
+
+        await delete_issued_check(code)  # прибираємо з бази, щоб не висів у списках
 
         await callback.message.edit_text(
             f"✅ Matic чек успішно закрито!\n\n"
@@ -615,8 +684,8 @@ async def process_topup_amount(message: Message, state: FSMContext):
             new_sum = result.get("new_sum", amount) if result else amount
         else:  # matic
             matic_code = data.get("matic_code")
-            result = await matic_api.add_to_code(matic_code, amount)
-            success = True
+            result = await matic_api.add_to_check_by_code(matic_code, amount)
+            success = bool(result and "id" in result)  # успіх = повернувся id транзакції
             new_sum = "Оновлено"
 
         if success:

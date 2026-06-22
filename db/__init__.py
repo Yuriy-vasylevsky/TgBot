@@ -27,6 +27,7 @@ from .wallet import (
     get_all_balances,
     mark_tx_used, 
     get_active_champion_checks,
+    delete_issued_check
 )
 
 # ==================== USERS ====================
