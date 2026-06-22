@@ -997,84 +997,84 @@ async def cb_back_to_main_menu(callback: types.CallbackQuery):
 #  СПОВІЩЕННЯ ПРО ПРОГРЕС НАГОРОД (промокод / відкат)
 # ──────────────────────────────────────────────────────────────────────────
 
-async def _ensure_table(db):
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS reward_progress (
-            user_id INTEGER NOT NULL,
-            reward_date TEXT NOT NULL,
-            promo_tier INTEGER NOT NULL DEFAULT 0,
-            cashback_tier INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (user_id, reward_date)
-        )
-    """)
+# async def _ensure_table(db):
+#     await db.execute("""
+#         CREATE TABLE IF NOT EXISTS reward_progress (
+#             user_id INTEGER NOT NULL,
+#             reward_date TEXT NOT NULL,
+#             promo_tier INTEGER NOT NULL DEFAULT 0,
+#             cashback_tier INTEGER NOT NULL DEFAULT 0,
+#             PRIMARY KEY (user_id, reward_date)
+#         )
+#     """)
 
 
-async def get_reward_tiers(user_id: int, reward_date: str) -> tuple[int, int]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await _ensure_table(db)
-        cur = await db.execute(
-            "SELECT promo_tier, cashback_tier FROM reward_progress "
-            "WHERE user_id = ? AND reward_date = ?",
-            (user_id, reward_date),
-        )
-        row = await cur.fetchone()
-        return (row[0], row[1]) if row else (0, 0)
+# async def get_reward_tiers(user_id: int, reward_date: str) -> tuple[int, int]:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await _ensure_table(db)
+#         cur = await db.execute(
+#             "SELECT promo_tier, cashback_tier FROM reward_progress "
+#             "WHERE user_id = ? AND reward_date = ?",
+#             (user_id, reward_date),
+#         )
+#         row = await cur.fetchone()
+#         return (row[0], row[1]) if row else (0, 0)
 
 
-async def set_reward_tiers(user_id: int, reward_date: str, promo_tier: int, cashback_tier: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await _ensure_table(db)
-        await db.execute("""
-            INSERT INTO reward_progress (user_id, reward_date, promo_tier, cashback_tier)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id, reward_date) DO UPDATE SET
-                promo_tier = excluded.promo_tier,
-                cashback_tier = excluded.cashback_tier
-        """, (user_id, reward_date, promo_tier, cashback_tier))
-        await db.commit()
+# async def set_reward_tiers(user_id: int, reward_date: str, promo_tier: int, cashback_tier: int):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await _ensure_table(db)
+#         await db.execute("""
+#             INSERT INTO reward_progress (user_id, reward_date, promo_tier, cashback_tier)
+#             VALUES (?, ?, ?, ?)
+#             ON CONFLICT(user_id, reward_date) DO UPDATE SET
+#                 promo_tier = excluded.promo_tier,
+#                 cashback_tier = excluded.cashback_tier
+#         """, (user_id, reward_date, promo_tier, cashback_tier))
+#         await db.commit()
 
 
-async def notify_reward_progress(bot, user_id: int, username: str | None, full_name: str):
-    all_checks = await get_issued_checks_for_user(user_id)
-    today_sum = _today_sum(all_checks)
-    today_str = datetime.now(KYIV).strftime("%Y-%m-%d")
+# async def notify_reward_progress(bot, user_id: int, username: str | None, full_name: str):
+#     all_checks = await get_issued_checks_for_user(user_id)
+#     today_sum = _today_sum(all_checks)
+#     today_str = datetime.now(KYIV).strftime("%Y-%m-%d")
 
-    old_promo_tier, old_cashback_tier = await get_reward_tiers(user_id, today_str)
-    new_promo_tier = today_sum // PROMO_GOAL
-    new_cashback_tier = today_sum // CASHBACK_GOAL
+#     old_promo_tier, old_cashback_tier = await get_reward_tiers(user_id, today_str)
+#     new_promo_tier = today_sum // PROMO_GOAL
+#     new_cashback_tier = today_sum // CASHBACK_GOAL
 
-    display_name = f"@{username}" if username else full_name
+#     display_name = f"@{username}" if username else full_name
 
-    if new_promo_tier > old_promo_tier:
-        await bot.send_message(
-            user_id,
-            f"🎉 Вітаємо! Ви можете отримати промокод!\n",
-            parse_mode="HTML",
-        )
-        if ADMIN_ID:
-            await bot.send_message(
-                ADMIN_ID,
-                f"🎟 {display_name} (id <code>{user_id}</code>) отримав промокод "
-                f"(всього сьогодні: {new_promo_tier}).",
-                parse_mode="HTML",
-            )
+#     if new_promo_tier > old_promo_tier:
+#         await bot.send_message(
+#             user_id,
+#             f"🎉 Вітаємо! Ви можете отримати промокод!\n",
+#             parse_mode="HTML",
+#         )
+#         if ADMIN_ID:
+#             await bot.send_message(
+#                 ADMIN_ID,
+#                 f"🎟 {display_name} (id <code>{user_id}</code>) отримав промокод "
+#                 f"(всього сьогодні: {new_promo_tier}).",
+#                 parse_mode="HTML",
+#             )
 
-    if new_cashback_tier > old_cashback_tier:
-        gained = int((new_cashback_tier - old_cashback_tier) * CASHBACK_GOAL * CASHBACK_PERCENT)
-        await add_to_balance(user_id, gained)
+#     if new_cashback_tier > old_cashback_tier:
+#         gained = int((new_cashback_tier - old_cashback_tier) * CASHBACK_GOAL * CASHBACK_PERCENT)
+#         await add_to_balance(user_id, gained)
 
-        await bot.send_message(
-            user_id,
-            f"💸 Вітаємо! Вам доступно відкат <b>{gained} грн</b> "
-            f"({int(CASHBACK_PERCENT * 100)}% з {CASHBACK_GOAL} грн).\n",
-            parse_mode="HTML",
-        )
-        if ADMIN_ID:
-            await bot.send_message(
-                ADMIN_ID,
-                f"💸 {display_name} (id <code>{user_id}</code>) отримав відкат {gained} грн.",
-                parse_mode="HTML",
-            )
+#         await bot.send_message(
+#             user_id,
+#             f"💸 Вітаємо! Вам доступно відкат <b>{gained} грн</b> "
+#             f"({int(CASHBACK_PERCENT * 100)}% з {CASHBACK_GOAL} грн).\n",
+#             parse_mode="HTML",
+#         )
+#         if ADMIN_ID:
+#             await bot.send_message(
+#                 ADMIN_ID,
+#                 f"💸 {display_name} (id <code>{user_id}</code>) отримав відкат {gained} грн.",
+#                 parse_mode="HTML",
+#             )
 
-    if new_promo_tier > old_promo_tier or new_cashback_tier > old_cashback_tier:
-        await set_reward_tiers(user_id, today_str, new_promo_tier, new_cashback_tier)
+#     if new_promo_tier > old_promo_tier or new_cashback_tier > old_cashback_tier:
+#         await set_reward_tiers(user_id, today_str, new_promo_tier, new_cashback_tier)
