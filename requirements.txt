@@ -1,10 +1,8 @@
-aiogram==3.7.0
+﻿aiogram==3.7.0
 pydantic==2.7.4
 pydantic-core==2.18.4
 aiosqlite==0.19.0
 python-dotenv==1.0.1
 aiofiles==23.2.1
-monobank  # або python-monobank
-python-dotenv  # для .env
-aiosqlite  # якщо db.py на SQLite, або asyncpg якщо PostgreSQL
+monobank
 httpx>=0.27.0

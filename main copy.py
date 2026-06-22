@@ -81,11 +81,6 @@ from games import (
 
 from handlers.menu import main_menu
 
-
-logger = logging.getLogger(__name__)
-
-
-
 # ===============================
 # ЗАХИСТ ВІД ПОДВІЙНОГО ЗАПУСКУ
 # ===============================
@@ -183,58 +178,7 @@ async def run_api():
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    logger.info(f"🌐 Safe API запущено на порту {port}")
-    return runner
-
-
-# ==========================
-# ЗАПУСК
-# ==========================
-async def main():
-    await init_db()
-    await set_commands()
-
-    # Фонові завдання
-    asyncio.create_task(run_cleanup_loop())
-    
-    # Запускаємо Web API
-    api_runner = None
-    try:
-        api_runner = await run_api()
-    except Exception as e:
-        logger.error(f"Не вдалося запустити Safe API: {e}")
-
-        logger.info("🚀 Бот успішно запущений!")
-
-    try:
-        await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("🛑 Завершуємо роботу бота...")
-        
-        # Закриваємо Matic API
-        try:
-            await matic_api.close()
-        except:
-            pass
-        
-        # Закриваємо бот
-        try:
-            await bot.session.close()
-        except:
-            pass
-        
-        # Закриваємо Web API
-        if api_runner:
-            try:
-                await api_runner.cleanup()
-            except:
-                pass
-        
-        print("✅ Бот коректно завершено.")
+    logging.info(f"🌐 Safe API запущено на порту {port}")
 
 
 # ==========================
@@ -368,7 +312,6 @@ async def set_commands():
 
 import asyncio
 from db import cleanup_old_payment_logs
-from handlers.casino_api import _matic_api as matic_api
 
 async def run_cleanup_loop():
     while True:
@@ -381,27 +324,12 @@ async def main():
     await init_db()
     await set_commands()
 
-    asyncio.create_task(run_cleanup_loop())
-    api_runner = await run_api()
+    # asyncio.create_task(background_payment_checker())
+    asyncio.create_task(run_cleanup_loop()) 
+    asyncio.create_task(run_api())
 
-    print("🚀 Бот успішно запущений!")
-
-    try:
-        await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("🛑 Завершуємо роботу бота...")
-        try:
-            await matic_api.close()
-        except:
-            pass
-        await bot.session.close()
-        if 'api_runner' in locals():
-            await api_runner.cleanup()
-        print("✅ Бот коректно завершено.")
+    logging.info("🚀 Бот успішно запущений!")
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":

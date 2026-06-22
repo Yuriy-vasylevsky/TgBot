@@ -436,3 +436,5 @@ async def add_to_invoice(invoice: str, sum_grn: float):
         except Exception as e:
             logger.exception(f"add_to_invoice error: {e}")
             return None
+        
+

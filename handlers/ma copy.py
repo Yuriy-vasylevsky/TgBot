@@ -1,3 +1,268 @@
+# import aiohttp
+# import hashlib
+# from typing import Optional, Dict
+
+# BASE_URL = "https://api.superplat.pw/api/v1"
+
+
+# class SuperplatMatic:
+#     def __init__(self, subagent: str = "alb2", password: str = "21212121"):
+#         self.subagent = subagent
+#         self.password = password
+#         self.token: Optional[str] = None
+#         self.session: Optional[aiohttp.ClientSession] = None
+
+#     async def _get_session(self) -> aiohttp.ClientSession:
+#         if self.session is None or self.session.closed:
+#             self.session = aiohttp.ClientSession(
+#                 headers={
+#                     "User-Agent": "SuperplatBot/1.0",
+#                     "Accept": "application/json, text/plain, */*"
+#                 }
+#             )
+#         return self.session
+
+#     async def close(self):
+#         if self.session and not self.session.closed:
+#             await self.session.close()
+
+#     async def _auth(self) -> str:
+#         if self.token:
+#             return self.token
+
+#         session = await self._get_session()
+#         url = f"{BASE_URL}/auth"
+
+#         password_md5 = hashlib.md5(self.password.encode('utf-8')).hexdigest()
+
+#         payload = {
+#             "login": self.subagent,
+#             "password": password_md5
+#         }
+
+#         async with session.post(url, json=payload) as resp:
+#             text = await resp.text()
+#             print(f"[AUTH] Status: {resp.status} | Content-Type: {resp.headers.get('content-type')}")
+#             print(f"[AUTH] Body: {text[:300]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"Auth error {resp.status}: {text[:400]}")
+
+#             try:
+#                 data = await resp.json()
+#             except:
+#                 import re
+#                 token_match = re.search(r'"token"\s*:\s*"([^"]+)"', text)
+#                 if token_match:
+#                     self.token = token_match.group(1)
+#                     return self.token
+#                 raise Exception(f"Cannot parse auth response: {text[:200]}")
+
+#             self.token = data.get("token")
+#             if not self.token:
+#                 raise Exception(f"No token in auth response: {data}")
+#             return self.token
+
+#     async def get_my_id(self) -> int:
+#         """Отримує ID поточного Subagent"""
+#         token = await self._auth()
+#         session = await self._get_session()
+
+#         url = f"{BASE_URL}/getInfo"
+#         headers = {"Token": token}
+
+#         async with session.post(url, json={}, headers=headers) as resp:
+#             text = await resp.text()
+#             print(f"[GETINFO] Status: {resp.status} | Content-Type: {resp.headers.get('content-type')}")
+#             print(f"[GETINFO] Body: {text[:500]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"getInfo error {resp.status}: {text[:400]}")
+
+#             # Пробуємо JSON, якщо не виходить — шукаємо id у тексті
+#             try:
+#                 data = await resp.json()
+#                 parent_id = data.get("id") or data.get("user_id") or data.get("parentId")
+#                 if parent_id:
+#                     return int(parent_id)
+#             except:
+#                 pass
+
+#             # Якщо не JSON — шукаємо число id
+#             import re
+#             id_match = re.search(r'"?id"?\s*[:=]\s*(\d+)', text)
+#             if id_match:
+#                 return int(id_match.group(1))
+
+#             raise Exception(f"Cannot find ID in getInfo response: {text[:400]}")
+
+#     async def add_codes(self, parent_id: int, count: int, amount: int) -> Dict:
+#         """Додає ігрові коди (Matic)"""
+#         token = await self._auth()
+#         session = await self._get_session()
+
+#         url = f"{BASE_URL}/addCodes"
+#         headers = {"Token": token}
+
+#         payload = {
+#             "parentId": parent_id,
+#             "count": count,
+#             "amount": amount * 100
+#         }
+
+#         async with session.post(url, json=payload, headers=headers) as resp:
+#             text = await resp.text()
+#             print(f"[ADDCODES] Status: {resp.status} | Body: {text[:400]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"addCodes error {resp.status}: {text[:400]}")
+
+#             try:
+#                 return await resp.json()
+#             except:
+#                 import json
+#                 try:
+#                     return json.loads(text)
+#                 except:
+#                     return {"status": "ok", "raw": text}
+                
+
+#     async def check_code(self, code: str) -> Dict:
+#         """Перевірити баланс та статус Matic чека"""
+#         token = await self._auth()
+#         session = await self._get_session()
+
+#         url = f"{BASE_URL}/checkCode"
+#         headers = {"Token": token}
+
+#         payload = {"code": code}
+
+#         async with session.post(url, json=payload, headers=headers) as resp:
+#             text = await resp.text()
+#             print(f"[CHECKCODE] Status: {resp.status} | Body: {text[:400]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"checkCode error: {resp.status}")
+
+#             try:
+#                 return await resp.json()
+#             except:
+#                 import json
+#                 return json.loads(text)
+
+
+#     async def close_code(self, code: str) -> Dict:
+#         """Закрити Matic чек і вивести гроші на баланс"""
+#         token = await self._auth()
+#         session = await self._get_session()
+
+#         url = f"{BASE_URL}/closeCode"
+#         headers = {"Token": token}
+
+#         payload = {"code": code}
+
+#         async with session.post(url, json=payload, headers=headers) as resp:
+#             text = await resp.text()
+#             print(f"[CLOSECODE] Status: {resp.status} | Body: {text[:400]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"closeCode error: {resp.status}")
+
+#             try:
+#                 return await resp.json()
+#             except:
+#                 import json
+#                 return json.loads(text)
+
+
+#     async def add_to_code(self, code: str, amount: int) -> Dict:
+#         """Поповнити Matic чек"""
+#         token = await self._auth()
+#         session = await self._get_session()
+
+#         url = f"{BASE_URL}/addToCode"
+#         headers = {"Token": token}
+
+#         payload = {
+#             "code": code,
+#             "amount": amount * 100  # в копійках
+#         }
+
+#         async with session.post(url, json=payload, headers=headers) as resp:
+#             text = await resp.text()
+#             print(f"[ADDTOCODE] Status: {resp.status} | Body: {text[:400]}")
+
+#             if resp.status != 200:
+#                 raise Exception(f"addToCode error: {resp.status}")
+
+#             try:
+#                 return await resp.json()
+#             except:
+#                 import json
+#                 return json.loads(text)
+            
+
+# # +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+# async def get_terminal_id(self, code: str) -> int:
+#     token = await self._auth()
+#     session = await self._get_session()
+
+#     async with session.post(
+#         f"{BASE_URL}/getTerminalId",
+#         json={"code": code},
+#         headers={"Token": token}
+#     ) as resp:
+
+#         text = await resp.text()
+
+#         if resp.status != 200:
+#             raise Exception(f"getTerminalId error: {text}")
+
+#         data = await resp.json()
+#         return int(data["id"])
+
+
+# async def get_terminal_balance(self, terminal_id: int) -> int:
+#     token = await self._auth()
+#     session = await self._get_session()
+
+#     async with session.post(
+#         f"{BASE_URL}/getBalance",
+#         json={"id": terminal_id},
+#         headers={"Token": token}
+#     ) as resp:
+
+#         text = await resp.text()
+
+#         if resp.status != 200:
+#             raise Exception(f"getBalance error: {text}")
+
+#         data = await resp.json()
+#         return int(data["amount"])
+
+
+# async def collect_terminal(self, terminal_id: int):
+#     token = await self._auth()
+#     session = await self._get_session()
+
+#     async with session.post(
+#         f"{BASE_URL}/collectTerminal",
+#         json={
+#             "id": terminal_id,
+#             "force": True
+#         },
+#         headers={"Token": token}
+#     ) as resp:
+
+#         text = await resp.text()
+
+#         if resp.status != 200:
+#             raise Exception(f"collectTerminal error: {text}")
+
+#         return await resp.json()
+
+
 import aiohttp
 import hashlib
 from typing import Optional, Dict
@@ -351,71 +616,3 @@ class SuperplatMatic:
             data = self._parse_json(text)
             amount = data.get("amount") or data.get("balance") or 0
             return int(amount)   # повертаємо в копійках!
-        
-
-    async def get_balance_by_code(self, code: str) -> float:
-            """Баланс чека в грн через terminal_id"""
-            terminal_id = await self.get_terminal_id(code)
-            try:
-                balance = await self.get_terminal_balance(terminal_id)
-            except Exception as e:
-                if "no such terminal" in str(e):
-                    # термінал вже зібраний/закритий раніше — вважаємо баланс 0
-                    return 0.0
-                raise
-            return balance  # сервер вже повертає суму в грн, без копійок
-
-    async def close_check_by_code(self, code: str) -> Dict:
-        """Закриває чек: збирає баланс терміналу на субагента і видаляє код"""
-        terminal_id = await self.get_terminal_id(code)
-        balance = await self.get_terminal_balance(terminal_id)
-        collect_result = await self.collect_terminal(terminal_id)
-
-        try:
-            await self.delete_code(code)
-        except Exception as e:
-            print(f"[CLOSE_CHECK] delete_code не вдався для {code}: {e}")
-
-        return {
-            "success": True,
-            "balance": balance,
-            "collect_result": collect_result,
-        }
-
-    # async def close_check_by_code(self, code: str) -> Dict:
-    #     """Закриває чек: збирає баланс терміналу на субагента і видаляє код"""
-    #     terminal_id = await self.get_terminal_id(code)
-    #     balance_kop = await self.get_terminal_balance(terminal_id)
-    #     collect_result = await self.collect_terminal(terminal_id)
-
-    #     try:
-    #         await self.delete_code(code)
-    #     except Exception as e:
-    #         print(f"[CLOSE_CHECK] delete_code не вдався для {code}: {e}")
-
-    #     return {
-    #         "success": True,
-    #         "balance": balance_kop / 100,
-    #         "collect_result": collect_result,
-    #     }
-
-
-    async def close_check_by_code(self, code: str) -> Dict:
-        """Закриває чек: збирає баланс терміналу на субагента і видаляє код"""
-        terminal_id = await self.get_terminal_id(code)
-        balance = await self.get_terminal_balance(terminal_id)
-
-        print(f"[CLOSE_CHECK] code={code} terminal_id={terminal_id} balance_raw={balance}")
-
-        collect_result = await self.collect_terminal(terminal_id)
-
-        try:
-            await self.delete_code(code)
-        except Exception as e:
-            print(f"[CLOSE_CHECK] delete_code не вдався для {code}: {e}")
-
-        return {
-            "success": True,
-            "balance": balance,
-            "collect_result": collect_result,
-        }
