@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
 from handlers.config import ADMIN_ID
-from handlers.profile import notify_reward_progress
+# from handlers.profile import notify_reward_progress
 from db.check import get_checks_stats, clear_all_checks, get_checks_total_balance
 from db import get_balance, add_to_balance, log_check_issued, delete_issued_check
 from db import get_issued_checks_for_user
@@ -289,7 +289,7 @@ async def issue_champion_check(target_message: Message, user, amount: int):
 
     await add_to_balance(user_id, -amount)
     await log_check_issued(user_id, f"🏆 Champion {amount}", invoice_code, amount)
-    await notify_reward_progress(target_message.bot, user_id, user.username, user.full_name or "")
+    # await notify_reward_progress(target_message.bot, user_id, user.username, user.full_name or "")
 
     name = f"@{user.username}" if user.username else user.full_name or f"#{user_id}"
     await target_message.bot.send_message(
@@ -315,7 +315,7 @@ async def issue_matic_check(target_message: Message, user, amount: int, code: st
 
     await add_to_balance(user_id, -amount)
     await log_check_issued(user_id, f"🎰 Matic {amount}", code, amount)
-    await notify_reward_progress(target_message.bot, user_id, user.username, user.full_name or "")
+    # await notify_reward_progress(target_message.bot, user_id, user.username, user.full_name or "")
 
     name = f"@{user.username}" if user.username else user.full_name or f"#{user_id}"
     await target_message.bot.send_message(
