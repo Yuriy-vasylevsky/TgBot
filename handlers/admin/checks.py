@@ -35,13 +35,13 @@ def play_menu_kb() -> ReplyKeyboardMarkup:
         resize_keyboard=True
     )
 
-
 def champion_main_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="💰 Купити чек Champion")],
             [KeyboardButton(text="🔒 Закрити чек Champion")],
             [KeyboardButton(text="💵 Поповнити чек Champion")],
+            [KeyboardButton(text="📋 Мої чеки Champion")],
             [KeyboardButton(text="🔙 Назад")]
         ],
         resize_keyboard=True
@@ -54,11 +54,11 @@ def matic_main_kb() -> ReplyKeyboardMarkup:
             [KeyboardButton(text="💰 Купити чек Matic")],
             [KeyboardButton(text="🔒 Закрити чек Matic")],
             [KeyboardButton(text="💵 Поповнити чек Matic")],
+            [KeyboardButton(text="📋 Мої коди Matic")],
             [KeyboardButton(text="🔙 Назад")]
         ],
         resize_keyboard=True
     )
-
 
 def champion_amount_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -126,8 +126,10 @@ async def play_menu(message: Message):
 
 @router.message(F.text == "🏆 Champion")
 async def champion_menu(message: Message):
+    balance = await get_balance(message.from_user.id)
     await message.answer(
-        "🏆 <b>Champion</b>\n\nОберіть дію:",
+        f"🏆 <b>Champion</b>\n\n"
+        f"💰 <b>Ваш баланс: {balance:,} грн</b>",
         parse_mode="HTML",
         reply_markup=champion_main_kb()
     )
@@ -143,10 +145,31 @@ async def buy_champion(message: Message):
 
 # ==================== MATIC ====================
 
+# @router.message(F.text == "🎰 Matic")
+# async def matic_menu(message: Message):
+#     balance = await get_balance(message.from_user.id)
+#     inline_kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [InlineKeyboardButton(text="📋 Мої коди", callback_data="matic_my_codes")]
+#         ]
+#     )
+#     await message.answer(
+#         "🎰 <b>Matic</b>\n\n",
+#         parse_mode="HTML",
+#         reply_markup=matic_main_kb()
+#     )
+#     await message.answer(
+#         f"💰 <b>Ваш баланс: {balance:,} грн</b>",
+#         parse_mode="HTML",
+#         reply_markup=inline_kb
+#     )
+
 @router.message(F.text == "🎰 Matic")
 async def matic_menu(message: Message):
+    balance = await get_balance(message.from_user.id)
     await message.answer(
-        "🎰 <b>Matic</b>\n\nОберіть дію:",
+        f"🎰 <b>Matic</b>\n\n"
+        f"💰 <b>Ваш баланс: {balance:,} грн</b>",
         parse_mode="HTML",
         reply_markup=matic_main_kb()
     )
@@ -158,6 +181,97 @@ async def buy_matic(message: Message):
         "🎰 Оберіть суму Matic:",
         reply_markup=matic_amount_kb()
     )
+
+
+
+
+
+@router.message(F.text == "📋 Мої коди Matic")
+async def matic_my_codes(message: Message):
+    user_id = message.from_user.id
+    checks = await get_issued_checks_for_user(user_id)
+    matic_checks = [ch for ch in checks if "Matic" in ch.get("check_type", "")]
+
+    if not matic_checks:
+        await message.answer("❌ У вас немає активних Matic кодів")
+        return
+
+    text = "📋 <b>Ваші активні Matic коди:</b>\n\n"
+    found = 0
+
+    for ch in matic_checks:
+        code = ch["code"]
+        try:
+            remaining = await matic_api.get_balance_by_code(code)
+
+            if remaining < 0:
+                await delete_issued_check(code)
+                continue
+            if remaining <= 0:
+                continue
+
+            found += 1
+            text += (
+                f"🔑 <code>{code}</code>\n"
+                f"💰 Баланс: <b>{remaining:.0f} грн</b>\n"
+                f"🔗 https://code.greenhost.pw/?c={code}\n\n"
+            )
+        except Exception as e:
+            print(f"[matic_my_codes] code={code} error={e}")
+            continue
+
+    if found == 0:
+        await message.answer("❌ Немає активних кодів з балансом > 0")
+        return
+
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+
+
+
+@router.message(F.text == "📋 Мої чеки Champion")
+async def champion_my_checks(message: Message):
+    user_id = message.from_user.id
+    checks = await get_issued_checks_for_user(user_id)
+    champion_checks = [ch for ch in checks if "Champion" in ch.get("check_type", "")]
+
+    if not champion_checks:
+        await message.answer("❌ У вас немає активних чеків Champion")
+        return
+
+    text = "📋 <b>Ваші активні чеки Champion:</b>\n\n"
+    found = 0
+
+    for ch in champion_checks:
+        code = ch["code"]
+        try:
+            status = await check_invoice(code)
+            if not status or not status.get("success"):
+                continue
+            remaining = float(status.get("sum", 0))
+            if remaining <= 0:
+                continue
+
+            found += 1
+            text += (
+                f"🔑 <code>{code}</code>\n"
+                f"💰 Баланс: <b>{remaining:.0f} грн</b>\n"
+                f"🔗 https://spinplanet.net/?login_code={code}\n\n"
+)
+        except Exception as e:
+            print(f"[champion_my_checks] code={code} error={e}")
+            continue
+
+    if found == 0:
+        await message.answer("❌ Немає активних чеків з балансом > 0")
+        return
+
+    await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
+
+
+
+
 
 
 # ==================== ВИДАЧА ЧЕКІВ ====================
