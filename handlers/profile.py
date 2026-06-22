@@ -794,8 +794,6 @@
 #         await set_reward_tiers(user_id, today_str, new_promo_tier, new_cashback_tier)
 
 
-
-
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -806,10 +804,10 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db import (
     get_user_data,
     add_or_update_user,
-    has_claimed_gift,
-    get_issued_checks_for_user,
     DB_PATH,
     add_to_balance,
+    get_issued_checks_for_user,
+    
 )
 from db.wallet import get_balance
 from handlers.menu import main_menu
@@ -889,51 +887,55 @@ def build_profile_text(user_id, username, full_name, balance, weekly_coupons) ->
     )
 
 
-def build_progress_bars(today_sum: int) -> str:
-    """
-    Прогрес-бари на сьогодні.
-    """
-    # ── Промокод ──
-    promo_tier = today_sum // PROMO_GOAL
-    promo_progress = today_sum % PROMO_GOAL
-    promo_blocks = int(promo_progress / PROMO_GOAL * 10)
-    promo_bar = "█" * promo_blocks + "░" * (10 - promo_blocks)
+# ──────────────────────────────────────────────────────────────────────────
+#  ПРОГРЕС СЬОГОДНІ (закоментовано)
+# ──────────────────────────────────────────────────────────────────────────
 
-    if promo_tier > 0:
-        promo_line = (
-            f"🎟 <b>Промокод</b> · отримано {promo_tier} шт ✅\n"
-            f"  Прогрес до наступного: [{promo_bar}] {promo_progress}/{PROMO_GOAL} грн\n"
-        )
-    else:
-        promo_line = (
-            f"🎟 <b>Промокод</b> · {PROMO_GOAL} грн\n"
-            f"  [{promo_bar}] {today_sum}/{PROMO_GOAL} грн\n"
-        )
-
-    # ── Відкат ──
-    cashback_tier = today_sum // CASHBACK_GOAL
-    cashback_progress = today_sum % CASHBACK_GOAL
-    cashback_blocks = int(cashback_progress / CASHBACK_GOAL * 10)
-    cashback_bar = "█" * cashback_blocks + "░" * (10 - cashback_blocks)
-
-    if cashback_tier > 0:
-        earned = int(cashback_tier * CASHBACK_GOAL * CASHBACK_PERCENT)
-        cashback_line = (
-            f"💸 <b>Відкат {int(CASHBACK_PERCENT * 100)}%</b> · нараховано {earned} грн ✅\n"
-            f"  Прогрес до наступного: [{cashback_bar}] {cashback_progress}/{CASHBACK_GOAL} грн\n"
-        )
-    else:
-        cashback_line = (
-            f"💸 <b>Відкат {int(CASHBACK_PERCENT * 100)}%</b> · {CASHBACK_GOAL} грн\n"
-            f"  [{cashback_bar}] {today_sum}/{CASHBACK_GOAL} грн\n"
-        )
-
-    return (
-        f"\n━━━━━━━━━━━━\n"
-        f"📊 <b>ПРОГРЕС СЬОГОДНІ</b>\n\n"
-        f"{promo_line}\n"
-        f"{cashback_line}"
-    )
+# def build_progress_bars(today_sum: int) -> str:
+#     """
+#     Прогрес-бари на сьогодні.
+#     """
+#     # ── Промокод ──
+#     promo_tier = today_sum // PROMO_GOAL
+#     promo_progress = today_sum % PROMO_GOAL
+#     promo_blocks = int(promo_progress / PROMO_GOAL * 10)
+#     promo_bar = "█" * promo_blocks + "░" * (10 - promo_blocks)
+#
+#     if promo_tier > 0:
+#         promo_line = (
+#             f"🎟 <b>Промокод</b> · отримано {promo_tier} шт ✅\n"
+#             f"  Прогрес до наступного: [{promo_bar}] {promo_progress}/{PROMO_GOAL} грн\n"
+#         )
+#     else:
+#         promo_line = (
+#             f"🎟 <b>Промокод</b> · {PROMO_GOAL} грн\n"
+#             f"  [{promo_bar}] {today_sum}/{PROMO_GOAL} грн\n"
+#         )
+#
+#     # ── Відкат ──
+#     cashback_tier = today_sum // CASHBACK_GOAL
+#     cashback_progress = today_sum % CASHBACK_GOAL
+#     cashback_blocks = int(cashback_progress / CASHBACK_GOAL * 10)
+#     cashback_bar = "█" * cashback_blocks + "░" * (10 - cashback_blocks)
+#
+#     if cashback_tier > 0:
+#         earned = int(cashback_tier * CASHBACK_GOAL * CASHBACK_PERCENT)
+#         cashback_line = (
+#             f"💸 <b>Відкат {int(CASHBACK_PERCENT * 100)}%</b> · нараховано {earned} грн ✅\n"
+#             f"  Прогрес до наступного: [{cashback_bar}] {cashback_progress}/{CASHBACK_GOAL} грн\n"
+#         )
+#     else:
+#         cashback_line = (
+#             f"💸 <b>Відкат {int(CASHBACK_PERCENT * 100)}%</b> · {CASHBACK_GOAL} грн\n"
+#             f"  [{cashback_bar}] {today_sum}/{CASHBACK_GOAL} грн\n"
+#         )
+#
+#     return (
+#         f"\n━━━━━━━━━━━━\n"
+#         f"📊 <b>ПРОГРЕС СЬОГОДНІ</b>\n\n"
+#         f"{promo_line}\n"
+#         f"{cashback_line}"
+#     )
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -969,7 +971,10 @@ async def show_profile(message: types.Message):
     today_sum = _today_sum(all_checks)
 
     profile_text = build_profile_text(user_id, username, full_name, balance, weekly_coupons)
-    progress_text = build_progress_bars(today_sum)
+    
+    # Прогрес-бары тимчасово вимкнено
+    # progress_text = build_progress_bars(today_sum)
+    progress_text = ""
 
     await message.answer(
         profile_text + progress_text,
