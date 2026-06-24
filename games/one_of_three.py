@@ -171,7 +171,7 @@ def choose_box_kb() -> InlineKeyboardMarkup:
 @router.message(F.text == "🎯 Один з трьох")
 async def start_one_of_three(message: types.Message):
     user_id = message.from_user.id
-
+    _played_users.discard(user_id)
     # if user_id in _played_users:
     #     await message.answer("❌ Ти вже зіграв у цю гру в цій сесії.")
     #     return
