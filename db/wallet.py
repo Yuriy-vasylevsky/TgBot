@@ -20,40 +20,36 @@ from .core import DB_PATH
 from datetime import date
 
 async def add_to_balance(user_id: int, amount_grn: int):
-    today = date.today().isoformat()
+    today_str = date.today().isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
-        # 1. Оновлюємо баланс користувача
         await db.execute("""
             INSERT INTO users (user_id, balance)
             VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
         """, (user_id, amount_grn, amount_grn))
 
-        # 2. Оновлюємо daily_net + yesterday_net
         await db.execute("""
             INSERT INTO users (user_id, daily_net, last_net_date)
             VALUES (?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
+                yesterday_net = CASE 
+                    WHEN last_net_date != ? THEN daily_net
+                    ELSE yesterday_net
+                END,
                 daily_net = CASE 
                     WHEN last_net_date = ? THEN daily_net + ?
-                    ELSE ? 
-                END,
-                yesterday_net = CASE 
-                    WHEN last_net_date = ? THEN daily_net 
-                    ELSE yesterday_net 
+                    ELSE ?
                 END,
                 last_net_date = ?
         """, (
-            user_id, amount_grn, today,          # INSERT
-            today, amount_grn, amount_grn,       # UPDATE daily_net
-            today,                               # WHEN last_net_date = today
-            today                                # last_net_date
+            user_id, amount_grn, today_str,
+            today_str,          # yesterday_net: якщо новий день — берем старий daily_net
+            today_str, amount_grn, amount_grn,  # daily_net
+            today_str
         ))
 
         await db.commit()
-
-
 
 
 from datetime import date
@@ -62,11 +58,7 @@ async def get_daily_net(user_id: int) -> int:
     today = date.today().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """
-            SELECT COALESCE(daily_net, 0) 
-            FROM users 
-            WHERE user_id = ? AND last_net_date = ?
-            """,
+            "SELECT COALESCE(daily_net, 0) FROM users WHERE user_id = ? AND last_net_date = ?",
             (user_id, today)
         )
         row = await cursor.fetchone()
