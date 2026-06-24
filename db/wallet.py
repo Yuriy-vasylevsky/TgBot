@@ -17,10 +17,13 @@ from .core import DB_PATH
 #         """, (user_id, amount_grn, amount_grn))
 #         await db.commit()
 
-from datetime import date
+
+from datetime import datetime, timezone, timedelta
+
+KYIV_TZ = timezone(timedelta(hours=3))
 
 async def add_to_balance(user_id: int, amount_grn: int):
-    today_str = date.today().isoformat()
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -55,7 +58,7 @@ async def add_to_balance(user_id: int, amount_grn: int):
 from datetime import date
 
 async def get_daily_net(user_id: int) -> int:
-    today = date.today().isoformat()
+    today = datetime.now(KYIV_TZ).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT COALESCE(daily_net, 0) FROM users WHERE user_id = ? AND last_net_date = ?",
