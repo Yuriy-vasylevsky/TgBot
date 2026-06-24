@@ -62,6 +62,12 @@ async def ensure_users_table_and_columns():
             ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
             ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0"),
             ("promo_cooldown_until", "ALTER TABLE users ADD COLUMN promo_cooldown_until TEXT"),
+            # ("project_net", "ALTER TABLE users ADD COLUMN project_net INTEGER DEFAULT 0"),
+            # ("personal_net", "ALTER TABLE users ADD COLUMN personal_net INTEGER DEFAULT 0"),
+            ("daily_net", "ALTER TABLE users ADD COLUMN daily_net INTEGER DEFAULT 0"),
+            ("last_net_date", "ALTER TABLE users ADD COLUMN last_net_date TEXT"),
+            ("yesterday_net", "ALTER TABLE users ADD COLUMN yesterday_net INTEGER DEFAULT 0"),
+            
         ]:
             if col not in cols:
                 await db.execute(sql)

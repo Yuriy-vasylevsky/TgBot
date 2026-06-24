@@ -8,7 +8,7 @@ from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance
+from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from db import get_issued_checks_for_user, get_all_balances
@@ -38,24 +38,27 @@ def parse_dt_safe(dt_str: str | None) -> datetime:
         return datetime.min.replace(tzinfo=timezone.utc)
 
 
+KYIV = timezone(timedelta(hours=3))
+
 def format_time_kyiv(dt_str: str | None) -> str:
     if not dt_str:
         return "немає даних"
     try:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(timezone(timedelta(hours=3)))
-        now = datetime.now(timezone(timedelta(hours=3)))
+            dt = dt.replace(tzinfo=KYIV)
 
-        if local.date() == now.date():
-            return f"сьогодні о {local:%H:%M}"
-        if local.date() == (now - timedelta(days=1)).date():
-            return f"вчора о {local:%H:%M}"
-        return local.strftime("%d.%m.%Y о %H:%M")
-    except Exception:
+        now = datetime.now(KYIV)
+
+        if dt.date() == now.date():
+            return f"сьогодні о {dt:%H:%M}"
+        if dt.date() == (now - timedelta(days=1)).date():
+            return f"вчора о {dt:%H:%M}"
+        
+        return dt.strftime("%d.%m.%Y о %H:%M")
+    except Exception as e:
+        print(f"Помилка форматування часу: {e}")
         return "—"
-
 
 async def build_users_keyboard(users: list[dict], page: int) -> InlineKeyboardBuilder:
     users_sorted = sorted(
@@ -190,6 +193,9 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     games_played = user.get("games_played", 0)
     balance = await get_balance(user_id)
+    daily_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+
 
     # ==================== ДІЇ ====================
     actions = user.get("last_actions", "")
@@ -241,7 +247,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     today_sum = sum(ch["price"] for ch in today_checks)
     yesterday_sum = sum(ch["price"] for ch in yesterday_checks)
-
+   
     checks_block = f"🎁 <b>Чеки сьогодні ({today_sum} грн):</b>\n{format_checks(today_checks)}\n"
     if show_yesterday:
         checks_block += f"\n🗓 <b>Чеки вчора ({yesterday_sum} грн):</b>\n{format_checks(yesterday_checks)}\n"
@@ -249,11 +255,14 @@ async def show_user_detail(callback: types.CallbackQuery):
     # ==================== ТЕКСТ ====================
     text = (
         f"👤 <b>{full_name}</b>\n"
-        f"{'@' if username != '—' else ''}{username}\n\n"
+        # f"{'@' if username != '—' else ''}{username}\n\n"
+        f"{'@' + username if username != '—' else f'<a href=\"tg://user?id={user_id}\">{user_id}</a>'}\n\n"
         f"🆔 <code>{user_id}</code>\n"
         f"🕒 Активність: {last_active}\n\n"
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
         f"💰 Баланс: <b>{balance}</b> грн\n"
+        f"📊 Програш сьогодні: <b>{daily_net} грн</b>\n"
+        f"📊 Програш <b>вчора</b>: <b>{yesterday_net} грн</b>\n"
         f"{cooldown_text}\n\n"
         f"{checks_block}\n"
         f"{actions_block}"

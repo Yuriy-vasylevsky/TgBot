@@ -8,14 +8,99 @@ import logging
 from .core import DB_PATH
 
 
+# async def add_to_balance(user_id: int, amount_grn: int):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute("""
+#             INSERT INTO users (user_id, balance)
+#             VALUES (?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
+#         """, (user_id, amount_grn, amount_grn))
+#         await db.commit()
+
+from datetime import date
+
 async def add_to_balance(user_id: int, amount_grn: int):
+    today = date.today().isoformat()
+
     async with aiosqlite.connect(DB_PATH) as db:
+        # 1. Оновлюємо баланс користувача
         await db.execute("""
             INSERT INTO users (user_id, balance)
             VALUES (?, ?)
             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
         """, (user_id, amount_grn, amount_grn))
+
+        # 2. Оновлюємо daily_net + yesterday_net
+        await db.execute("""
+            INSERT INTO users (user_id, daily_net, last_net_date)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                daily_net = CASE 
+                    WHEN last_net_date = ? THEN daily_net + ?
+                    ELSE ? 
+                END,
+                yesterday_net = CASE 
+                    WHEN last_net_date = ? THEN daily_net 
+                    ELSE yesterday_net 
+                END,
+                last_net_date = ?
+        """, (
+            user_id, amount_grn, today,          # INSERT
+            today, amount_grn, amount_grn,       # UPDATE daily_net
+            today,                               # WHEN last_net_date = today
+            today                                # last_net_date
+        ))
+
         await db.commit()
+
+
+
+
+from datetime import date
+
+async def get_daily_net(user_id: int) -> int:
+    today = date.today().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(daily_net, 0) 
+            FROM users 
+            WHERE user_id = ? AND last_net_date = ?
+            """,
+            (user_id, today)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+async def get_yesterday_net(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(yesterday_net, 0) FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+# async def get_personal_net(user_id: int) -> int:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT COALESCE(personal_net, 0) FROM users WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         row = await cursor.fetchone()
+#         return row[0] if row else 0
+
+
+# async def get_project_net() -> int:
+#     """Повертає чистий результат проєкту"""
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT COALESCE(project_net, 0) FROM users WHERE user_id = 0"
+#         )
+#         row = await cursor.fetchone()
+#         return row[0] if row else 0
 
 
 async def get_balance(user_id: int) -> int:

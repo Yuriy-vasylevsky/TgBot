@@ -145,24 +145,6 @@ async def buy_champion(message: Message):
 
 # ==================== MATIC ====================
 
-# @router.message(F.text == "🎰 Matic")
-# async def matic_menu(message: Message):
-#     balance = await get_balance(message.from_user.id)
-#     inline_kb = InlineKeyboardMarkup(
-#         inline_keyboard=[
-#             [InlineKeyboardButton(text="📋 Мої коди", callback_data="matic_my_codes")]
-#         ]
-#     )
-#     await message.answer(
-#         "🎰 <b>Matic</b>\n\n",
-#         parse_mode="HTML",
-#         reply_markup=matic_main_kb()
-#     )
-#     await message.answer(
-#         f"💰 <b>Ваш баланс: {balance:,} грн</b>",
-#         parse_mode="HTML",
-#         reply_markup=inline_kb
-#     )
 
 @router.message(F.text == "🎰 Matic")
 async def matic_menu(message: Message):

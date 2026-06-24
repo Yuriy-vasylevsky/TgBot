@@ -17,16 +17,6 @@ async def build_notifications_text(page: int, filter_type: str | None) -> tuple[
     records, total_pages = await get_notifications(page=page, filter_type=filter_type)
     daily = await get_daily_winnings_summary()
 
-    # text = (
-    #     f"<b>📜 Історія сповіщень</b>\n\n"
-    #     f"📊 <b>Виграші за сьогодні:</b>\n"
-    #     f"  🎰 Слоти: <b>{daily['slots_count'] * 30} грн</b>\n"
-    #     f"  🎯 1 із 3: <b>{daily['one_of_three_count'] * 30} грн</b>\n"
-    #     f"  🃏 Блекджек: <b>{daily['blackjack_count'] * 30} грн</b>\n"
-    #     f"  🎡 Фортуна: <b>{daily['fortune_total']} грн</b>\n\n"
-    #     f"  💰 Разом: <b>{daily['grand_total']} грн</b>\n"
-    #     f"━━━━━━━━━━━━━━━━━\n\n"
-    # )
 
     text = (
         f"<b>📜 Історія сповіщень</b>\n\n"

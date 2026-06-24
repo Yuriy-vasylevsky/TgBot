@@ -210,35 +210,6 @@ from db import DB_PATH
 # ________________________________________________________________________________________________________
 
 
-# @router.message(F.text == "📜 Перегляд кодів")
-# async def view_codes_handler(message: types.Message):
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             "SELECT id, casino_type, code, used FROM casino_codes"
-#         )
-#         codes = await cursor.fetchall()
-
-#     if not codes:
-#         await message.answer(
-#             "⚠️ Немає жодного коду в базі.", reply_markup=main_menu(is_admin=True)
-#         )
-#         return
-
-#     text_lines = ["📜 <b>Список кодів:</b>\n"]
-#     for code_id, casino_type, code, used in codes:
-#         status = "✅ використаний" if used else "🆓 вільний"
-#         text_lines.append(f"<b>{casino_type}</b> — <code>{code}</code> — {status}")
-#     text = "\n".join(text_lines)
-
-#     keyboard = ReplyKeyboardMarkup(
-#         keyboard=[
-#             [KeyboardButton(text="🧹 Очистити всі коди")],
-#             [KeyboardButton(text="⬅️ Назад в адмінку")],
-#         ],
-#         resize_keyboard=True,
-#     )
-
-#     await message.answer(text, parse_mode="HTML", reply_markup=keyboard)
 
 @router.message(F.text == "📜 Перегляд кодів")
 async def view_codes_handler(message: types.Message):
