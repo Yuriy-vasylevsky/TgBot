@@ -629,29 +629,44 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     await message.answer(result, parse_mode="HTML")
 
     if balance >= 30 or balance <= 0:
-        today_net = await get_daily_net(message.from_user.id)
-        yesterday_net = await get_yesterday_net(message.from_user.id)
-        has_contribution = (today_net > 0) or (yesterday_net > 0)
+            today_net = await get_daily_net(message.from_user.id)
+            yesterday_net = await get_yesterday_net(message.from_user.id)
+            has_contribution = (today_net > 0) or (yesterday_net > 0)
 
-        if balance >= 30 and has_contribution:
-            await add_to_balance(message.from_user.id, 30)
-            await add_game_win(message.from_user.id)
-            final_text = "🎉 Вітаю! +30 грн на баланс!"
-        elif balance >= 30:
-            final_text = "💸 Виграш буде до депозиту"
-        else:
-            final_text = "💀 Баланс 0. Гра завершена."
+            if balance >= 30 and has_contribution:
+                await add_to_balance(message.from_user.id, 30)
+                await add_game_win(message.from_user.id)
+                final_text = "🎉 Вітаю! +30 грн на баланс!"
+            elif balance >= 30:
+                final_text = "💸 Виграш буде до депозиту"
+            else:
+                final_text = "💀 Баланс 0. Гра завершена."
 
-        gift_claimed = await has_claimed_gift(message.from_user.id)
-        await message.answer(
-            final_text,
-            reply_markup=main_menu(
-                is_admin=(message.from_user.id == ADMIN_ID),
-                user_has_gift=gift_claimed,
-            ),
-        )
-        await state.clear()
-        return
+            try:
+                        username = f"@{message.from_user.username}" if message.from_user.username else f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>"
+                        outcome = "ВИГРАВ" if balance >= 30 else "ПРОГРАВ"
+                        await message.bot.send_message(
+                            ADMIN_ID,
+                            f"🃏 Гравець зіграв у 'Blackjack'\n"
+                            f"👤 {message.from_user.full_name} ({username})\n"
+                            f"Результат: {outcome}"
+                            + (" | +30 грн на баланс" if balance >= 30 and has_contribution else "")
+                            + (" | до депозиту" if balance >= 30 and not has_contribution else ""),
+                            parse_mode="HTML",
+                        )
+            except Exception:
+                pass
+
+            gift_claimed = await has_claimed_gift(message.from_user.id)
+            await message.answer(
+                final_text,
+                reply_markup=main_menu(
+                    is_admin=(message.from_user.id == ADMIN_ID),
+                    user_has_gift=gift_claimed,
+                ),
+            )
+            await state.clear()
+            return
 
     await asyncio.sleep(1.2)
     await message.answer("Оберіть ставку:", reply_markup=bet_keyboard(balance), parse_mode="HTML")

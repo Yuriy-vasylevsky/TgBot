@@ -503,30 +503,34 @@ async def slot_spin(message: types.Message, state: FSMContext):
         return
 
     if coupons >= 30:
-        today_net = await get_daily_net(user_id)
-        yesterday_net = await get_yesterday_net(user_id)
-        has_contribution = (today_net > 0) or (yesterday_net > 0)
+                today_net = await get_daily_net(user_id)
+                yesterday_net = await get_yesterday_net(user_id)
+                has_contribution = (today_net > 0) or (yesterday_net > 0)
 
-        if has_contribution:
-            await add_to_balance(user_id, 30)
-            await add_game_win(user_id)
-            result_text = "🎉 Вітаю! +30 грн на баланс!"
-        else:
-            result_text = "💸 Виграш буде до депозиту"
+                if has_contribution:
+                    await add_to_balance(user_id, 30)
+                    await add_game_win(user_id)
+                    result_text = "🎉 Вітаю! +30 грн на баланс!"
+                else:
+                    result_text = "💸 Виграш буде до депозиту"
 
-        gift_claimed = await has_claimed_gift(user_id)
-        await message.answer(
-            result_text,
-            reply_markup=main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed)
-        )
-        await state.clear()
-        return
+                try:
+                    username = f"@{message.from_user.username}" if message.from_user.username else f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
+                    await message.bot.send_message(
+                        ADMIN_ID,
+                        f"🎰 Гравець виграв у 'Слоти'\n"
+                        f"👤 {message.from_user.full_name} ({username})\n"
+                        f"Результат: ВИГРАВ"
+                        + (" | +30 грн на баланс" if has_contribution else " | до депозиту"),
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
 
-    # Продовжуємо гру
-    await message.answer("🎯 Обери наступну ставку:", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="1 купон"), KeyboardButton(text="2 купони")],
-            [KeyboardButton(text="3 купони")],
-        ],
-        resize_keyboard=True,
-    ))
+                gift_claimed = await has_claimed_gift(user_id)
+                await message.answer(
+                    result_text,
+                    reply_markup=main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed)
+                )
+                await state.clear()
+                return

@@ -275,14 +275,16 @@ async def open_boxes(cb: CallbackQuery):
 
     # Логіка бази та адмін
     try:
-        await add_game_result("Один з трьох", is_win)
-        username = f"@{cb.from_user.username}" if cb.from_user.username else "Без @"
-        await cb.bot.send_message(
-            ADMIN_ID,
-            f"🎯 Гравець зіграв у 'Один із трьох'\n"
-            f"👤 {cb.from_user.full_name} ({username})\n"
-            f"Результат: {'ВИГРАВ' if is_win else 'ПРОГРАВ'}",
-            parse_mode="HTML",
-        )
+                await add_game_result("Один з трьох", is_win)
+                username = f"@{cb.from_user.username}" if cb.from_user.username else f"<a href='tg://user?id={cb.from_user.id}'>{cb.from_user.full_name}</a>"
+                await cb.bot.send_message(
+                    ADMIN_ID,
+                    f"🎯 Гравець зіграв у 'Один із трьох'\n"
+                    f"👤 {cb.from_user.full_name} ({username})\n"
+                    f"Результат: {'ВИГРАВ' if is_win else 'ПРОГРАВ'}"
+                    + (f" | +30 грн на баланс" if is_win and has_positive_contribution else "")
+                    + (f" | до депозиту" if is_win and not has_positive_contribution else ""),
+                    parse_mode="HTML",
+                )
     except Exception:
         pass
