@@ -332,7 +332,7 @@ async def champion_pick_amount(callback: CallbackQuery, state: FSMContext):
     value = callback.data.removeprefix("champ_amt_")
     if value == "custom":
         await state.set_state(CheckFSM.waiting_for_custom_amount)
-        await callback.message.edit_text("🏆 Введіть суму Champion (від 50 грн):")
+        await callback.message.edit_text("🏆 Введіть суму Champion (від 30 грн):")
         await callback.answer()
         return
 
@@ -350,8 +350,8 @@ async def champion_pick_amount(callback: CallbackQuery, state: FSMContext):
 async def process_custom_champion(message: Message, state: FSMContext):
     try:
         amount = int(message.text)
-        if amount < 50:
-            await message.answer("❌ Мінімум 50 грн")
+        if amount < 30:
+            await message.answer("❌ Мінімум 30 грн")
             return
     except:
         await message.answer("❌ Введіть число")
@@ -374,8 +374,8 @@ async def process_custom_champion(message: Message, state: FSMContext):
 async def process_custom_matic(message: Message, state: FSMContext):
     try:
         amount = int(message.text)
-        if amount < 50:
-            await message.answer("❌ Мінімум 50 грн")
+        if amount < 30:
+            await message.answer("❌ Мінімум 30 грн")
             return
     except:
         await message.answer("❌ Введіть число")
@@ -418,7 +418,7 @@ async def matic_pick_amount(callback: CallbackQuery, state: FSMContext):
 
     if value == "custom":
         await state.set_state(CheckFSM.waiting_for_custom_matic_amount)
-        await callback.message.edit_text("🎰 Введіть суму Matic (від 50 грн):")
+        await callback.message.edit_text("🎰 Введіть суму Matic (від 30 грн):")
         await callback.answer()
         return
 
