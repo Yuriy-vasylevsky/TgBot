@@ -58,6 +58,63 @@ async def get_referrals(referrer_id: int) -> list[dict]:
     ]
 
 
+
+
+
+
+async def get_all_referrals() -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("""
+            SELECT
+                r.referrer_id,
+                r.referred_id,
+                r.was_existing_user,
+                r.paid,
+                r.bonus_given,
+                r.created_at,
+
+                ref.username,
+                ref.full_name,
+
+                usr.username,
+                usr.full_name
+
+            FROM referrals r
+            LEFT JOIN users ref ON ref.user_id = r.referrer_id
+            LEFT JOIN users usr ON usr.user_id = r.referred_id
+            ORDER BY r.created_at DESC
+        """)
+
+        rows = await cur.fetchall()
+
+    return [
+        {
+            "referrer_id": r[0],
+            "referred_id": r[1],
+            "was_existing_user": bool(r[2]),
+            "paid": bool(r[3]),
+            "bonus_given": bool(r[4]),
+            "created_at": r[5],
+
+            "referrer_username": r[6],
+            "referrer_name": r[7],
+
+            "referred_username": r[8],
+            "referred_name": r[9],
+        }
+        for r in rows
+    ]
+
+
+
+
+
+
+
+
+
+
+
 async def is_referred(referred_id: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(

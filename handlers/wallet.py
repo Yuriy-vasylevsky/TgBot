@@ -40,6 +40,8 @@ _payment_locks: dict[int, asyncio.Lock] = {}
 router = Router(name="wallet")
 
 MIN_SUM = 200
+REFERRAL_BONUS = 50
+
 
 class WalletStates(StatesGroup):
     enter_amount = State()
@@ -140,6 +142,167 @@ async def process_amount(message: Message, state: FSMContext):
     await state.clear()
 
 
+# @router.callback_query(F.data == "wallet_check")
+# @router.message(Command("check"))
+# async def check_payment(event: Message | CallbackQuery):
+
+#     if isinstance(event, CallbackQuery):
+#         message = event.message
+#         user_id = event.from_user.id
+#         await event.answer()
+#     else:
+#         message = event
+#         user_id = event.from_user.id
+
+#     # ── Один лок на user_id ──────────────────────────────────────
+#     if user_id not in _payment_locks:
+#         _payment_locks[user_id] = asyncio.Lock()
+#     lock = _payment_locks[user_id]
+
+#     if lock.locked():
+#         await message.answer("⏳ Платіж вже перевіряється, зачекай...")
+#         return
+
+#     async with lock:
+#         # ── Перевіряємо pending ──────────────────────────────────────
+#         pending = await get_pending_payments()
+#         user_pending = [p for p in pending if p["user_id"] == user_id]
+#         if not user_pending:
+#             await message.answer(
+#                 "❌ Немає активних платежів. Почни з кнопки 'Поповнити баланс'"
+#             )
+#             return
+
+#         p = user_pending[0]
+#         target_amount_kop = p["amount_kop"]
+#         target_amount_grn = target_amount_kop // 100
+#         payment_id = p["comment"]
+
+#         try:
+#             parts = payment_id.split(":")
+#             payment_timestamp = int(parts[1])
+#         except Exception:
+#             payment_timestamp = int(time.time())
+
+#         logging.info(
+#             f"🔍 ПЕРЕВІРКА | user_id={user_id} | "
+#             f"payment_id='{payment_id}' | {target_amount_grn} грн"
+#         )
+
+#         await message.answer("🔍 Перевіряю платіж...")
+
+#         try:
+#             client = monobank.Client(token=MONO_TOKEN)
+#             from_date = datetime.now() - timedelta(days=7)
+#             statements = client.get_statements(MONO_ACCOUNT, from_date, datetime.now())
+#             logging.info(f"📥 Отримано {len(statements)} транзакцій")
+
+#             time_window = 600
+#             best_match = None
+#             best_match_diff = float("inf")
+
+#             for tx in statements:
+#                 tx_amount = tx.get("amount", 0)
+#                 tx_time   = tx.get("time", 0)
+#                 tx_id     = tx.get("id", "")
+#                 time_diff = abs(tx_time - payment_timestamp)
+
+#                 if await is_tx_used(tx_id):
+#                     continue
+
+#                 if tx_amount == target_amount_kop and time_diff <= time_window and tx_amount > 0:
+#                     if time_diff < best_match_diff:
+#                         best_match = tx
+#                         best_match_diff = time_diff
+
+#             if not best_match:
+#                 kb = InlineKeyboardMarkup(inline_keyboard=[[
+#                     InlineKeyboardButton(text="🔄 Перевірити платіж", callback_data="wallet_check")
+#                 ]])
+#                 await message.answer(
+#                     f"❌ Платіж ще не знайдено.\n\n"
+#                     f"✓ Відправив точно <b>{target_amount_grn} грн</b>\n"
+#                     f"✓ На правильну картку: <b>{MONO_JAR_CARD}</b>\n\n"
+#                     f"Почекай 1–2 хвилини і спробуй знову.",
+#                     parse_mode="HTML", reply_markup=kb,
+#                 )
+#                 return
+
+#             tx    = best_match
+#             tx_id = tx.get("id", "")
+
+#             # ── АТОМАРНА РЕЗЕРВАЦІЯ — якщо повернула False, хтось встиг раніше ──
+#             reserved = await mark_tx_used(tx_id, user_id, target_amount_kop, payment_id)
+#             if not reserved:
+#                 await message.answer("⚠️ Ця транзакція вже зарахована. Перевір баланс.")
+#                 return
+
+#             # ── Зараховуємо ─────────────────────────────────────────────
+#             await add_to_balance(user_id, target_amount_grn)
+#             await update_daily_net(user_id, target_amount_grn)
+#             await remove_pending_payment(user_id)
+#             await add_payment_log(
+#                 user_id=user_id,
+#                 username=event.from_user.username or event.from_user.full_name,
+#                 amount=target_amount_grn,
+#                 comment=payment_id,
+#             )
+
+#             user_name = (
+#                 f"@{event.from_user.username}"
+#                 if event.from_user.username
+#                 else event.from_user.full_name
+#             )
+#             await message.bot.send_message(
+#                 ADMIN_ID,
+#                 f"💰 Поповнення балансу\n\n"
+#                 f"👤 {user_name}\n"
+#                 f"💵 <b>{target_amount_grn} грн</b>\n"
+#                 f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
+#                 parse_mode="HTML",
+#             )
+
+#             play_kb = ReplyKeyboardMarkup(
+#                 keyboard=[[KeyboardButton(text="🎮 Грати")]],
+#                 resize_keyboard=True,
+#             )
+#             await message.answer(
+#                 f"✅ Платіж зараховано!\n\n"
+#                 f"💰 {target_amount_grn} грн\n"
+#                 f"💳 Баланс: {await get_balance(user_id)} грн",
+#                 reply_markup=play_kb,
+#             )
+#             logging.info(
+#                 f"✅ ЗАРАХОВАНО | user_id={user_id} | {target_amount_grn} грн | "
+#                 f"tx_id='{tx_id}' | diff={best_match_diff}s"
+#             )
+
+#             referrer_id = await mark_referral_paid(user_id)
+#             if referrer_id:
+#                 await add_to_balance(referrer_id, 50)
+#                 await update_daily_net(referrer_id, 50)
+#                 await message.bot.send_message(
+#                     referrer_id,
+#                     f"🎉 Реферал поповнив баланс!\n💰 Вам нараховано <b>50 грн</b>",
+#                     parse_mode="HTML",
+#                 )
+#                 await add_to_balance(user_id, 50)
+#                 await update_daily_net(referrer_id, 50)
+#                 await message.bot.send_message(
+#                     user_id,
+#                     f"🎁 Бонус <b>50 грн</b> за запрошення!\n"
+#                     f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
+#                     parse_mode="HTML",
+#                 )
+
+#         except monobank.TooManyRequests:
+#             logging.warning(f"⚠️ Ліміт Monobank для user_id={user_id}")
+#             await message.answer("⏳ Ліміт запитів Monobank. Зачекай 60 секунд.")
+#         except Exception as e:
+#             logging.error(f"❌ ПОМИЛКА | user_id={user_id}: {e}", exc_info=True)
+#             await message.answer("❌ Помилка перевірки. Спробуй пізніше.")
+
+
 @router.callback_query(F.data == "wallet_check")
 @router.message(Command("check"))
 async def check_payment(event: Message | CallbackQuery):
@@ -151,7 +314,6 @@ async def check_payment(event: Message | CallbackQuery):
         message = event
         user_id = event.from_user.id
 
-    # ── Один лок на user_id ──────────────────────────────────────
     if user_id not in _payment_locks:
         _payment_locks[user_id] = asyncio.Lock()
     lock = _payment_locks[user_id]
@@ -161,13 +323,10 @@ async def check_payment(event: Message | CallbackQuery):
         return
 
     async with lock:
-        # ── Перевіряємо pending ──────────────────────────────────────
         pending = await get_pending_payments()
         user_pending = [p for p in pending if p["user_id"] == user_id]
         if not user_pending:
-            await message.answer(
-                "❌ Немає активних платежів. Почни з кнопки 'Поповнити баланс'"
-            )
+            await message.answer("❌ Немає активних платежів.")
             return
 
         p = user_pending[0]
@@ -175,24 +334,12 @@ async def check_payment(event: Message | CallbackQuery):
         target_amount_grn = target_amount_kop // 100
         payment_id = p["comment"]
 
-        try:
-            parts = payment_id.split(":")
-            payment_timestamp = int(parts[1])
-        except Exception:
-            payment_timestamp = int(time.time())
-
-        logging.info(
-            f"🔍 ПЕРЕВІРКА | user_id={user_id} | "
-            f"payment_id='{payment_id}' | {target_amount_grn} грн"
-        )
-
         await message.answer("🔍 Перевіряю платіж...")
 
         try:
             client = monobank.Client(token=MONO_TOKEN)
             from_date = datetime.now() - timedelta(days=7)
             statements = client.get_statements(MONO_ACCOUNT, from_date, datetime.now())
-            logging.info(f"📥 Отримано {len(statements)} транзакцій")
 
             time_window = 600
             best_match = None
@@ -200,9 +347,14 @@ async def check_payment(event: Message | CallbackQuery):
 
             for tx in statements:
                 tx_amount = tx.get("amount", 0)
-                tx_time   = tx.get("time", 0)
-                tx_id     = tx.get("id", "")
-                time_diff = abs(tx_time - payment_timestamp)
+                tx_time = tx.get("time", 0)
+                tx_id = tx.get("id", "")
+
+                try:
+                    payment_timestamp = int(payment_id.split(":")[1])
+                    time_diff = abs(tx_time - payment_timestamp)
+                except:
+                    time_diff = 0
 
                 if await is_tx_used(tx_id):
                     continue
@@ -221,20 +373,19 @@ async def check_payment(event: Message | CallbackQuery):
                     f"✓ Відправив точно <b>{target_amount_grn} грн</b>\n"
                     f"✓ На правильну картку: <b>{MONO_JAR_CARD}</b>\n\n"
                     f"Почекай 1–2 хвилини і спробуй знову.",
-                    parse_mode="HTML", reply_markup=kb,
+                    parse_mode="HTML", reply_markup=kb
                 )
                 return
 
-            tx    = best_match
+            # === Успішне зарахування ===
+            tx = best_match
             tx_id = tx.get("id", "")
 
-            # ── АТОМАРНА РЕЗЕРВАЦІЯ — якщо повернула False, хтось встиг раніше ──
             reserved = await mark_tx_used(tx_id, user_id, target_amount_kop, payment_id)
             if not reserved:
-                await message.answer("⚠️ Ця транзакція вже зарахована. Перевір баланс.")
+                await message.answer("⚠️ Ця транзакція вже була зарахована.")
                 return
 
-            # ── Зараховуємо ─────────────────────────────────────────────
             await add_to_balance(user_id, target_amount_grn)
             await update_daily_net(user_id, target_amount_grn)
             await remove_pending_payment(user_id)
@@ -245,20 +396,24 @@ async def check_payment(event: Message | CallbackQuery):
                 comment=payment_id,
             )
 
-            user_name = (
-                f"@{event.from_user.username}"
-                if event.from_user.username
-                else event.from_user.full_name
-            )
-            await message.bot.send_message(
-                ADMIN_ID,
-                f"💰 Поповнення балансу\n\n"
-                f"👤 {user_name}\n"
-                f"💵 <b>{target_amount_grn} грн</b>\n"
-                f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
-                parse_mode="HTML",
+            # Посилання на реферала
+            referral_link = (
+                f"@{event.from_user.username}" 
+                if event.from_user.username 
+                else f'<a href="tg://user?id={user_id}">{event.from_user.full_name}</a>'
             )
 
+            # Сповіщення адміністратору про поповнення
+            await message.bot.send_message(
+                ADMIN_ID,
+                f"💰 Нове поповнення балансу\n\n"
+                f"👤 {referral_link}\n"
+                f"💵 <b>{target_amount_grn} грн</b>\n"
+                f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
+                parse_mode="HTML"
+            )
+
+            # Повідомлення користувачу
             play_kb = ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="🎮 Грати")]],
                 resize_keyboard=True,
@@ -268,33 +423,51 @@ async def check_payment(event: Message | CallbackQuery):
                 f"💰 {target_amount_grn} грн\n"
                 f"💳 Баланс: {await get_balance(user_id)} грн",
                 reply_markup=play_kb,
-            )
-            logging.info(
-                f"✅ ЗАРАХОВАНО | user_id={user_id} | {target_amount_grn} грн | "
-                f"tx_id='{tx_id}' | diff={best_match_diff}s"
+                parse_mode="HTML"
             )
 
+            # ====================== РЕФЕРАЛЬНИЙ БЛОК ======================
             referrer_id = await mark_referral_paid(user_id)
-            if referrer_id:
-                await add_to_balance(referrer_id, 50)
-                await update_daily_net(referrer_id, 50)
-                await message.bot.send_message(
-                    referrer_id,
-                    f"🎉 Реферал поповнив баланс!\n💰 Вам нараховано <b>50 грн</b>",
-                    parse_mode="HTML",
-                )
-                await add_to_balance(user_id, 50)
-                await update_daily_net(referrer_id, 50)
-                await message.bot.send_message(
-                    user_id,
-                    f"🎁 Бонус <b>50 грн</b> за запрошення!\n"
-                    f"💳 Баланс: <b>{await get_balance(user_id)} грн</b>",
-                    parse_mode="HTML",
-                )
+            logging.info(f"🔗 mark_referral_paid повернув referrer_id = {referrer_id}")
+
+            if referrer_id and referrer_id != user_id:
+                await add_to_balance(referrer_id, REFERRAL_BONUS)
+                await update_daily_net(referrer_id, REFERRAL_BONUS)
+
+                # Посилання на реферера
+                referrer_link = f'<a href="tg://user?id={referrer_id}">{referrer_id}</a>'
+
+                # Сповіщення рефереру
+                try:
+                    await message.bot.send_message(
+                        referrer_id,
+                        f"🎉 Ваш реферал поповнив баланс!\n\n"
+                        f"👤 Користувач: {referral_link}\n"
+                        f"💰 Вам нараховано <b>+{REFERRAL_BONUS} грн</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Не вдалося відправити рефереру {referrer_id}: {e}")
+
+                # Сповіщення адміністратору про видачу бонусу
+                try:
+                    await message.bot.send_message(
+                        ADMIN_ID,
+                        f"🎁 Реферальний бонус виданий!\n\n"
+                        f"👤 Реферер: {referrer_link}\n"
+                        f"👤 Реферал: {referral_link}\n"
+                        f"💰 Бонус: <b>+{REFERRAL_BONUS} грн</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    logging.error(f"❌ Не вдалося відправити адміну про бонус: {e}")
+
+            logging.info(f"✅ Поповнення успішно завершено для user {user_id}")
 
         except monobank.TooManyRequests:
             logging.warning(f"⚠️ Ліміт Monobank для user_id={user_id}")
-            await message.answer("⏳ Ліміт запитів Monobank. Зачекай 60 секунд.")
+            await message.answer("⏳ Ліміт запитів. Зачекай 60 секунд.")
         except Exception as e:
-            logging.error(f"❌ ПОМИЛКА | user_id={user_id}: {e}", exc_info=True)
-            await message.answer("❌ Помилка перевірки. Спробуй пізніше.")
+            logging.error(f"❌ Критична помилка в check_payment: {e}", exc_info=True)
+            await message.answer("❌ Помилка при обробці платежу.")
+# пааааааааа

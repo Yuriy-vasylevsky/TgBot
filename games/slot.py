@@ -362,20 +362,16 @@ import random
 from aiogram import F, types, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 from db import (
-    add_game_result,
     get_winrate,
     has_claimed_gift,
     add_game_win,
-    save_notification,
 )
 from db.wallet import get_daily_net, get_yesterday_net, add_to_balance
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
-import aiosqlite
-from db import DB_PATH
 
 router = Router()
 logging.basicConfig(level=logging.INFO)
@@ -389,7 +385,10 @@ class SlotGameFSM(StatesGroup):
 @router.message(F.text == "🎰 Слоти")
 async def start_slots(message: types.Message, state: FSMContext):
     await state.set_state(SlotGameFSM.playing)
-    await state.update_data(coupons=10, first_bet=False)
+    await state.update_data(
+        coupons=10,
+        in_spin=False
+    )
 
     await message.answer(
         f"<b>🎰 Слоти</b>\n\n"
@@ -416,121 +415,183 @@ async def slot_spin(message: types.Message, state: FSMContext):
 
     if text == "🔙 Повернутись до ігор":
         gift_claimed = await has_claimed_gift(user_id)
-        await message.answer("🔙 Повертаємось у головне меню.", reply_markup=main_menu(
-            is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed
-        ))
+        await message.answer(
+            "🔙 Повертаємось у головне меню.",
+            reply_markup=main_menu(
+                is_admin=(user_id == ADMIN_ID),
+                user_has_gift=gift_claimed
+            )
+        )
         await state.clear()
         return
+
+    data = await state.get_data()
+
+    # Захист від подвійного натискання
+    if data.get("in_spin", False):
+        return await message.answer("⏳ Зачекайте, барабани ще крутяться...")
 
     try:
         bet = int(text.split()[0])
     except:
         return await message.answer("⚠️ Обери ставку з кнопок.")
 
-    data = await state.get_data()
     coupons = data.get("coupons", 10)
 
     if bet > coupons:
         return await message.answer("⚠️ Недостатньо купонів!")
 
-    # === Winrate ===
+    # Блокуємо спін
+    await state.update_data(in_spin=True)
+
     try:
-        winrate = await get_winrate()
-        if winrate > 1:
-            winrate /= 100
-    except:
-        winrate = 0.33
-
-    is_win = random.random() < winrate
-
-    # === Символи та результат ===
-    symbols = ["🍒", "🍋", "🍊", "🍇", "🍉", "🍓", "7️⃣"]
-    if is_win:
-        roll = random.random()
-        if roll < 0.01:
-            sym = "7️⃣"
-            reels = [sym, sym, sym]
-            multiplier = 20
-            outcome = "🎉 ДЖЕКПОТ! Три сімки — x20!"
-        elif roll < 0.08:
-            reels = ["7️⃣", "7️⃣", random.choice([s for s in symbols if s != "7️⃣"])]
-            random.shuffle(reels)
-            multiplier = 7
-            outcome = "💎 Дві сімки — x7!"
-        else:
-            fruit = random.choice([s for s in symbols if s != "7️⃣"])
-            reels = [fruit, fruit, random.choice([s for s in symbols if s != fruit])]
-            random.shuffle(reels)
-            multiplier = 3
-            outcome = f"✨ Пара {fruit} — x3!"
-    else:
-        reels = random.sample([s for s in symbols if s != "7️⃣"], 3)
-        multiplier = 0
-        outcome = "❌ Програш"
-
-    win_amount = bet * multiplier
-    coupons = coupons - bet + win_amount
-    await state.update_data(coupons=coupons)
-
-    # Анімація
-    msg = await message.answer("🎰 Крутимо барабани...")
-    for _ in range(4):
-        spin = f"| {random.choice(symbols)} | {random.choice(symbols)} | {random.choice(symbols)} |"
+        # === Winrate ===
         try:
-            await msg.edit_text(f"🎲 {spin}")
+            winrate = await get_winrate()
+            if winrate > 1:
+                winrate /= 100
         except:
-            pass
-        await asyncio.sleep(0.25)
+            winrate = 0.33
 
-    final_reels = f"| {reels[0]} | {reels[1]} | {reels[2]} |"
-    await msg.edit_text(
-        f"{final_reels}\n\n"
-        f"{outcome}\n\n"
-        f"💵 Ставка: {bet}\n"
-        f"🏆 Виграш: {win_amount}\n"
-        f"🎟 Баланс: <b>{coupons}</b>",
-        parse_mode="HTML"
-    )
+        is_win = random.random() < winrate
 
-    # === Кінець гри ===
-    if coupons <= 0:
-        gift_claimed = await has_claimed_gift(user_id)
-        await message.answer(
-            "💀 Ви програли всі купони!",
-            reply_markup=main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed)
+        # === Символи та результат ===
+        symbols = ["🍒", "🍋", "🍊", "🍇", "🍉", "🍓", "7️⃣"]
+
+        if is_win:
+            roll = random.random()
+            if roll < 0.01:  # Джекпот
+                sym = "7️⃣"
+                reels = [sym, sym, sym]
+                multiplier = 20
+                outcome = "🎉 ДЖЕКПОТ! Три сімки — x20!"
+            elif roll < 0.08:  # Дві сімки
+                reels = ["7️⃣", "7️⃣", random.choice([s for s in symbols if s != "7️⃣"])]
+                random.shuffle(reels)
+                multiplier = 7
+                outcome = "💎 Дві сімки — x7!"
+            else:  # Пара фруктів
+                fruit = random.choice([s for s in symbols if s != "7️⃣"])
+                reels = [fruit, fruit, random.choice([s for s in symbols if s != fruit])]
+                random.shuffle(reels)
+                multiplier = 3
+                outcome = f"✨ Пара {fruit} — x3!"
+        else:
+            reels = random.sample([s for s in symbols if s != "7️⃣"], 3)
+            multiplier = 0
+            outcome = "❌ Програш"
+
+        win_amount = bet * multiplier
+        coupons = coupons - bet + win_amount
+
+        await state.update_data(coupons=coupons)
+
+        # Анімація
+        msg = await message.answer("🎰 Крутимо барабани...")
+        for _ in range(4):
+            spin = f"| {random.choice(symbols)} | {random.choice(symbols)} | {random.choice(symbols)} |"
+            try:
+                await msg.edit_text(f"🎲 {spin}")
+            except:
+                pass
+            await asyncio.sleep(0.25)
+
+        final_reels = f"| {reels[0]} | {reels[1]} | {reels[2]} |"
+        await msg.edit_text(
+            f"{final_reels}\n\n"
+            f"{outcome}\n\n"
+            f"💵 Ставка: {bet}\n"
+            f"🏆 Виграш: {win_amount}\n"
+            f"🎟 Баланс: <b>{coupons}</b>",
+            parse_mode="HTML"
         )
-        await state.clear()
-        return
 
-    if coupons >= 30:
-                today_net = await get_daily_net(user_id)
-                yesterday_net = await get_yesterday_net(user_id)
-                has_contribution = (today_net > 0) or (yesterday_net > 0)
-
-                if has_contribution:
-                    await add_to_balance(user_id, 30)
-                    await add_game_win(user_id)
-                    result_text = "🎉 Вітаю! +30 грн на баланс!"
-                else:
-                    result_text = "💸 Виграш буде до депозиту"
-
-                try:
-                    username = f"@{message.from_user.username}" if message.from_user.username else f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
-                    await message.bot.send_message(
-                        ADMIN_ID,
-                        f"🎰 Гравець виграв у 'Слоти'\n"
-                        f"👤 {message.from_user.full_name} ({username})\n"
-                        f"Результат: ВИГРАВ"
-                        + (" | +30 грн на баланс" if has_contribution else " | до депозиту"),
-                        parse_mode="HTML",
-                    )
-                except Exception:
-                    pass
-
-                gift_claimed = await has_claimed_gift(user_id)
-                await message.answer(
-                    result_text,
-                    reply_markup=main_menu(is_admin=(user_id == ADMIN_ID), user_has_gift=gift_claimed)
+        # === Перевірка закінчення гри ===
+        if coupons <= 0:
+            # Сповіщення адміністратору про програш
+            try:
+                username = (
+                    f"@{message.from_user.username}"
+                    if message.from_user.username
+                    else f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
                 )
-                await state.clear()
-                return
+                await message.bot.send_message(
+                    ADMIN_ID,
+                    f"🎰 Гравець програв у 'Слоти'\n"
+                    f"👤 {message.from_user.full_name} ({username})\n"
+                    f"Результат: ПРОГРАВ",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+            gift_claimed = await has_claimed_gift(user_id)
+            await message.answer(
+                "💀 Ви програли всі купони!",
+                reply_markup=main_menu(
+                    is_admin=(user_id == ADMIN_ID),
+                    user_has_gift=gift_claimed
+                )
+            )
+            await state.clear()
+            return
+
+        if coupons >= 30:
+            today_net = await get_daily_net(user_id)
+            yesterday_net = await get_yesterday_net(user_id)
+            has_contribution = (today_net > 0) or (yesterday_net > 0)
+
+            if has_contribution:
+                await add_to_balance(user_id, 30)
+                await add_game_win(user_id)
+                result_text = "🎉 Вітаю! +30 грн на баланс!"
+            else:
+                result_text = "💸 Виграш буде до депозиту"
+
+            # Повідомлення адміністратору про виграш
+            try:
+                username = (
+                    f"@{message.from_user.username}"
+                    if message.from_user.username
+                    else f"<a href='tg://user?id={user_id}'>{message.from_user.full_name}</a>"
+                )
+                await message.bot.send_message(
+                    ADMIN_ID,
+                    f"🎰 Гравець виграв у 'Слоти'\n"
+                    f"👤 {message.from_user.full_name} ({username})\n"
+                    f"Результат: ВИГРАВ"
+                    + (" | +30 грн на баланс" if has_contribution else " | до депозиту"),
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+            gift_claimed = await has_claimed_gift(user_id)
+            await message.answer(
+                result_text,
+                reply_markup=main_menu(
+                    is_admin=(user_id == ADMIN_ID),
+                    user_has_gift=gift_claimed
+                )
+            )
+            await state.clear()
+            return
+
+        # Якщо гра продовжується
+        await message.answer(
+            f"🎟 Поточний баланс: <b>{coupons}</b> купонів\n"
+            f"Обери наступну ставку 👇",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="1 купон"), KeyboardButton(text="2 купони")],
+                    [KeyboardButton(text="3 купони")],
+                    [KeyboardButton(text="🔙 Повернутись до ігор")],
+                ],
+                resize_keyboard=True,
+            ),
+        )
+
+    finally:
+        # Знімаємо блокування в будь-якому випадку
+        await state.update_data(in_spin=False)

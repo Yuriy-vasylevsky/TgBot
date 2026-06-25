@@ -267,12 +267,11 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
 
                 if was_existing:
                     await message.answer(
-                        "ℹ️ Ви вже зареєстровані в боті, тому бонус другу не нараховується"
+                        "ℹ️ Ви вже зареєстровані в боті"
                     )
                 else:
                     await message.answer(
-                        "👋 Вас запросив друг! Поповніть баланс через бот "
-                        "і кожен з вас отримає бонус 50 грн 🎁"
+                        "👋  "
                     )
         except ValueError:
             pass
