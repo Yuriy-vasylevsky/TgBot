@@ -22,37 +22,117 @@ from datetime import datetime, timezone, timedelta
 
 KYIV_TZ = timezone(timedelta(hours=3))
 
-async def add_to_balance(user_id: int, amount_grn: int):
-    today_str = datetime.now(KYIV_TZ).date().isoformat()
+# async def add_to_balance(user_id: int, amount_grn: int):
+#     today_str = datetime.now(KYIV_TZ).date().isoformat()
 
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute("""
+#             INSERT INTO users (user_id, balance)
+#             VALUES (?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
+#         """, (user_id, amount_grn, amount_grn))
+
+#         await db.execute("""
+#             INSERT INTO users (user_id, daily_net, last_net_date)
+#             VALUES (?, ?, ?)
+#             ON CONFLICT(user_id) DO UPDATE SET
+#                 yesterday_net = CASE 
+#                     WHEN last_net_date != ? THEN daily_net
+#                     ELSE yesterday_net
+#                 END,
+#                 daily_net = CASE 
+#                     WHEN last_net_date = ? THEN daily_net + ?
+#                     ELSE ?
+#                 END,
+#                 last_net_date = ?
+#         """, (
+#             user_id, amount_grn, today_str,
+#             today_str,          # yesterday_net: якщо новий день — берем старий daily_net
+#             today_str, amount_grn, amount_grn,  # daily_net
+#             today_str
+#         ))
+
+#         await db.commit()
+
+
+
+async def add_to_balance(user_id: int, amount_grn: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             INSERT INTO users (user_id, balance)
             VALUES (?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
+            ON CONFLICT(user_id)
+            DO UPDATE SET balance = balance + ?
         """, (user_id, amount_grn, amount_grn))
 
+        await db.commit()
+
+
+
+
+
+async def update_daily_net(user_id: int, amount: int):
+    """
+    amount > 0 -> касир поповнив баланс
+    amount < 0 -> касир списав баланс
+    """
+
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+
         await db.execute("""
-            INSERT INTO users (user_id, daily_net, last_net_date)
-            VALUES (?, ?, ?)
+            INSERT INTO users
+            (
+                user_id,
+                daily_net,
+                yesterday_net,
+                last_net_date
+            )
+            VALUES (?, ?, 0, ?)
+
             ON CONFLICT(user_id) DO UPDATE SET
-                yesterday_net = CASE 
-                    WHEN last_net_date != ? THEN daily_net
+
+                yesterday_net = CASE
+                    WHEN last_net_date != ?
+                    THEN daily_net
                     ELSE yesterday_net
                 END,
-                daily_net = CASE 
-                    WHEN last_net_date = ? THEN daily_net + ?
+
+                daily_net = CASE
+                    WHEN last_net_date = ?
+                    THEN daily_net + ?
                     ELSE ?
                 END,
+
                 last_net_date = ?
-        """, (
-            user_id, amount_grn, today_str,
-            today_str,          # yesterday_net: якщо новий день — берем старий daily_net
-            today_str, amount_grn, amount_grn,  # daily_net
+        """,
+        (
+            user_id,
+            amount,
+            today_str,
+
+            today_str,
+
+            today_str,
+            amount,
+            amount,
+
             today_str
         ))
 
         await db.commit()
+
+
+
+
+
+
+
+
+
+
+
 
 
 from datetime import date
@@ -337,16 +417,36 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
     total_pages = max(1, (total + per_page - 1) // per_page)
     return rows, total_pages, day_total
 
+# async def log_check_issued(user_id: int, check_type: str, code: str, price: int):
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute(
+#             """
+#             INSERT INTO issued_checks (user_id, check_type, code, price, issued_at)
+#             VALUES (?, ?, ?, ?, DATETIME('now'))
+#             """,
+#             (user_id, check_type, code, price)
+#         )
+#         await db.commit()
+
+
+
 async def log_check_issued(user_id: int, check_type: str, code: str, price: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
-            INSERT INTO issued_checks (user_id, check_type, code, price, issued_at)
-            VALUES (?, ?, ?, ?, DATETIME('now'))
+            INSERT INTO issued_checks
+            (user_id, check_type, code, price)
+            VALUES (?, ?, ?, ?)
             """,
             (user_id, check_type, code, price)
         )
         await db.commit()
+
+
+
+
+
+
 
 
 async def get_issued_checks_for_user(user_id: int) -> list[dict]:

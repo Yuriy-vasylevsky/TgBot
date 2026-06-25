@@ -8,7 +8,7 @@ from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net
+from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from db import get_issued_checks_for_user, get_all_balances
@@ -371,6 +371,47 @@ async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
 
 
 
+# @router.message(BalanceFSM.add_amount)
+# async def balance_add_finish(message: types.Message, state: FSMContext):
+#     try:
+#         amount = int(message.text)
+#     except:
+#         await message.answer("❌ Введіть число")
+#         return
+
+#     data = await state.get_data()
+#     user_id = data["user_id"]
+
+#     await add_to_balance(user_id, amount)
+#     balance = await get_balance(user_id)
+
+#     await message.answer(
+#         f"✅ Баланс поповнено на {amount} грн\n\n"
+#         f"💰 Новий баланс: {balance} грн"
+#     )
+
+#     # сповіщення юзеру
+#     try:
+#         await message.bot.send_message(
+#             user_id,
+#             f"💰 Вам нараховано <b>{amount} грн</b>\n\n"
+#             f"💳 Ваш баланс: <b>{balance} грн</b>",
+#             parse_mode="HTML"
+#         )
+#     except Exception:
+#         await message.answer("⚠️ Не вдалось надіслати сповіщення користувачу")
+
+#     await state.clear()
+
+
+
+
+
+
+
+
+
+
 @router.message(BalanceFSM.add_amount)
 async def balance_add_finish(message: types.Message, state: FSMContext):
     try:
@@ -383,6 +424,8 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
     user_id = data["user_id"]
 
     await add_to_balance(user_id, amount)
+    await update_daily_net(user_id, amount)
+
     balance = await get_balance(user_id)
 
     await message.answer(
@@ -390,7 +433,6 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
         f"💰 Новий баланс: {balance} грн"
     )
 
-    # сповіщення юзеру
     try:
         await message.bot.send_message(
             user_id,
@@ -402,6 +444,9 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Не вдалось надіслати сповіщення користувачу")
 
     await state.clear()
+
+
+
 
 @router.callback_query(F.data.startswith("balance_remove:"))
 async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext):
@@ -417,6 +462,29 @@ async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext)
     await callback.answer()
 
 
+# @router.message(BalanceFSM.remove_amount)
+# async def balance_remove_finish(message: types.Message, state: FSMContext):
+#     try:
+#         amount = int(message.text)
+#     except:
+#         await message.answer("❌ Введіть число")
+#         return
+
+#     data = await state.get_data()
+#     user_id = data["user_id"]
+
+#     await add_to_balance(user_id, -amount)
+#     balance = await get_balance(user_id)
+
+#     await message.answer(
+#         f"✅ Списано {amount} грн\n\n"
+#         f"💰 Новий баланс: {balance} грн"
+#     )
+
+#     await state.clear()
+
+
+
 @router.message(BalanceFSM.remove_amount)
 async def balance_remove_finish(message: types.Message, state: FSMContext):
     try:
@@ -429,6 +497,8 @@ async def balance_remove_finish(message: types.Message, state: FSMContext):
     user_id = data["user_id"]
 
     await add_to_balance(user_id, -amount)
+    await update_daily_net(user_id, -amount)
+
     balance = await get_balance(user_id)
 
     await message.answer(

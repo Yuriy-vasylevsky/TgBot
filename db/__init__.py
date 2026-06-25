@@ -32,6 +32,7 @@ from .wallet import (
     # get_personal_net,
     get_daily_net,
     get_yesterday_net,
+    update_daily_net,
 )
 
 # ==================== USERS ====================

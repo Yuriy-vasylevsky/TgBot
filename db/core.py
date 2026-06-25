@@ -90,6 +90,24 @@ async def create_pending_payments_table():
         await db.commit()
 
 
+# async def create_used_monobank_txs_table():
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         await db.execute("""
+#             CREATE TABLE IF NOT EXISTS used_monobank_txs (
+#                 tx_id TEXT PRIMARY KEY,
+#                 user_id INTEGER NOT NULL,
+#                 amount_kop INTEGER NOT NULL,
+#                 payment_id TEXT,
+#                 used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+#             )
+#         """)
+#         await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_id ON used_monobank_txs(tx_id)")
+#         await db.commit()
+
+
+
+
+
 async def create_used_monobank_txs_table():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -98,11 +116,16 @@ async def create_used_monobank_txs_table():
                 user_id INTEGER NOT NULL,
                 amount_kop INTEGER NOT NULL,
                 payment_id TEXT,
-                used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                used_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
             )
         """)
-        await db.execute("CREATE INDEX IF NOT EXISTS idx_tx_id ON used_monobank_txs(tx_id)")
+        await db.execute(
+            "CREATE INDEX IF NOT EXISTS idx_tx_id ON used_monobank_txs(tx_id)"
+        )
         await db.commit()
+
+
+
 
 
 async def init_db():
@@ -134,7 +157,7 @@ async def init_db():
                 "blackjack_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, is_win INTEGER)",
                 "settings (key TEXT PRIMARY KEY, value REAL)",
                 "issued_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, check_type TEXT NOT NULL, code TEXT NOT NULL, price INTEGER NOT NULL, issued_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
-                "referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referred_id INTEGER NOT NULL UNIQUE, was_existing_user INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, bonus_given INTEGER DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now')))",
+                "referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referred_id INTEGER NOT NULL UNIQUE, was_existing_user INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, bonus_given INTEGER DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
