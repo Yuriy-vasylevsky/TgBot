@@ -29,6 +29,7 @@ from db import (
     is_tx_used,
     add_payment_log,
     mark_referral_paid,
+    update_daily_net,
 )
 
 import asyncio
@@ -235,6 +236,7 @@ async def check_payment(event: Message | CallbackQuery):
 
             # ── Зараховуємо ─────────────────────────────────────────────
             await add_to_balance(user_id, target_amount_grn)
+            await update_daily_net(user_id, target_amount_grn)
             await remove_pending_payment(user_id)
             await add_payment_log(
                 user_id=user_id,
@@ -275,12 +277,14 @@ async def check_payment(event: Message | CallbackQuery):
             referrer_id = await mark_referral_paid(user_id)
             if referrer_id:
                 await add_to_balance(referrer_id, 50)
+                await update_daily_net(referrer_id, 50)
                 await message.bot.send_message(
                     referrer_id,
                     f"🎉 Реферал поповнив баланс!\n💰 Вам нараховано <b>50 грн</b>",
                     parse_mode="HTML",
                 )
                 await add_to_balance(user_id, 50)
+                await update_daily_net(referrer_id, 50)
                 await message.bot.send_message(
                     user_id,
                     f"🎁 Бонус <b>50 грн</b> за запрошення!\n"
