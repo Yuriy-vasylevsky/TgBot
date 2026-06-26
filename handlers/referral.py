@@ -55,18 +55,12 @@
 #     await message.answer(text, parse_mode="HTML", disable_web_page_preview=True)
 
 
-
 from aiogram import Router, F, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from collections import defaultdict
 
-from db import (
-    get_referrals,
-    get_all_referrals,
-    is_referred,
-    add_referral,
-    get_balance,
-)
+from db import get_all_referrals, get_referrals
 
-# from handlers.config import ADMINS
 from handlers.config import ADMIN_ID
 
 router = Router(name="referral")
@@ -74,12 +68,18 @@ router = Router(name="referral")
 REFERRAL_BONUS = 50
 
 
+def user_link(user_id: int, username: str | None, full_name: str | None):
+    if username:
+        return f"@{username}"
+    name = full_name or f"ID {user_id}"
+    return f'<a href="tg://user?id={user_id}">{name}</a>'
+
+
 def format_referral_list(referrals: list[dict]) -> str:
     if not referrals:
         return "У вас ще немає рефералів"
 
     lines = []
-
     for r in referrals:
         name = (
             f"@{r['username']}"
@@ -97,15 +97,6 @@ def format_referral_list(referrals: list[dict]) -> str:
         lines.append(f"• {name} — {status}")
 
     return "\n".join(lines)
-
-
-def user_link(user_id: int, username: str | None, full_name: str | None):
-    if username:
-        return f"@{username}"
-
-    name = full_name or f"ID {user_id}"
-
-    return f'<a href="tg://user?id={user_id}">{name}</a>'
 
 
 @router.message(F.text == "👥 Реферали")
@@ -143,40 +134,77 @@ async def referral_menu(message: types.Message):
     )
 
 
-@router.message(F.text == "👥 Всі реферали")
-async def all_referrals(message: types.Message):
-    
-    if message.from_user.id != ADMIN_ID:   # якщо один адмін
+async def show_all_referrers(message_or_callback_message: types.Message):
+    """Окрема функція для показу списку реферерів"""
+    all_referrals_data = await get_all_referrals()
+    if not all_referrals_data:
+        await message_or_callback_message.answer("Рефералів ще немає.")
         return
 
-    referrals = await get_all_referrals()
+    referrer_dict = defaultdict(list)
+    for r in all_referrals_data:
+        referrer_dict[r["referrer_id"]].append(r)
 
-    if not referrals:
-        await message.answer("Рефералів ще немає.")
-        return
+    keyboard = []
+    for referrer_id, refs in referrer_dict.items():
+        sample = refs[0]
+        name = (
+            sample.get("referrer_username") or 
+            sample.get("referrer_name") or 
+            f"ID {referrer_id}"
+        )
+        
+        total = len(refs)
+        paid = sum(1 for r in refs if r["paid"] and not r["was_existing_user"])
+        
+        button_text = f"{name} — {paid}/{total} оплачено"
+        
+        keyboard.append([InlineKeyboardButton(
+            text=button_text,
+            callback_data=f"referrer_detail:{referrer_id}"
+        )])
 
-    total = len(referrals)
-    paid = sum(1 for r in referrals if r["paid"])
-    existing = sum(1 for r in referrals if r["was_existing_user"])
-    waiting = total - paid - existing
+    text = f"<b>👥 Всі реферери: {len(referrer_dict)}</b>\n\nНатисніть на реферера, щоб переглянути його рефералів:"
 
-    text = (
-        "👥 <b>Всі реферали</b>\n\n"
-        f"📊 Всього: <b>{total}</b>\n"
-        f"✅ Оплатили: <b>{paid}</b>\n"
-        f"⏳ Не оплатили: <b>{waiting}</b>\n"
-        f"⚠️ Старі користувачі: <b>{existing}</b>\n\n"
+    await message_or_callback_message.edit_text(
+        text,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
     )
 
-    for r in referrals:
 
-        referrer = user_link(
-            r["referrer_id"],
-            r["referrer_username"],
-            r["referrer_name"]
-        )
+@router.message(F.text == "👥 Всі реферали")
+async def all_referrals(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await show_all_referrers(message)
 
-        referred = user_link(
+
+@router.callback_query(F.data.startswith("referrer_detail:"))
+async def referrer_detail(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас немає доступу!", show_alert=True)
+        return
+
+    referrer_id = int(callback.data.split(":")[1])
+
+    all_referrals_data = await get_all_referrals()
+    user_refs = [r for r in all_referrals_data if r["referrer_id"] == referrer_id]
+
+    if not user_refs:
+        await callback.answer("Рефералів не знайдено")
+        return
+
+    referrer_link = user_link(
+        referrer_id,
+        user_refs[0].get("referrer_username"),
+        user_refs[0].get("referrer_name")
+    )
+
+    text = f"<b>👤 Реферер:</b> {referrer_link}\n\n"
+
+    for r in user_refs:
+        referred_link = user_link(
             r["referred_id"],
             r["referred_username"],
             r["referred_name"]
@@ -189,23 +217,28 @@ async def all_referrals(message: types.Message):
         else:
             status = "⏳ Не оплатив"
 
-        bonus = (
-            "🎁 Бонус виданий"
-            if r["bonus_given"]
-            else "❌ Бонус не виданий"
-        )
+        bonus = "🎁 Бонус виданий" if r["bonus_given"] else "❌ Бонус не виданий"
 
-        text += (
-            f"👤 Реферер: {referrer}\n"
-            f"↳ Реферал: {referred}\n"
-            f"📌 {status}\n"
-            f"{bonus}\n"
-            f"🕒 {r['created_at']}\n\n"
-        )
+        text += f"↳ {referred_link}\n   {status}\n   {bonus}\n   🕒 {r['created_at']}\n\n"
 
-    for i in range(0, len(text), 3500):
-        await message.answer(
-            text[i:i + 3500],
-            parse_mode="HTML",
-            disable_web_page_preview=True
-        )
+    back_kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="← Назад до списку реферерів", callback_data="back_to_all_referrers")]
+    ])
+
+    await callback.message.edit_text(
+        text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+        reply_markup=back_kb
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_all_referrers")
+async def back_to_all_referrers(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("У вас немає доступу!", show_alert=True)
+        return
+
+    await show_all_referrers(callback.message)
+    await callback.answer("Повернено до списку")

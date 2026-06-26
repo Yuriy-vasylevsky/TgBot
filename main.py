@@ -415,10 +415,10 @@ if __name__ == "__main__":
 #    Оновити код після змін у GitHub:    cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
 
 
-# systemctl restart tgbot    # перезапустити
-# systemctl stop tgbot       # зупинити
-# systemctl start tgbot      # запустити
-# systemctl status tgbot     # перевірити стан
+#              systemctl restart tgbot    # перезапустити
+#              systemctl stop tgbot       # зупинити
+#              systemctl start tgbot      # запустити
+#              systemctl status tgbot     # перевірити стан
 
 # 77.42.71.244	
 
