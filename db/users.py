@@ -266,3 +266,36 @@ async def set_promo_cooldown(user_id: int, hours: int = 12):
         await db.commit()
 
 
+# async def search_users(query: str) -> list[dict]:
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         db.row_factory = aiosqlite.Row  # ← додай це
+#         sql = """
+#             SELECT * FROM users 
+#             WHERE full_name LIKE ? 
+#                OR username LIKE ? 
+#                OR CAST(user_id AS TEXT) LIKE ?
+#             ORDER BY last_active DESC
+#         """
+#         search_pattern = f"%{query}%"
+#         async with db.execute(sql, (search_pattern, search_pattern, search_pattern)) as cursor:
+#             rows = await cursor.fetchall()
+#             return [dict(row) for row in rows] if rows else []
+
+async def search_users(query: str) -> list[dict]:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        # Реєструємо функцію, яка коректно лоуеркейсить кирилицю
+        await db.create_function("lower_unicode", 1, lambda x: x.lower() if x else x)
+
+        sql = """
+            SELECT * FROM users 
+            WHERE lower_unicode(full_name) LIKE lower_unicode(?) 
+               OR lower_unicode(username) LIKE lower_unicode(?)
+               OR CAST(user_id AS TEXT) LIKE ?
+            ORDER BY last_active DESC
+        """
+        search_pattern = f"%{query}%"
+        async with db.execute(sql, (search_pattern, search_pattern, search_pattern)) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(row) for row in rows] if rows else []

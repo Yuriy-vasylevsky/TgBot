@@ -5,7 +5,7 @@ from db import get_all_users_info, search_users, get_issued_checks_for_user, get
 from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win
+from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
@@ -54,14 +54,18 @@ def format_time_kyiv(dt_str: str | None) -> str:
             return f"сьогодні о {dt:%H:%M}"
         if dt.date() == (now - timedelta(days=1)).date():
             return f"вчора о {dt:%H:%M}"
-        
+
         return dt.strftime("%d.%m.%Y о %H:%M")
     except Exception as e:
         print(f"Помилка форматування часу: {e}")
         return "—"
 
 
-async def build_users_keyboard(users: list[dict], page: int, is_search: bool = False, search_query: str | None = None) -> InlineKeyboardBuilder:
+async def build_users_keyboard(
+    users: list[dict],
+    page: int,
+    is_search: bool = False,
+) -> InlineKeyboardBuilder:
     users_sorted = sorted(
         users, key=lambda x: parse_dt_safe(x.get("last_active")), reverse=True
     )
@@ -85,30 +89,29 @@ async def build_users_keyboard(users: list[dict], page: int, is_search: bool = F
             )
         )
 
-    # Навігація
+    # Навігація — без search_query в callback_data
     nav_row = []
     if page > 1:
         nav_row.append(
             types.InlineKeyboardButton(
-                text="⬅️ Назад", 
-                callback_data=f"users_list:{page-1}:{search_query or ''}"
+                text="⬅️ Назад",
+                callback_data=f"users_list:{page - 1}"
             )
         )
     if end < len(users_sorted):
         nav_row.append(
             types.InlineKeyboardButton(
-                text="Далі ➡️", 
-                callback_data=f"users_list:{page+1}:{search_query or ''}"
+                text="Далі ➡️",
+                callback_data=f"users_list:{page + 1}"
             )
         )
 
     if nav_row:
         kb.row(*nav_row)
 
-    # Кнопки дій
     kb.row(
         types.InlineKeyboardButton(
-            text="🔍 Пошук гравця", 
+            text="🔍 Пошук гравця",
             callback_data="start_user_search"
         )
     )
@@ -116,18 +119,19 @@ async def build_users_keyboard(users: list[dict], page: int, is_search: bool = F
     if is_search:
         kb.row(
             types.InlineKeyboardButton(
-                text="← До всіх користувачів", 
-                callback_data="users_list:1"
+                text="← До всіх користувачів",
+                callback_data="back_to_all_users"
             )
         )
 
     return kb
 
 
-
-async def show_users_list(message_or_query, page: int = 1, search_query: str | None = None):
-    """Універсальна функція для показу списку або результатів пошуку"""
-    
+async def show_users_list(
+    message_or_query,
+    page: int = 1,
+    search_query: str | None = None,
+):
     if search_query:
         users = await search_users(search_query)
         title = f"🔍 Результати пошуку: «{search_query}»"
@@ -141,11 +145,11 @@ async def show_users_list(message_or_query, page: int = 1, search_query: str | N
         text = f"{title}\n\n🫥 Нічого не знайдено" if search_query else "🫥 Користувачів ще немає"
         kb = InlineKeyboardBuilder()
         if search_query:
-            kb.button(text="← До всіх користувачів", callback_data="users_list:1")
+            kb.button(text="← До всіх користувачів", callback_data="back_to_all_users")
         kb_markup = kb.as_markup()
     else:
-        kb_builder = await build_users_keyboard(users, page, is_search=is_search, search_query=search_query)
-        kb_markup = kb_builder.as_markup()          # ← Головне виправлення
+        kb_builder = await build_users_keyboard(users, page, is_search=is_search)
+        kb_markup = kb_builder.as_markup()
         total_pages = (len(users) + USERS_PER_PAGE - 1) // USERS_PER_PAGE
         text = f"{title} (стор. {page}/{total_pages})\n\n"
         if search_query:
@@ -154,39 +158,40 @@ async def show_users_list(message_or_query, page: int = 1, search_query: str | N
     if isinstance(message_or_query, types.CallbackQuery):
         try:
             await message_or_query.message.edit_text(
-                text, 
-                reply_markup=kb_markup, 
-                parse_mode="HTML", 
+                text,
+                reply_markup=kb_markup,
+                parse_mode="HTML",
                 disable_web_page_preview=True
             )
         except Exception:
             await message_or_query.message.answer(
-                text, 
-                reply_markup=kb_markup, 
-                parse_mode="HTML", 
+                text,
+                reply_markup=kb_markup,
+                parse_mode="HTML",
                 disable_web_page_preview=True
             )
         await message_or_query.answer()
     else:
         await message_or_query.answer(
-            text, 
-            reply_markup=kb_markup,          # ← Було помилка тут
-            parse_mode="HTML", 
+            text,
+            reply_markup=kb_markup,
+            parse_mode="HTML",
             disable_web_page_preview=True
         )
 
 
-
+# ==================== СПИСОК ====================
 
 @router.message(F.text == "👥 Список користувачів")
-async def cmd_list_users(message: types.Message):
+async def cmd_list_users(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    await state.clear()
     await show_users_list(message, page=1)
 
 
 @router.callback_query(F.data.startswith("users_list:"))
-async def paginate_users_list(callback: types.CallbackQuery):
+async def paginate_users_list(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         await callback.answer("Доступно лише адміністратору", show_alert=True)
         return
@@ -194,12 +199,23 @@ async def paginate_users_list(callback: types.CallbackQuery):
     try:
         parts = callback.data.split(":")
         page = int(parts[1])
-        search_query = parts[2] if len(parts) > 2 and parts[2] else None
-    except:
+    except Exception:
         page = 1
-        search_query = None
+
+    # Беремо search_query зі стейту
+    fsm_data = await state.get_data()
+    search_query = fsm_data.get("search_query")
 
     await show_users_list(callback, page=page, search_query=search_query)
+
+
+@router.callback_query(F.data == "back_to_all_users")
+async def back_to_all_users(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Доступно лише адміністратору", show_alert=True)
+        return
+    await state.clear()
+    await show_users_list(callback, page=1, search_query=None)
 
 
 # ==================== ПОШУК ====================
@@ -224,11 +240,14 @@ async def process_search_query(message: types.Message, state: FSMContext):
         return
 
     query = message.text.strip()
-    if len(query) < 1:
+    if len(query) < 2:
         await message.answer("❌ Запит має містити мінімум 2 символи.")
         return
 
-    await state.clear()
+    # Зберігаємо запит у стейт і знімаємо стан очікування
+    await state.set_state(None)
+    await state.update_data(search_query=query)
+
     await show_users_list(message, page=1, search_query=query)
 
 
@@ -246,7 +265,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         from_page = int(parts[2])
         show_all_actions = len(parts) > 3 and parts[3] == "1"
         show_yesterday = len(parts) > 4 and parts[4] == "1"
-    except:
+    except Exception:
         await callback.answer("Помилка обробки", show_alert=True)
         return
 
@@ -265,7 +284,6 @@ async def show_user_detail(callback: types.CallbackQuery):
     balance = await get_balance(user_id)
     daily_net = await get_daily_net(user_id)
     yesterday_net = await get_yesterday_net(user_id)
-    daily_game_win = await get_daily_game_win(user_id) 
 
     # ==================== ДІЇ ====================
     actions = user.get("last_actions", "")
@@ -300,7 +318,7 @@ async def show_user_detail(callback: types.CallbackQuery):
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt.astimezone(kyiv_tz).date()
-        except:
+        except Exception:
             return None
 
     today_checks = [ch for ch in issued if get_check_date(ch) == today]
@@ -317,7 +335,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     today_sum = sum(ch["price"] for ch in today_checks)
     yesterday_sum = sum(ch["price"] for ch in yesterday_checks)
-   
+
     checks_block = f"🎁 <b>Чеки сьогодні ({today_sum} грн):</b>\n{format_checks(today_checks)}\n"
     if show_yesterday:
         checks_block += f"\n🗓 <b>Чеки вчора ({yesterday_sum} грн):</b>\n{format_checks(yesterday_checks)}\n"
@@ -332,7 +350,6 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"💰 Баланс: <b>{balance}</b> грн\n"
         f"📊 Програш сьогодні: <b>{daily_net} грн</b>\n"
         f"📊 Програш <b>вчора</b>: <b>{yesterday_net} грн</b>\n"
-        f"🎉 Виграш в іграх сьогодні: <b>{daily_game_win} грн</b>\n" 
         f"{cooldown_text}\n\n"
         f"{checks_block}\n"
         f"{actions_block}"
@@ -343,7 +360,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
     kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
-    kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}") 
+    kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}")
     kb.button(text="➕1 промо", callback_data=f"ask_add_promo:{user_id}:{from_page}")
 
     if show_yesterday:
@@ -373,6 +390,8 @@ async def show_user_detail(callback: types.CallbackQuery):
     await callback.answer()
 
 
+# ==================== СКИДАННЯ КУЛДАУНУ ====================
+
 async def reset_promo_cooldown(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
@@ -392,7 +411,7 @@ async def ask_reset_cooldown(callback: types.CallbackQuery):
         _, user_id_str, from_page_str = callback.data.split(":")
         user_id = int(user_id_str)
         from_page = int(from_page_str)
-    except:
+    except Exception:
         await callback.answer("Помилка обробки", show_alert=True)
         return
 
@@ -423,7 +442,7 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
         _, user_id_str, from_page_str = callback.data.split(":")
         user_id = int(user_id_str)
         from_page = int(from_page_str)
-    except:
+    except Exception:
         await callback.answer("Помилка обробки", show_alert=True)
         return
 
@@ -433,6 +452,8 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
     callback.data = f"user_detail:{user_id}:{from_page}:0"
     await show_user_detail(callback)
 
+
+# ==================== БАЛАНС ====================
 
 @router.callback_query(F.data.startswith("balance_add:"))
 async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
@@ -450,7 +471,7 @@ async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
 async def balance_add_finish(message: types.Message, state: FSMContext):
     try:
         amount = int(message.text)
-    except:
+    except Exception:
         await message.answer("❌ Введіть число")
         return
 
@@ -495,7 +516,7 @@ async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext)
 async def balance_remove_finish(message: types.Message, state: FSMContext):
     try:
         amount = int(message.text)
-    except:
+    except Exception:
         await message.answer("❌ Введіть число")
         return
 
@@ -513,6 +534,8 @@ async def balance_remove_finish(message: types.Message, state: FSMContext):
 
     await state.clear()
 
+
+# ==================== БАЛАНСИ ГРАВЦІВ ====================
 
 @router.message(F.text == "💰 Баланси гравців")
 async def show_all_balances(message: types.Message):
@@ -556,13 +579,15 @@ async def show_all_balances(message: types.Message):
     )
 
     if len(text) > 4000:
-        # розбиття на частини (як було в оригіналі)
         chunks, chunk = [], ""
         for line in lines:
             if len(chunk) + len(line) > 3900:
                 chunks.append(chunk)
                 chunk = ""
             chunk += line + "\n\n"
+        if chunk:
+            chunks.append(chunk)
+
         header = f"┌──────────────\n  │  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n└──────────────\n\n"
         footer = f"\n{'─' * 10}\n👥 Гравців: <b>{len(users)}</b>\n💵 Загальна сума: <b>{total} грн</b>\n{'─' * 10}"
         chunks[-1] += footer
@@ -571,6 +596,8 @@ async def show_all_balances(message: types.Message):
     else:
         await message.answer(text, parse_mode="HTML")
 
+
+# ==================== ПРОМО ====================
 
 @router.callback_query(F.data.startswith("ask_add_promo:"))
 async def ask_add_promo(callback: types.CallbackQuery):

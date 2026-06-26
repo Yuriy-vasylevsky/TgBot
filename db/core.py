@@ -67,6 +67,8 @@ async def ensure_users_table_and_columns():
             ("daily_net", "ALTER TABLE users ADD COLUMN daily_net INTEGER DEFAULT 0"),
             ("last_net_date", "ALTER TABLE users ADD COLUMN last_net_date TEXT"),
             ("yesterday_net", "ALTER TABLE users ADD COLUMN yesterday_net INTEGER DEFAULT 0"),
+            ("daily_game_win", "ALTER TABLE users ADD COLUMN daily_game_win INTEGER DEFAULT 0"),
+            ("last_game_win_date", "ALTER TABLE users ADD COLUMN last_game_win_date TEXT"),
             
         ]:
             if col not in cols:

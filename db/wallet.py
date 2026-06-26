@@ -517,3 +517,257 @@ async def get_active_champion_checks(user_id: int) -> list[dict]:
                 })
     
     return active
+
+
+
+# баланс виграних грошей користувачів
+
+
+async def add_daily_game_win(user_id: int, amount: int):
+    """
+    Фіксує суму, яку юзер виграв В ІГРАХ сьогодні (Blackjack, Слоти, Один з трьох).
+    Окремо від daily_net (депозити/нет), щоб не змішувати фінансову й ігрову статистику.
+    """
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO users
+            (user_id, daily_game_win, last_game_win_date)
+            VALUES (?, ?, ?)
+
+            ON CONFLICT(user_id) DO UPDATE SET
+
+                daily_game_win = CASE
+                    WHEN last_game_win_date = ?
+                    THEN daily_game_win + ?
+                    ELSE ?
+                END,
+
+                last_game_win_date = ?
+        """,
+        (
+            user_id, amount, today_str,
+            today_str, amount, amount,
+            today_str
+        ))
+        await db.commit()
+
+
+async def get_daily_game_win(user_id: int) -> int:
+    today = datetime.now(KYIV_TZ).date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(daily_game_win, 0) FROM users WHERE user_id = ? AND last_game_win_date = ?",
+            (user_id, today)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+async def get_all_daily_game_wins() -> list[dict]:
+    """Для адмінки: список усіх юзерів, хто виграв в іграх сьогодні."""
+    today = datetime.now(KYIV_TZ).date().isoformat()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT user_id, full_name, username, daily_game_win
+            FROM users
+            WHERE last_game_win_date = ? AND daily_game_win > 0
+            ORDER BY daily_game_win DESC
+            """,
+            (today,)
+        )
+        rows = await cursor.fetchall()
+    return [
+        {"user_id": r[0], "full_name": r[1], "username": r[2], "daily_game_win": r[3]}
+        for r in rows
+    ]
+
+
+# Обмеження виграшу 
+
+
+# from datetime import datetime, timezone, timedelta
+# import aiosqlite
+# from .core import DB_PATH
+# from .wallet import get_daily_net, get_daily_game_win
+
+# KYIV_TZ = timezone(timedelta(hours=3))
+
+# async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
+#     """
+#     Перевіряє, чи може користувач отримати приз.
+#     Повертає (дозволено, повідомлення_для_користувача)
+#     """
+#     today_net = await get_daily_net(user_id)  # депозит/програш сьогодні
+#     daily_game_win = await get_daily_game_win(user_id)
+
+#     if today_net < 200:
+#         return False, (
+#             "❌ Ви не можете отримати виграш.\n\n"
+#             "Потрібно мати депозит."
+#         )
+
+#     # Загальне обмеження: max 80 грн виграшу на 200 грн net
+#     max_allowed_win = (today_net // 200) * 80
+
+#     # Поточний виграш сьогодні (включаючи цей приз)
+#     total_won_today = daily_game_win + prize_amount
+
+#     if total_won_today > max_allowed_win:
+#         return False, (
+#             f"❌ Ліміт виграшів вичерпано.\n\n"
+#             f"На ваші {today_net} грн депозиту\n"
+#             f"дозволено максимум {max_allowed_win} грн виграшу."
+#         )
+
+#     return True, "OK"
+
+
+
+
+# async def get_yesterday_game_win(user_id: int) -> int:
+#     """Повертає виграш у іграх за вчора"""
+#     yesterday = (datetime.now(KYIV_TZ) - timedelta(days=1)).date().isoformat()
+    
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             """
+#             SELECT COALESCE(daily_game_win, 0) 
+#             FROM users 
+#             WHERE user_id = ? AND last_game_win_date = ?
+#             """,
+#             (user_id, yesterday)
+#         )
+#         row = await cursor.fetchone()
+#         return row[0] if row else 0
+
+
+
+
+
+# from datetime import datetime, timezone, timedelta
+# import aiosqlite
+# from .core import DB_PATH
+# from .wallet import get_daily_net, get_yesterday_net, get_daily_game_win
+
+# KYIV_TZ = timezone(timedelta(hours=3))
+
+
+# async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
+#     """
+#     Перевіряє можливість отримання призу з урахуванням:
+#     - Депозитів/програшу (сьогодні + вчора)
+#     - Виграшів у іграх (сьогодні + вчора)
+#     """
+#     today_net = await get_daily_net(user_id)
+#     yesterday_net = await get_yesterday_net(user_id)
+#     daily_game_win = await get_daily_game_win(user_id)
+
+#     # === Сумарний внесок ===
+#     total_net = today_net + yesterday_net
+
+#     if total_net < 200:
+#         return False, (
+#             "❌ Ви не можете отримати виграш.\n\n"
+#             "Потрібно мати мінімум 200 грн депозиту або програшу\n"
+#             "протягом останніх 48 годин (сьогодні або вчора)."
+#         )
+
+#     # === Сумарний виграш за сьогодні + вчора ===
+#     total_won = daily_game_win + prize_amount   # сьогодні + цей приз
+
+#     # Додаємо вчорашній виграш (якщо є функція)
+#     try:
+#         yesterday_game_win = await get_yesterday_game_win(user_id)  # потрібно буде додати
+#         total_won += yesterday_game_win
+#     except Exception:
+#         # Якщо функції ще немає — працюємо тільки з сьогоднішнім
+#         pass
+
+#     # Максимально дозволений виграш
+#     max_allowed_win = (total_net // 200) * 80
+
+#     if total_won > max_allowed_win:
+#         return False, (
+#             f"❌ Ліміт виграшів вичерпано.\n\n"
+#             f"За останні 2 дні у вас {total_net} грн внеску.\n"
+#             f"Дозволено максимум {max_allowed_win} грн виграшу.\n"
+#             f"Ви вже виграли: {total_won - prize_amount} грн."
+#         )
+
+#     return True, "OK"
+
+
+
+from datetime import datetime, timezone, timedelta
+import aiosqlite
+from .core import DB_PATH
+from .wallet import get_daily_net, get_yesterday_net, get_daily_game_win
+
+KYIV_TZ = timezone(timedelta(hours=3))
+
+
+async def get_yesterday_game_win(user_id: int) -> int:
+    """Повертає виграш у іграх за вчора"""
+    yesterday = (datetime.now(KYIV_TZ) - timedelta(days=1)).date().isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(daily_game_win, 0) 
+            FROM users 
+            WHERE user_id = ? AND last_game_win_date = ?
+            """,
+            (user_id, yesterday)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+def _positive_or_zero(value: int) -> int:
+    """Якщо значення за день мінусове — ігноруємо його (повертаємо 0)"""
+    return value if value > 0 else 0
+
+
+async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
+    """
+    Перевіряє можливість отримання призу з урахуванням:
+    - Депозитів/програшу (сьогодні + вчора, мінусові дні ігноруються)
+    - Виграшів у іграх (сьогодні + вчора, мінусові дні ігноруються)
+    """
+    today_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+    daily_game_win = await get_daily_game_win(user_id)
+    yesterday_game_win = await get_yesterday_game_win(user_id)
+
+    # === Сумарний внесок (мінусові дні не враховуються) ===
+    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+
+    if total_net < 200:
+        return False, (
+            "❌ Ви не можете отримати виграш.\n\n"
+            "Потрібно мати мінімум 200 грн депозиту або програшу\n"
+            "протягом останніх 48 годин (сьогодні або вчора)."
+        )
+
+    # === Сумарний виграш за сьогодні + вчора (мінусові дні не враховуються) ===
+    total_won = (
+        _positive_or_zero(daily_game_win)
+        + _positive_or_zero(yesterday_game_win)
+        + prize_amount
+    )
+
+    # Максимально дозволений виграш
+    max_allowed_win = int(total_net * 80 / 200)
+
+    if total_won > max_allowed_win:
+        return False, (
+            f"❌ Ліміт виграшів вичерпано.\n\n"
+            f"За останні 2 дні у вас {total_net} грн внеску.\n"
+            f"Дозволено максимум {max_allowed_win} грн виграшу.\n"
+            f"Ви вже виграли: {total_won - prize_amount} грн."
+        )
+
+    return True, "OK"

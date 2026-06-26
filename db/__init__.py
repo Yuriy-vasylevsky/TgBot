@@ -33,6 +33,10 @@ from .wallet import (
     get_daily_net,
     get_yesterday_net,
     update_daily_net,
+    get_all_daily_game_wins,
+    get_daily_game_win, 
+    add_daily_game_win, 
+    can_receive_prize,
 )
 
 # ==================== USERS ====================
@@ -51,7 +55,8 @@ from .users import (
     set_user_access,
     get_all_users,
     get_all_users_info,
-    add_or_update_user,           # ← ДОДАНО для profile.py
+    add_or_update_user, 
+    search_users,          
 )
 
 # ==================== PROMO ====================
