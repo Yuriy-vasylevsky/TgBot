@@ -748,7 +748,7 @@ async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, 
     if total_net < 200:
         return False, (
             "❌ Ви не можете отримати виграш.\n\n"
-            "Потрібно мати мінімум 200 грн депозиту або програшу\n"
+            "❗Потрібно мати мінімум 200 грн депозиту\n"
             "протягом останніх 48 годин (сьогодні або вчора)."
         )
 
@@ -765,9 +765,9 @@ async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, 
     if total_won > max_allowed_win:
         return False, (
             f"❌ Ліміт виграшів вичерпано.\n\n"
-            f"За останні 2 дні у вас {total_net} грн внеску.\n"
-            f"Дозволено максимум {max_allowed_win} грн виграшу.\n"
-            f"Ви вже виграли: {total_won - prize_amount} грн."
+            # f"За останні 2 дні у вас {total_net} грн внеску.\n"
+            f"❗Ви можете виграти всього {max_allowed_win}  грн.\n"
+            f"❗Ви вже виграли: {total_won - prize_amount} грн."
         )
 
     return True, "OK"
