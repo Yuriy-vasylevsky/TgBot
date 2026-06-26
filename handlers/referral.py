@@ -134,11 +134,11 @@ async def referral_menu(message: types.Message):
     )
 
 
-async def show_all_referrers(message_or_callback_message: types.Message):
-    """Окрема функція для показу списку реферерів"""
+async def show_all_referrers(target_message: types.Message):
+    """Показує список всіх реферерів"""
     all_referrals_data = await get_all_referrals()
     if not all_referrals_data:
-        await message_or_callback_message.answer("Рефералів ще немає.")
+        await target_message.answer("Рефералів ще немає.")
         return
 
     referrer_dict = defaultdict(list)
@@ -148,11 +148,7 @@ async def show_all_referrers(message_or_callback_message: types.Message):
     keyboard = []
     for referrer_id, refs in referrer_dict.items():
         sample = refs[0]
-        name = (
-            sample.get("referrer_username") or 
-            sample.get("referrer_name") or 
-            f"ID {referrer_id}"
-        )
+        name = sample.get("referrer_username") or sample.get("referrer_name") or f"ID {referrer_id}"
         
         total = len(refs)
         paid = sum(1 for r in refs if r["paid"] and not r["was_existing_user"])
@@ -166,7 +162,7 @@ async def show_all_referrers(message_or_callback_message: types.Message):
 
     text = f"<b>👥 Всі реферери: {len(referrer_dict)}</b>\n\nНатисніть на реферера, щоб переглянути його рефералів:"
 
-    await message_or_callback_message.edit_text(
+    await target_message.edit_text(
         text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -222,15 +218,25 @@ async def referrer_detail(callback: types.CallbackQuery):
         text += f"↳ {referred_link}\n   {status}\n   {bonus}\n   🕒 {r['created_at']}\n\n"
 
     back_kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="← Назад до списку реферерів", callback_data="back_to_all_referrers")]
+        [InlineKeyboardButton(text="← Назад до списку", callback_data="back_to_all_referrers")]
     ])
 
-    await callback.message.edit_text(
-        text,
-        parse_mode="HTML",
-        disable_web_page_preview=True,
-        reply_markup=back_kb
-    )
+    try:
+        await callback.message.edit_text(
+            text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=back_kb
+        )
+    except Exception:
+        # Якщо не вдалося відредагувати — надсилаємо нове повідомлення
+        await callback.message.answer(
+            text,
+            parse_mode="HTML",
+            disable_web_page_preview=True,
+            reply_markup=back_kb
+        )
+
     await callback.answer()
 
 
@@ -240,5 +246,11 @@ async def back_to_all_referrers(callback: types.CallbackQuery):
         await callback.answer("У вас немає доступу!", show_alert=True)
         return
 
-    await show_all_referrers(callback.message)
+    try:
+        await show_all_referrers(callback.message)
+    except Exception:
+        # Якщо edit не працює — надсилаємо нове
+        await callback.message.answer("Повертаємося до списку...")
+        await show_all_referrers(callback.message)
+
     await callback.answer("Повернено до списку")
