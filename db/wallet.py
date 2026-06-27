@@ -28,50 +28,6 @@ import aiosqlite
 
 KYIV_TZ = timezone(timedelta(hours=3))
 
-# async def ensure_daily_reset(user_id: int):
-#     """Гарантує правильний перехід на новий день"""
-#     today_str = datetime.now(KYIV_TZ).date().isoformat()
-
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
-#             (user_id,)
-#         )
-#         row = await cursor.fetchone()
-
-#         if not row:
-#             await db.execute(
-#                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date) "
-#                 "VALUES (?, 0, 0, ?)",
-#                 (user_id, today_str)
-#             )
-#             await db.commit()
-#             return
-
-#         daily_net, yesterday_net, last_net_date = row
-
-#         # Надійна перевірка на новий день
-#         is_new_day = (
-#             last_net_date is None or 
-#             last_net_date != today_str
-#         )
-
-#         if is_new_day:
-#             await db.execute("""
-#                 UPDATE users 
-#                 SET 
-#                     yesterday_net = COALESCE(?, 0),
-#                     daily_net = 0,
-#                     last_net_date = ?
-#                 WHERE user_id = ?
-#             """, (daily_net, today_str, user_id))
-#             await db.commit()
-#             logging.info(f"✅ Reset daily_net для user {user_id} (новий день)")
-
-
-
-
-
 
 from datetime import datetime, timezone, timedelta
 import logging
@@ -84,17 +40,58 @@ CASHBACK_GOAL = 1000
  
  
 # ==================== ОНОВЛЕНА ensure_daily_reset ====================
-async def ensure_daily_reset(user_id: int):
-    """Гарантує правильний перехід на новий день (тепер скидає й кешбек-базу)"""
-    today_str = datetime.now(KYIV_TZ).date().isoformat()
+# async def ensure_daily_reset(user_id: int):
+#     """Гарантує правильний перехід на новий день (тепер скидає й кешбек-базу)"""
+#     today_str = datetime.now(KYIV_TZ).date().isoformat()
  
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         row = await cursor.fetchone()
+ 
+#         if not row:
+#             await db.execute(
+#                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, cashback_claimed_base) "
+#                 "VALUES (?, 0, 0, ?, 0)",
+#                 (user_id, today_str)
+#             )
+#             await db.commit()
+#             return
+ 
+#         daily_net, yesterday_net, last_net_date = row
+ 
+#         is_new_day = (
+#             last_net_date is None or
+#             last_net_date != today_str
+#         )
+ 
+#         if is_new_day:
+#             await db.execute("""
+#                 UPDATE users 
+#                 SET 
+#                     yesterday_net = COALESCE(?, 0),
+#                     daily_net = 0,
+#                     cashback_claimed_base = 0,
+#                     last_net_date = ?
+#                 WHERE user_id = ?
+#             """, (daily_net, today_str, user_id))
+#             await db.commit()
+#             logging.info(f"✅ Reset daily_net + cashback для user {user_id} (новий день)")
+ 
+ 
+async def ensure_daily_reset(user_id: int):
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
+    yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
+
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
             (user_id,)
         )
         row = await cursor.fetchone()
- 
+
         if not row:
             await db.execute(
                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, cashback_claimed_base) "
@@ -103,28 +100,33 @@ async def ensure_daily_reset(user_id: int):
             )
             await db.commit()
             return
- 
+
         daily_net, yesterday_net, last_net_date = row
- 
-        is_new_day = (
-            last_net_date is None or
-            last_net_date != today_str
-        )
- 
-        if is_new_day:
-            await db.execute("""
-                UPDATE users 
-                SET 
-                    yesterday_net = COALESCE(?, 0),
-                    daily_net = 0,
-                    cashback_claimed_base = 0,
-                    last_net_date = ?
-                WHERE user_id = ?
-            """, (daily_net, today_str, user_id))
-            await db.commit()
-            logging.info(f"✅ Reset daily_net + cashback для user {user_id} (новий день)")
- 
- 
+
+        if last_net_date == today_str:
+            return  # вже актуально
+
+        if last_net_date == yesterday_str:
+            # Вчора була активність — коректно переносимо
+            new_yesterday = daily_net or 0
+        else:
+            # Пропущено більше одного дня — вчора не було активності
+            new_yesterday = 0
+
+        await db.execute("""
+            UPDATE users 
+            SET 
+                yesterday_net = ?,
+                daily_net = 0,
+                cashback_claimed_base = 0,
+                last_net_date = ?
+            WHERE user_id = ?
+        """, (new_yesterday, today_str, user_id))
+        await db.commit()
+        logging.info(f"✅ Reset daily_net + cashback для user {user_id} | yesterday_net={new_yesterday}")
+
+
+
 # ==================== КЕШБЕК: ДОПОМІЖНІ ФУНКЦІЇ ====================
  
 async def get_cashback_claimed_base(user_id: int) -> int:
@@ -617,8 +619,8 @@ async def get_active_champion_checks(user_id: int) -> list[dict]:
 
 
 async def ensure_daily_game_win_reset(user_id: int):
-    """Надійний перенос виграшів в іграх"""
     today_str = datetime.now(KYIV_TZ).date().isoformat()
+    yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
@@ -638,20 +640,24 @@ async def ensure_daily_game_win_reset(user_id: int):
 
         daily_win, yesterday_win, last_date = row
 
-        if last_date is None or last_date != today_str:
-            await db.execute("""
-                UPDATE users 
-                SET 
-                    yesterday_game_win = COALESCE(?, 0),
-                    daily_game_win = 0,
-                    last_game_win_date = ?
-                WHERE user_id = ?
-            """, (daily_win, today_str, user_id))
-            await db.commit()
-            logging.info(f"🔄 GameWin Reset | user={user_id} | {daily_win} → yesterday")
+        if last_date == today_str:
+            return
 
+        if last_date == yesterday_str:
+            new_yesterday = daily_win or 0
+        else:
+            new_yesterday = 0
 
-
+        await db.execute("""
+            UPDATE users 
+            SET 
+                yesterday_game_win = ?,
+                daily_game_win = 0,
+                last_game_win_date = ?
+            WHERE user_id = ?
+        """, (new_yesterday, today_str, user_id))
+        await db.commit()
+        logging.info(f"🔄 GameWin Reset | user={user_id} | yesterday_game_win={new_yesterday}")
 
 async def add_daily_game_win(user_id: int, amount: int):
     await ensure_daily_game_win_reset(user_id)   # ← додаємо
