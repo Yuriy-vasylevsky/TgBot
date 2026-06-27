@@ -48,8 +48,6 @@ async def ensure_users_table_and_columns():
             games_won INTEGER DEFAULT 0,
             money_won INTEGER DEFAULT 0,
             has_claimed_gift INTEGER DEFAULT 0,
-            last_daily_bonus_date TEXT,
-            last_fortune_date TEXT,
             balance INTEGER DEFAULT 0
             
         )""")
@@ -58,17 +56,21 @@ async def ensure_users_table_and_columns():
             cols = {r[1] for r in await cur.fetchall()}
 
         for col, sql in [
-            ("last_daily_bonus_date", "ALTER TABLE users ADD COLUMN last_daily_bonus_date TEXT"),
-            ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
+            # ("last_daily_bonus_date", "ALTER TABLE users ADD COLUMN last_daily_bonus_date TEXT"),
+            # ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
             ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0"),
             ("promo_cooldown_until", "ALTER TABLE users ADD COLUMN promo_cooldown_until TEXT"),
+            ("promo_claimed_base", "ALTER TABLE users ADD COLUMN promo_claimed_base INTEGER DEFAULT 0"),
             # ("project_net", "ALTER TABLE users ADD COLUMN project_net INTEGER DEFAULT 0"),
             # ("personal_net", "ALTER TABLE users ADD COLUMN personal_net INTEGER DEFAULT 0"),
             ("daily_net", "ALTER TABLE users ADD COLUMN daily_net INTEGER DEFAULT 0"),
+            ("cashback_claimed_base", "ALTER TABLE users ADD COLUMN cashback_claimed_base INTEGER DEFAULT 0"),
             ("last_net_date", "ALTER TABLE users ADD COLUMN last_net_date TEXT"),
             ("yesterday_net", "ALTER TABLE users ADD COLUMN yesterday_net INTEGER DEFAULT 0"),
             ("daily_game_win", "ALTER TABLE users ADD COLUMN daily_game_win INTEGER DEFAULT 0"),
+            ("yesterday_game_win", "ALTER TABLE users ADD COLUMN yesterday_game_win INTEGER DEFAULT 0"),
             ("last_game_win_date", "ALTER TABLE users ADD COLUMN last_game_win_date TEXT"),
+
             
         ]:
             if col not in cols:

@@ -1,60 +1,12 @@
 
-
-
 import aiosqlite
 import time
 import logging
 
 from .core import DB_PATH
-
-
-# async def add_to_balance(user_id: int, amount_grn: int):
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute("""
-#             INSERT INTO users (user_id, balance)
-#             VALUES (?, ?)
-#             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
-#         """, (user_id, amount_grn, amount_grn))
-#         await db.commit()
-
-
 from datetime import datetime, timezone, timedelta
 
 KYIV_TZ = timezone(timedelta(hours=3))
-
-# async def add_to_balance(user_id: int, amount_grn: int):
-#     today_str = datetime.now(KYIV_TZ).date().isoformat()
-
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute("""
-#             INSERT INTO users (user_id, balance)
-#             VALUES (?, ?)
-#             ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
-#         """, (user_id, amount_grn, amount_grn))
-
-#         await db.execute("""
-#             INSERT INTO users (user_id, daily_net, last_net_date)
-#             VALUES (?, ?, ?)
-#             ON CONFLICT(user_id) DO UPDATE SET
-#                 yesterday_net = CASE 
-#                     WHEN last_net_date != ? THEN daily_net
-#                     ELSE yesterday_net
-#                 END,
-#                 daily_net = CASE 
-#                     WHEN last_net_date = ? THEN daily_net + ?
-#                     ELSE ?
-#                 END,
-#                 last_net_date = ?
-#         """, (
-#             user_id, amount_grn, today_str,
-#             today_str,          # yesterday_net: якщо новий день — берем старий daily_net
-#             today_str, amount_grn, amount_grn,  # daily_net
-#             today_str
-#         ))
-
-#         await db.commit()
-
-
 
 async def add_to_balance(user_id: int, amount_grn: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -68,87 +20,257 @@ async def add_to_balance(user_id: int, amount_grn: int):
         await db.commit()
 
 
+# Обнова витрат ща сьогодні і вчора
+
+
+from datetime import datetime, date
+import aiosqlite
+
+KYIV_TZ = timezone(timedelta(hours=3))
+
+# async def ensure_daily_reset(user_id: int):
+#     """Гарантує правильний перехід на новий день"""
+#     today_str = datetime.now(KYIV_TZ).date().isoformat()
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         row = await cursor.fetchone()
+
+#         if not row:
+#             await db.execute(
+#                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date) "
+#                 "VALUES (?, 0, 0, ?)",
+#                 (user_id, today_str)
+#             )
+#             await db.commit()
+#             return
+
+#         daily_net, yesterday_net, last_net_date = row
+
+#         # Надійна перевірка на новий день
+#         is_new_day = (
+#             last_net_date is None or 
+#             last_net_date != today_str
+#         )
+
+#         if is_new_day:
+#             await db.execute("""
+#                 UPDATE users 
+#                 SET 
+#                     yesterday_net = COALESCE(?, 0),
+#                     daily_net = 0,
+#                     last_net_date = ?
+#                 WHERE user_id = ?
+#             """, (daily_net, today_str, user_id))
+#             await db.commit()
+#             logging.info(f"✅ Reset daily_net для user {user_id} (новий день)")
+
+
+
+
+
+
+from datetime import datetime, timezone, timedelta
+import logging
+import aiosqlite
+ 
+KYIV_TZ = timezone(timedelta(hours=3))
+ 
+CASHBACK_PERCENT = 0.10
+CASHBACK_GOAL = 1000
+ 
+ 
+# ==================== ОНОВЛЕНА ensure_daily_reset ====================
+async def ensure_daily_reset(user_id: int):
+    """Гарантує правильний перехід на новий день (тепер скидає й кешбек-базу)"""
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
+ 
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+ 
+        if not row:
+            await db.execute(
+                "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, cashback_claimed_base) "
+                "VALUES (?, 0, 0, ?, 0)",
+                (user_id, today_str)
+            )
+            await db.commit()
+            return
+ 
+        daily_net, yesterday_net, last_net_date = row
+ 
+        is_new_day = (
+            last_net_date is None or
+            last_net_date != today_str
+        )
+ 
+        if is_new_day:
+            await db.execute("""
+                UPDATE users 
+                SET 
+                    yesterday_net = COALESCE(?, 0),
+                    daily_net = 0,
+                    cashback_claimed_base = 0,
+                    last_net_date = ?
+                WHERE user_id = ?
+            """, (daily_net, today_str, user_id))
+            await db.commit()
+            logging.info(f"✅ Reset daily_net + cashback для user {user_id} (новий день)")
+ 
+ 
+# ==================== КЕШБЕК: ДОПОМІЖНІ ФУНКЦІЇ ====================
+ 
+async def get_cashback_claimed_base(user_id: int) -> int:
+    """Скільки net вже 'витрачено' на попередні кешбеки сьогодні."""
+    await ensure_daily_reset(user_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(cashback_claimed_base, 0) FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+ 
+ 
+async def get_cashback_status(user_id: int) -> dict:
+    """
+    Повертає статус кешбеку.
+    claim_amount показується завжди (потенційна сума), can_claim — тільки для видачі.
+    """
+    today_net = await get_daily_net(user_id)
+    claimed_base = await get_cashback_claimed_base(user_id)
+    balance = await get_balance(user_id)
+
+    available_net = max(today_net - claimed_base, 0)
+    
+    # Потенційна сума кешбеку (показуємо завжди)
+    potential_claim_amount = round(available_net * CASHBACK_PERCENT)
+    
+    # Можна отримати тільки якщо є достатньо net І баланс <= 50
+    # can_claim = (available_net >= CASHBACK_GOAL) and (balance <= 50)
+    can_claim = (available_net >= CASHBACK_GOAL) and (balance <= 0)
+    return {
+        "today_net": today_net,
+        "claimed_base": claimed_base,
+        "available_net": available_net,
+        "balance": balance,
+        "can_claim": can_claim,
+        "claim_amount": potential_claim_amount,   # <-- Важливо: завжди потенційна сума
+        "balance_too_high": balance > 50,
+        "progress_in_tier": available_net,
+    }
+ 
+async def claim_cashback(user_id: int) -> dict:
+    """Атомарно видає кешбек з перевіркою балансу ≤ 50 грн"""
+    await ensure_daily_reset(user_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT daily_net, cashback_claimed_base, balance FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return {"success": False, "reason": "no_user"}
+
+        daily_net, claimed_base, balance = row
+        daily_net = daily_net or 0
+        claimed_base = claimed_base or 0
+        balance = balance or 0
+
+        available_net = daily_net - claimed_base
+
+        # === НОВІ ПЕРЕВІРКИ ===
+        if available_net < CASHBACK_GOAL:
+            return {
+                "success": False,
+                "reason": "not_enough",
+                "available_net": max(available_net, 0),
+                "needed": CASHBACK_GOAL - max(available_net, 0),
+            }
+
+        if balance > 0:
+            return {
+                "success": False,
+                "reason": "balance_too_high",
+                "current_balance": balance,
+                "max_allowed": 0,
+            }
+
+        cashback_amount = round(available_net * CASHBACK_PERCENT)
+        new_claimed_base = claimed_base + available_net
+        new_balance = balance + cashback_amount
+
+        await db.execute(
+            """
+            UPDATE users
+            SET balance = ?,
+                cashback_claimed_base = ?
+            WHERE user_id = ?
+            """,
+            (new_balance, new_claimed_base, user_id)
+        )
+        await db.commit()
+
+        return {
+            "success": True,
+            "cashback_amount": cashback_amount,
+            "claimed_from_net": available_net,
+            "new_balance": new_balance,
+        }
+
+
+
+
+
+
+
+
+
+
 
 
 
 async def update_daily_net(user_id: int, amount: int):
-    """
-    amount > 0 -> касир поповнив баланс
-    amount < 0 -> касир списав баланс
-    """
+    """Оновлює daily_net з гарантованим reset'ом"""
+    await ensure_daily_reset(user_id)   # ← Додаємо
 
     today_str = datetime.now(KYIV_TZ).date().isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
-
         await db.execute("""
-            INSERT INTO users
-            (
-                user_id,
-                daily_net,
-                yesterday_net,
-                last_net_date
-            )
-            VALUES (?, ?, 0, ?)
-
-            ON CONFLICT(user_id) DO UPDATE SET
-
-                yesterday_net = CASE
-                    WHEN last_net_date != ?
-                    THEN daily_net
-                    ELSE yesterday_net
-                END,
-
-                daily_net = CASE
-                    WHEN last_net_date = ?
-                    THEN daily_net + ?
-                    ELSE ?
-                END,
-
+            UPDATE users 
+            SET 
+                daily_net = daily_net + ?,
                 last_net_date = ?
-        """,
-        (
-            user_id,
-            amount,
-            today_str,
-
-            today_str,
-
-            today_str,
-            amount,
-            amount,
-
-            today_str
-        ))
-
+            WHERE user_id = ?
+        """, (amount, today_str, user_id))
         await db.commit()
 
 
-
-
-
-
-
-
-
-
-
-
-
-from datetime import date
-
 async def get_daily_net(user_id: int) -> int:
+    await ensure_daily_reset(user_id)   # ← КРИТИЧНО
+
     today = datetime.now(KYIV_TZ).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT COALESCE(daily_net, 0) FROM users WHERE user_id = ? AND last_net_date = ?",
-            (user_id, today)
+            "SELECT COALESCE(daily_net, 0) FROM users WHERE user_id = ?",
+            (user_id,)
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
 
 
 async def get_yesterday_net(user_id: int) -> int:
+    await ensure_daily_reset(user_id)   # ← КРИТИЧНО
+
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT COALESCE(yesterday_net, 0) FROM users WHERE user_id = ?",
@@ -157,25 +279,6 @@ async def get_yesterday_net(user_id: int) -> int:
         row = await cursor.fetchone()
         return row[0] if row else 0
 
-
-# async def get_personal_net(user_id: int) -> int:
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             "SELECT COALESCE(personal_net, 0) FROM users WHERE user_id = ?",
-#             (user_id,)
-#         )
-#         row = await cursor.fetchone()
-#         return row[0] if row else 0
-
-
-# async def get_project_net() -> int:
-#     """Повертає чистий результат проєкту"""
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             "SELECT COALESCE(project_net, 0) FROM users WHERE user_id = 0"
-#         )
-#         row = await cursor.fetchone()
-#         return row[0] if row else 0
 
 
 async def get_balance(user_id: int) -> int:
@@ -417,16 +520,6 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
     total_pages = max(1, (total + per_page - 1) // per_page)
     return rows, total_pages, day_total
 
-# async def log_check_issued(user_id: int, check_type: str, code: str, price: int):
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         await db.execute(
-#             """
-#             INSERT INTO issued_checks (user_id, check_type, code, price, issued_at)
-#             VALUES (?, ?, ?, ?, DATETIME('now'))
-#             """,
-#             (user_id, check_type, code, price)
-#         )
-#         await db.commit()
 
 
 
@@ -523,46 +616,84 @@ async def get_active_champion_checks(user_id: int) -> list[dict]:
 # баланс виграних грошей користувачів
 
 
+async def ensure_daily_game_win_reset(user_id: int):
+    """Надійний перенос виграшів в іграх"""
+    today_str = datetime.now(KYIV_TZ).date().isoformat()
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT daily_game_win, yesterday_game_win, last_game_win_date FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+
+        if not row:
+            await db.execute(
+                """INSERT INTO users (user_id, daily_game_win, yesterday_game_win, last_game_win_date) 
+                   VALUES (?, 0, 0, ?)""",
+                (user_id, today_str)
+            )
+            await db.commit()
+            return
+
+        daily_win, yesterday_win, last_date = row
+
+        if last_date is None or last_date != today_str:
+            await db.execute("""
+                UPDATE users 
+                SET 
+                    yesterday_game_win = COALESCE(?, 0),
+                    daily_game_win = 0,
+                    last_game_win_date = ?
+                WHERE user_id = ?
+            """, (daily_win, today_str, user_id))
+            await db.commit()
+            logging.info(f"🔄 GameWin Reset | user={user_id} | {daily_win} → yesterday")
+
+
+
+
 async def add_daily_game_win(user_id: int, amount: int):
-    """
-    Фіксує суму, яку юзер виграв В ІГРАХ сьогодні (Blackjack, Слоти, Один з трьох).
-    Окремо від daily_net (депозити/нет), щоб не змішувати фінансову й ігрову статистику.
-    """
+    await ensure_daily_game_win_reset(user_id)   # ← додаємо
+
     today_str = datetime.now(KYIV_TZ).date().isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
-            INSERT INTO users
-            (user_id, daily_game_win, last_game_win_date)
-            VALUES (?, ?, ?)
-
-            ON CONFLICT(user_id) DO UPDATE SET
-
-                daily_game_win = CASE
-                    WHEN last_game_win_date = ?
-                    THEN daily_game_win + ?
-                    ELSE ?
-                END,
-
+            UPDATE users 
+            SET 
+                daily_game_win = daily_game_win + ?,
                 last_game_win_date = ?
-        """,
-        (
-            user_id, amount, today_str,
-            today_str, amount, amount,
-            today_str
-        ))
+            WHERE user_id = ?
+        """, (amount, today_str, user_id))
         await db.commit()
 
 
 async def get_daily_game_win(user_id: int) -> int:
+    await ensure_daily_game_win_reset(user_id)   # ← додаємо
+
     today = datetime.now(KYIV_TZ).date().isoformat()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            "SELECT COALESCE(daily_game_win, 0) FROM users WHERE user_id = ? AND last_game_win_date = ?",
-            (user_id, today)
+            "SELECT COALESCE(daily_game_win, 0) FROM users WHERE user_id = ?",
+            (user_id,)
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
+
+
+async def get_yesterday_game_win(user_id: int) -> int:
+    await ensure_daily_game_win_reset(user_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(yesterday_game_win, 0) FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
 
 
 async def get_all_daily_game_wins() -> list[dict]:
@@ -585,121 +716,6 @@ async def get_all_daily_game_wins() -> list[dict]:
     ]
 
 
-# Обмеження виграшу 
-
-
-# from datetime import datetime, timezone, timedelta
-# import aiosqlite
-# from .core import DB_PATH
-# from .wallet import get_daily_net, get_daily_game_win
-
-# KYIV_TZ = timezone(timedelta(hours=3))
-
-# async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
-#     """
-#     Перевіряє, чи може користувач отримати приз.
-#     Повертає (дозволено, повідомлення_для_користувача)
-#     """
-#     today_net = await get_daily_net(user_id)  # депозит/програш сьогодні
-#     daily_game_win = await get_daily_game_win(user_id)
-
-#     if today_net < 200:
-#         return False, (
-#             "❌ Ви не можете отримати виграш.\n\n"
-#             "Потрібно мати депозит."
-#         )
-
-#     # Загальне обмеження: max 80 грн виграшу на 200 грн net
-#     max_allowed_win = (today_net // 200) * 80
-
-#     # Поточний виграш сьогодні (включаючи цей приз)
-#     total_won_today = daily_game_win + prize_amount
-
-#     if total_won_today > max_allowed_win:
-#         return False, (
-#             f"❌ Ліміт виграшів вичерпано.\n\n"
-#             f"На ваші {today_net} грн депозиту\n"
-#             f"дозволено максимум {max_allowed_win} грн виграшу."
-#         )
-
-#     return True, "OK"
-
-
-
-
-# async def get_yesterday_game_win(user_id: int) -> int:
-#     """Повертає виграш у іграх за вчора"""
-#     yesterday = (datetime.now(KYIV_TZ) - timedelta(days=1)).date().isoformat()
-    
-#     async with aiosqlite.connect(DB_PATH) as db:
-#         cursor = await db.execute(
-#             """
-#             SELECT COALESCE(daily_game_win, 0) 
-#             FROM users 
-#             WHERE user_id = ? AND last_game_win_date = ?
-#             """,
-#             (user_id, yesterday)
-#         )
-#         row = await cursor.fetchone()
-#         return row[0] if row else 0
-
-
-
-
-
-# from datetime import datetime, timezone, timedelta
-# import aiosqlite
-# from .core import DB_PATH
-# from .wallet import get_daily_net, get_yesterday_net, get_daily_game_win
-
-# KYIV_TZ = timezone(timedelta(hours=3))
-
-
-# async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
-#     """
-#     Перевіряє можливість отримання призу з урахуванням:
-#     - Депозитів/програшу (сьогодні + вчора)
-#     - Виграшів у іграх (сьогодні + вчора)
-#     """
-#     today_net = await get_daily_net(user_id)
-#     yesterday_net = await get_yesterday_net(user_id)
-#     daily_game_win = await get_daily_game_win(user_id)
-
-#     # === Сумарний внесок ===
-#     total_net = today_net + yesterday_net
-
-#     if total_net < 200:
-#         return False, (
-#             "❌ Ви не можете отримати виграш.\n\n"
-#             "Потрібно мати мінімум 200 грн депозиту або програшу\n"
-#             "протягом останніх 48 годин (сьогодні або вчора)."
-#         )
-
-#     # === Сумарний виграш за сьогодні + вчора ===
-#     total_won = daily_game_win + prize_amount   # сьогодні + цей приз
-
-#     # Додаємо вчорашній виграш (якщо є функція)
-#     try:
-#         yesterday_game_win = await get_yesterday_game_win(user_id)  # потрібно буде додати
-#         total_won += yesterday_game_win
-#     except Exception:
-#         # Якщо функції ще немає — працюємо тільки з сьогоднішнім
-#         pass
-
-#     # Максимально дозволений виграш
-#     max_allowed_win = (total_net // 200) * 80
-
-#     if total_won > max_allowed_win:
-#         return False, (
-#             f"❌ Ліміт виграшів вичерпано.\n\n"
-#             f"За останні 2 дні у вас {total_net} грн внеску.\n"
-#             f"Дозволено максимум {max_allowed_win} грн виграшу.\n"
-#             f"Ви вже виграли: {total_won - prize_amount} грн."
-#         )
-
-#     return True, "OK"
-
-
 
 from datetime import datetime, timezone, timedelta
 import aiosqlite
@@ -708,22 +724,6 @@ from .wallet import get_daily_net, get_yesterday_net, get_daily_game_win
 
 KYIV_TZ = timezone(timedelta(hours=3))
 
-
-async def get_yesterday_game_win(user_id: int) -> int:
-    """Повертає виграш у іграх за вчора"""
-    yesterday = (datetime.now(KYIV_TZ) - timedelta(days=1)).date().isoformat()
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute(
-            """
-            SELECT COALESCE(daily_game_win, 0) 
-            FROM users 
-            WHERE user_id = ? AND last_game_win_date = ?
-            """,
-            (user_id, yesterday)
-        )
-        row = await cursor.fetchone()
-        return row[0] if row else 0
 
 
 def _positive_or_zero(value: int) -> int:
@@ -771,3 +771,147 @@ async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, 
         )
 
     return True, "OK"
+
+
+
+
+
+
+import random
+import string
+import logging
+import aiosqlite
+
+from datetime import datetime, timezone, timedelta
+from .core import DB_PATH
+from .wallet import get_daily_net, get_balance, ensure_daily_reset
+
+KYIV_TZ = timezone(timedelta(hours=3))
+
+PROMO_GOAL = 500
+PROMO_BALANCE_LIMIT = 0
+
+
+# Примітка: колонка promo_claimed_base додається централізовано
+# в core.py -> ensure_users_table_and_columns(), окрема міграція тут не потрібна.
+
+
+# ==================== ДОПОМІЖНІ ====================
+
+def _generate_promo_code() -> str:
+    return "PROMO-" + "".join(
+        random.choices(string.ascii_uppercase + string.digits, k=6)
+    )
+
+
+async def get_promo_claimed_base(user_id: int) -> int:
+    """Скільки net вже 'витрачено' на попередні промокоди сьогодні."""
+    await ensure_daily_reset(user_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(promo_claimed_base, 0) FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0
+
+
+async def get_promo_status(user_id: int) -> dict:
+    """
+    Повертає статус видачі промокоду.
+    available_net показує, скільки накопичено понад уже видані промокоди.
+    can_claim — чи можна забрати промокод прямо зараз.
+    """
+    today_net = await get_daily_net(user_id)
+    claimed_base = await get_promo_claimed_base(user_id)
+    balance = await get_balance(user_id)
+
+    available_net = max(today_net - claimed_base, 0)
+
+    can_claim = (available_net >= PROMO_GOAL) and (balance <= PROMO_BALANCE_LIMIT)
+
+    return {
+        "today_net": today_net,
+        "claimed_base": claimed_base,
+        "available_net": available_net,
+        "balance": balance,
+        "can_claim": can_claim,
+        "balance_too_high": balance > PROMO_BALANCE_LIMIT,
+        "progress_in_tier": available_net % PROMO_GOAL,
+        "available_count": available_net // PROMO_GOAL,
+    }
+
+
+async def claim_promo(user_id: int) -> dict:
+    """
+    Атомарно генерує та видає промокод користувачу
+    з перевіркою балансу ≤ PROMO_BALANCE_LIMIT (аналогічно кешбеку).
+    """
+    await ensure_daily_reset(user_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT daily_net, promo_claimed_base, balance FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return {"success": False, "reason": "no_user"}
+
+        daily_net, claimed_base, balance = row
+        daily_net = daily_net or 0
+        claimed_base = claimed_base or 0
+        balance = balance or 0
+
+        available_net = daily_net - claimed_base
+
+        if available_net < PROMO_GOAL:
+            return {
+                "success": False,
+                "reason": "not_enough",
+                "available_net": max(available_net, 0),
+                "needed": PROMO_GOAL - max(available_net, 0),
+            }
+
+        if balance > PROMO_BALANCE_LIMIT:
+            return {
+                "success": False,
+                "reason": "balance_too_high",
+                "current_balance": balance,
+                "max_allowed": PROMO_BALANCE_LIMIT,
+            }
+
+        # Генеруємо унікальний код "на льоту"
+        code = _generate_promo_code()
+        # На випадок колізії (малоймовірно) — пробуємо ще раз
+        for _ in range(5):
+            cur = await db.execute(
+                "SELECT 1 FROM promocodes WHERE code = ?", (code,)
+            )
+            if not await cur.fetchone():
+                break
+            code = _generate_promo_code()
+
+        new_claimed_base = claimed_base + PROMO_GOAL
+
+        await db.execute(
+            "INSERT INTO promocodes (code) VALUES (?)",
+            (code,)
+        )
+        await db.execute(
+            "UPDATE users SET promo_claimed_base = ? WHERE user_id = ?",
+            (new_claimed_base, user_id)
+        )
+        await db.commit()
+
+        logging.info(f"🎟 Промокод видано: user_id={user_id} code={code}")
+
+        return {
+            "success": True,
+            "code": code,
+            "claimed_from_net": PROMO_GOAL,
+            "remaining_net": available_net - PROMO_GOAL,
+        }
+
+
+

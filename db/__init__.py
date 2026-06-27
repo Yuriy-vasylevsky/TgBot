@@ -37,6 +37,14 @@ from .wallet import (
     get_daily_game_win, 
     add_daily_game_win, 
     can_receive_prize,
+    get_yesterday_game_win,
+    get_cashback_claimed_base,
+    get_cashback_status, 
+    claim_cashback,
+    claim_promo,
+    get_promo_status,
+    get_promo_claimed_base,
+    _generate_promo_code,
 )
 
 # ==================== USERS ====================

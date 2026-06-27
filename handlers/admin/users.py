@@ -5,7 +5,7 @@ from db import get_all_users_info, search_users, get_issued_checks_for_user, get
 from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win
+from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
@@ -26,19 +26,23 @@ class AdminSearch(StatesGroup):
     waiting_for_query = State()
 
 
+KYIV = timezone(timedelta(hours=3))
+
+
 def parse_dt_safe(dt_str: str | None) -> datetime:
     if not dt_str:
         return datetime.min.replace(tzinfo=timezone.utc)
     try:
         dt = datetime.fromisoformat(dt_str)
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt
+            # Наївні рядки в цій БД (з SQLite DATETIME('now', '+3 hours'))
+            # вже зміщені на київський час, а не UTC — тож і тег ставимо київський,
+            # інакше порівняння з tz-aware рядками (з save_user) буде хибним.
+            dt = dt.replace(tzinfo=KYIV)
+        return dt.astimezone(timezone.utc)
     except Exception:
         return datetime.min.replace(tzinfo=timezone.utc)
 
-
-KYIV = timezone(timedelta(hours=3))
 
 def format_time_kyiv(dt_str: str | None) -> str:
     if not dt_str:
@@ -245,7 +249,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         user_id = int(parts[1])
         from_page = int(parts[2])
         show_all_actions = len(parts) > 3 and parts[3] == "1"
-        show_yesterday = len(parts) > 4 and parts[4] == "1"
+        show_checks = len(parts) > 4 and parts[4] == "1"
     except:
         await callback.answer("Помилка обробки", show_alert=True)
         return
@@ -266,6 +270,23 @@ async def show_user_detail(callback: types.CallbackQuery):
     daily_net = await get_daily_net(user_id)
     yesterday_net = await get_yesterday_net(user_id)
     daily_game_win = await get_daily_game_win(user_id) 
+    yesterday_game_win = await get_yesterday_game_win(user_id)
+
+    cashback_status = await get_cashback_status(user_id)
+
+
+    cb = cashback_status
+    cashback_text = (
+        f"💸 <b>Кешбек : <b>{cb['claimed_base']/10}</b></b>\n"
+        # f"   Використано: <b>{cb['claimed_base']}</b> грн\n"
+        # f"   Доступно: <b>{cb['available_net']}</b> грн\n"
+    )
+
+    if cb['can_claim']:
+        cashback_text += f"   🎁 Можна забрати: <b>{cb['claim_amount']}</b> грн ✅"
+    else:
+        cashback_text += f"   📊 Прогрес: <b>{cb['progress_in_tier']}</b> / {1000} грн"
+
 
     # ==================== ДІЇ ====================
     actions = user.get("last_actions", "")
@@ -318,9 +339,13 @@ async def show_user_detail(callback: types.CallbackQuery):
     today_sum = sum(ch["price"] for ch in today_checks)
     yesterday_sum = sum(ch["price"] for ch in yesterday_checks)
    
-    checks_block = f"🎁 <b>Чеки сьогодні ({today_sum} грн):</b>\n{format_checks(today_checks)}\n"
-    if show_yesterday:
-        checks_block += f"\n🗓 <b>Чеки вчора ({yesterday_sum} грн):</b>\n{format_checks(yesterday_checks)}\n"
+    if show_checks:
+        checks_block = (
+            f"🎁 <b>Чеки сьогодні ({today_sum} грн):</b>\n{format_checks(today_checks)}\n\n"
+            f"🗓 <b>Чеки вчора ({yesterday_sum} грн):</b>\n{format_checks(yesterday_checks)}\n"
+        )
+    else:
+        checks_block = ""
 
     # ==================== ТЕКСТ ====================
     text = (
@@ -332,12 +357,14 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"💰 Баланс: <b>{balance}</b> грн\n"
         f"📊 Програш сьогодні: <b>{daily_net} грн</b>\n"
         f"📊 Програш <b>вчора</b>: <b>{yesterday_net} грн</b>\n"
-        f"🎉 Виграш в іграх сьогодні: <b>{daily_game_win} грн</b>\n" 
+        f"🎉 Виграш сьогодні: <b>{daily_game_win} грн</b>\n" 
+        f"🎉 Виграш <b>вчора</b>: <b>{yesterday_game_win} грн</b>\n"   
+        # f"💸 Кеш {cashback_status} грн\n"  
+        f"{cashback_text}\n\n" 
         f"{cooldown_text}\n\n"
         f"{checks_block}\n"
         f"{actions_block}"
     )
-
     # ==================== КНОПКИ ====================
     kb = InlineKeyboardBuilder()
 
@@ -346,15 +373,15 @@ async def show_user_detail(callback: types.CallbackQuery):
     kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}") 
     kb.button(text="➕1 промо", callback_data=f"ask_add_promo:{user_id}:{from_page}")
 
-    if show_yesterday:
-        kb.button(text="▲ Сховати вчорашні", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:0")
+    if show_checks:
+        kb.button(text="▲ Сховати чеки", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:0")
     else:
-        kb.button(text="🗓 Чеки вчора", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:1")
+        kb.button(text="🧾 Чеки", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:1")
 
     if show_all_actions:
-        kb.button(text="▲ Сховати дії", callback_data=f"user_detail:{user_id}:{from_page}:0:{1 if show_yesterday else 0}")
+        kb.button(text="▲ Сховати дії", callback_data=f"user_detail:{user_id}:{from_page}:0:{1 if show_checks else 0}")
     else:
-        kb.button(text="▼ Останні дії", callback_data=f"user_detail:{user_id}:{from_page}:1:{1 if show_yesterday else 0}")
+        kb.button(text="▼ Останні дії", callback_data=f"user_detail:{user_id}:{from_page}:1:{1 if show_checks else 0}")
 
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
 

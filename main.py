@@ -145,6 +145,7 @@ dp.include_router(referral_router)
 dp.message.middleware(BanMiddleware())
 dp.callback_query.middleware(BanMiddleware())
 dp.message.middleware(SaveUserMiddleware())
+dp.callback_query.middleware(SaveUserMiddleware())
 
 ADMIN_ID = config.ADMIN_ID
 
