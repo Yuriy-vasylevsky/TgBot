@@ -6,6 +6,12 @@ import asyncio
 
 from handlers.config import ADMIN_ID
 from db import add_money_win, add_daily_game_win
+from db.game_cooldown import (
+    is_game_on_cooldown,
+    get_game_cooldown_remaining,
+    set_game_cooldown,
+    format_cooldown as format_game_cooldown,
+)
 from db.wallet import (
     add_to_balance,
     get_daily_net,
@@ -20,8 +26,8 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # =====================================
 # НАЛАШТУВАННЯ
 # =====================================
-REQUIRED_PLAYERS = 3
-MAX_ROUNDS = 3
+REQUIRED_PLAYERS = 2
+MAX_ROUNDS = 2
 TOTAL_LOOT = 150
 CODE_LENGTH = 2
 TURN_TIMEOUT_SECONDS = 45
@@ -93,7 +99,6 @@ def build_cancel_keyboard() -> InlineKeyboardMarkup:
 
 def build_loot_keyboard(remaining: int, is_last: bool) -> InlineKeyboardMarkup:
     if is_last:
-        # Останній гравець забирає без ризику, але максимум LAST_PLAYER_MAX
         capped = min(remaining, LAST_PLAYER_MAX)
         return InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(
@@ -192,43 +197,44 @@ def new_game_state(msg_id: int) -> dict:
 # ВИДАЧА ВИГРАШІВ ПІД ЧАС ФІНАЛІЗАЦІЇ
 # =====================================
 async def _payout_player(chat_id: int, bot, user_id: int, name: str, taken: int):
-    """Перевіряє ліміти (як у фортуні) і нараховує виграш гравцю окремим повідомленням."""
+    """Перевіряє ліміти і нараховує виграш пропорційно депозиту."""
     if taken <= 0:
         return
 
-    # === Перевірка наявності депозиту (сьогодні + вчора) ===
     today_net = await get_daily_net(user_id)
     yesterday_net = await get_yesterday_net(user_id)
     total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
 
-    if total_net < 200:
+    # Немає депозиту взагалі — нічого не нараховуємо, кулдаун НЕ ставимо
+    if total_net <= 0:
         await bot.send_message(
             chat_id=chat_id,
             text=(
                 f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
-                f"❌ Не було депозиту! Виграш не нараховано❗\n"
-                # f"❗Потрібно мати мінімум 200 грн депозиту за останні 48 годин."
+                f"❌ Не було депозиту! Виграш не нараховано❗"
             ),
             parse_mode="HTML"
         )
         return
 
-    # === Розрахунок доступного ліміту виграшу (як у can_receive_prize) ===
     daily_game_win = await get_daily_game_win(user_id)
     yesterday_game_win = await get_yesterday_game_win(user_id)
 
     already_won = _positive_or_zero(daily_game_win) + _positive_or_zero(yesterday_game_win)
+    # Ліміт пропорційний депозиту: 80 грн на кожні 200 грн депу
+    # Приклад: деп 100 грн → ліміт 40 грн; деп 300 грн → ліміт 120 грн
     max_allowed_win = int(total_net * 80 / 200)
     available_limit = max(max_allowed_win - already_won, 0)
 
-    # Скільки реально можна нарахувати на баланс з цього виграшу
     payout_amount = min(taken, available_limit)
 
     if payout_amount > 0:
         await add_to_balance(user_id, payout_amount)
         await add_daily_game_win(user_id, payout_amount)
+        # Кулдаун ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
+        await set_game_cooldown(user_id)
 
-    # add_money_win рахуємо повною сумою виграшу (як облік виграного в грі)
+    # Облік повного виграшу в іграх
     await add_money_win(user_id, taken)
 
     if payout_amount >= taken:
@@ -251,11 +257,12 @@ async def _payout_player(chat_id: int, bot, user_id: int, name: str, taken: int)
             parse_mode="HTML"
         )
     else:
+        # Ліміт вичерпано повністю — нічого не нараховано, кулдаун НЕ ставимо
         await bot.send_message(
             chat_id=chat_id,
             text=(
                 f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
-                f"❌ Ліміт виграшів вичерпано.\n"
+                f"❌ Ліміт виграшів вичерпано."
             ),
             parse_mode="HTML"
         )
@@ -442,11 +449,22 @@ async def handle_pograb_message(message: Message):
         if text != game["secret"]:
             return
 
-        # Захист від race condition — якщо одночасно два гравці вгадали
+        # Захист від race condition
         if user_id in game["ranking"]:
             return
 
-        # Правильна відповідь
+        # Перевірка глобального кулдауну участі в іграх
+        if await is_game_on_cooldown(user_id):
+            remaining = await get_game_cooldown_remaining(user_id)
+            cd_text = format_game_cooldown(*remaining) if remaining else "невідомо"
+            cd_msg = await message.answer(
+                f"{user.mention_html()}, ти нещодавно вже вигравав у грі!\n"
+                f"⏳ Зачекай ще <b>{cd_text}</b>",
+                parse_mode="HTML"
+            )
+            game["round_messages"].append(cd_msg.message_id)
+            return
+
         if user_id not in game["participants"]:
             game["participants"][user_id] = {"name": get_display_name(user), "taken": 0}
         game["ranking"].append(user_id)
@@ -485,7 +503,6 @@ async def handle_pograb_message(message: Message):
 
         game.update(phase="looting", current_turn=0)
 
-        # Видаляємо старе статус-повідомлення і надсилаємо нове з фото bank2
         try:
             await message.bot.delete_message(chat_id, game["status_msg_id"])
         except:
@@ -541,7 +558,6 @@ async def pograb_take_money(callback: CallbackQuery):
     risk = RISK_CHANCES.get(amount, 0)
 
     if is_last:
-        # Останній гравець — без ризику, але максимум LAST_PLAYER_MAX
         final_amount = amount
         await callback.message.answer(
             f"💰 <b>{name}</b> спокійно забирає <b>{final_amount} грн</b>",

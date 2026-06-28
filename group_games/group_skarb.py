@@ -8,6 +8,12 @@ import time
 
 from handlers.config import ADMIN_ID
 from db import add_money_win, add_daily_game_win
+from db.game_cooldown import (
+    is_game_on_cooldown,
+    get_game_cooldown_remaining,
+    set_game_cooldown,
+    format_cooldown as format_game_cooldown,
+)
 from db.wallet import (
     add_to_balance,
     get_daily_net,
@@ -22,7 +28,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 GRID_SIZE = 7
 REQUIRED_PLAYERS = 4
 PRIZE_AMOUNT = 50
-CLICK_COOLDOWN_SEC = 6        # мінімум між кліками одного гравця
+CLICK_COOLDOWN_SEC = 1        # мінімум між кліками одного гравця
 GLOBAL_CLICK_COOLDOWN_SEC = 1 # мінімум між будь-якими кліками (анти-флуд)
 WIN_COOLDOWN_HOURS = 0
 AUTO_DELETE_AFTER_WIN_SEC = 6000
@@ -31,8 +37,8 @@ CLOSED_CELL = "🃏"
 WIN_CARD = "A♥️"
 BOMB_CELL = "💣"
 
-NUM_ARROWS = 7
-NUM_BOMBS = 5
+NUM_ARROWS = 12
+NUM_BOMBS = 0
 
 LIFE_EMOJI = "❤️"
 INITIAL_LIVES = 1
@@ -237,7 +243,8 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     yesterday_net = await get_yesterday_net(user_id)
     total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
 
-    if total_net < 200:
+    if total_net <= 0:
+        # Немає депозиту — гроші не нараховуємо, кулдаун НЕ ставимо
         await bot.send_message(
             chat_id=chat_id,
             text=(
@@ -252,6 +259,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     yesterday_game_win = await get_yesterday_game_win(user_id)
 
     already_won = _positive_or_zero(daily_game_win) + _positive_or_zero(yesterday_game_win)
+    # Ліміт пропорційний депозиту: 80 грн на кожні 200 грн депу
     max_allowed_win = int(total_net * 80 / 200)
     available_limit = max(max_allowed_win - already_won, 0)
 
@@ -260,6 +268,8 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     if payout_amount > 0:
         await add_to_balance(user_id, payout_amount)
         await add_daily_game_win(user_id, payout_amount)
+        # Кулдаун ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
+        await set_game_cooldown(user_id)
 
     await add_money_win(user_id, taken)
 
@@ -283,6 +293,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
             parse_mode="HTML"
         )
     else:
+        # Ліміт вичерпано повністю — нічого не нараховано, кулдаун НЕ ставимо
         await bot.send_message(
             chat_id=chat_id,
             text=(
@@ -434,6 +445,16 @@ async def skarb_join(callback: CallbackQuery):
 
     if user_id in game["participants"]:
         await callback.answer("Ти вже приєднався!", show_alert=True)
+        return
+
+    # Перевірка глобального кулдауну участі в іграх
+    if await is_game_on_cooldown(user_id):
+        remaining = await get_game_cooldown_remaining(user_id)
+        cd_text = format_game_cooldown(*remaining) if remaining else "невідомо"
+        await callback.answer(
+            f"⏳ Не так швидко! Зачекай ще {cd_text}",
+            show_alert=True
+        )
         return
 
     if len(game["participants"]) >= REQUIRED_PLAYERS:

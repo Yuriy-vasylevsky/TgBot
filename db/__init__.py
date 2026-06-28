@@ -9,6 +9,23 @@ from .core import (
     create_used_monobank_txs_table,
 )
 
+
+
+
+# ==================== WALLET ====================
+
+ 
+
+from .game_cooldown import (
+is_game_on_cooldown,
+get_game_cooldown_remaining,
+set_game_cooldown,
+
+
+)
+
+
+
 # ==================== WALLET ====================
 from .wallet import (
     add_to_balance,
