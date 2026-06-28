@@ -20,14 +20,14 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # =====================================
 # НАЛАШТУВАННЯ
 # =====================================
-REQUIRED_PLAYERS = 2
+REQUIRED_PLAYERS = 3
 MAX_ROUNDS = 3
 TOTAL_LOOT = 150
 CODE_LENGTH = 2
 TURN_TIMEOUT_SECONDS = 45
 
 # Максимальна сума, яку може забрати останній гравець (без ризику)
-LAST_PLAYER_MAX = 100
+LAST_PLAYER_MAX = 80
 
 IMAGE_GUESSING = "images/bank1.png"
 IMAGE_LOOTING  = "images/bank2.png"
@@ -39,7 +39,7 @@ IMAGE_ESCAPED  = "images/escaped.png"
 LOOT_AMOUNTS = [30, 50, 80, 120, 150]
 
 # Шанс спіймання у % для суми; 0 = безпечно
-RISK_CHANCES = {80: 50, 120: 65, 150: 80}
+RISK_CHANCES = {80: 50, 120: 65, 150: 75}
 
 
 def _positive_or_zero(value: int) -> int:
