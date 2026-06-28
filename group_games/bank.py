@@ -5,6 +5,14 @@ import random
 import asyncio
 
 from handlers.config import ADMIN_ID
+from db import add_money_win, add_daily_game_win
+from db.wallet import (
+    add_to_balance,
+    get_daily_net,
+    get_yesterday_net,
+    get_daily_game_win,
+    get_yesterday_game_win,
+)
 
 router = Router(name="group_pograb")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
@@ -12,20 +20,31 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # =====================================
 # НАЛАШТУВАННЯ
 # =====================================
-REQUIRED_PLAYERS = 4
-MAX_ROUNDS = 4
-TOTAL_LOOT = 200
+REQUIRED_PLAYERS = 2
+MAX_ROUNDS = 3
+TOTAL_LOOT = 150
 CODE_LENGTH = 2
-TURN_TIMEOUT_SECONDS = 40
+TURN_TIMEOUT_SECONDS = 45
 
-IMAGE_GUESSING = "bank1.png"
-IMAGE_LOOTING  = "bank2.png"
-IMAGE_FINAL    = "bank3.png"
-IMAGE_CAUGHT   = "caught.png"
-IMAGE_ESCAPED  = "escaped.png"
+# Максимальна сума, яку може забрати останній гравець (без ризику)
+LAST_PLAYER_MAX = 100
+
+IMAGE_GUESSING = "images/bank1.png"
+IMAGE_LOOTING  = "images/bank2.png"
+IMAGE_FINAL    = "images/bank3.png"
+IMAGE_CAUGHT   = "images/caught.png"
+IMAGE_ESCAPED  = "images/escaped.png"
+
+# Доступні суми для забору (в порядку зростання)
+LOOT_AMOUNTS = [30, 50, 80, 120, 150]
 
 # Шанс спіймання у % для суми; 0 = безпечно
-RISK_CHANCES = {100: 50, 150: 60, 200: 70}
+RISK_CHANCES = {80: 50, 120: 65, 150: 80}
+
+
+def _positive_or_zero(value: int) -> int:
+    return value if value > 0 else 0
+
 
 active_pograb = {}
 
@@ -72,8 +91,18 @@ def build_cancel_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def build_loot_keyboard(remaining: int) -> InlineKeyboardMarkup:
-    amounts = [a for a in [25, 50, 100, 150] if a < remaining]
+def build_loot_keyboard(remaining: int, is_last: bool) -> InlineKeyboardMarkup:
+    if is_last:
+        # Останній гравець забирає без ризику, але максимум LAST_PLAYER_MAX
+        capped = min(remaining, LAST_PLAYER_MAX)
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(
+                text=f"💰 ЗАБРАТИ {capped} грн",
+                callback_data=f"pograb_take_{capped}"
+            )],
+        ])
+
+    amounts = [a for a in LOOT_AMOUNTS if a < remaining]
     rows, row = [], []
     for a in amounts:
         row.append(InlineKeyboardButton(text=f"{a} грн", callback_data=f"pograb_take_{a}"))
@@ -98,9 +127,9 @@ def status_text(game: dict) -> str:
             "🔹 Гравці на швидкість вгадують 2-значний код сейфа\n"
             "🔹 Хто вгадав — потрапляє в чергу на пограбування\n"
             f"🔹 У сейфі {TOTAL_LOOT} грн, кожен бере скільки хоче по черзі\n"
-            "🔹 Кнопки 100, 150, 200 грн — ризиковані (шанс спіймання 50–70%)\n"
-            "🔹 25 та 50 грн — безпечні\n"
-            "🔹 Останній гравець забирає залишок без ризику\n"
+            "🔹 Кнопки 80, 120, 150 грн — ризиковані (шанс спіймання 50–80%)\n"
+            "🔹 30 та 50 грн — безпечні\n"
+            f"🔹 Останній гравець забирає залишок без ризику (максимум {LAST_PLAYER_MAX} грн)\n"
             f"🔹 Таймер на хід: {TURN_TIMEOUT_SECONDS} сек"
         )
 
@@ -159,8 +188,81 @@ def new_game_state(msg_id: int) -> dict:
     }
 
 
+# =====================================
+# ВИДАЧА ВИГРАШІВ ПІД ЧАС ФІНАЛІЗАЦІЇ
+# =====================================
+async def _payout_player(chat_id: int, bot, user_id: int, name: str, taken: int):
+    """Перевіряє ліміти (як у фортуні) і нараховує виграш гравцю окремим повідомленням."""
+    if taken <= 0:
+        return
+
+    # === Перевірка наявності депозиту (сьогодні + вчора) ===
+    today_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+
+    if total_net < 200:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"❌ Не було депозиту! Виграш не нараховано❗\n"
+                # f"❗Потрібно мати мінімум 200 грн депозиту за останні 48 годин."
+            ),
+            parse_mode="HTML"
+        )
+        return
+
+    # === Розрахунок доступного ліміту виграшу (як у can_receive_prize) ===
+    daily_game_win = await get_daily_game_win(user_id)
+    yesterday_game_win = await get_yesterday_game_win(user_id)
+
+    already_won = _positive_or_zero(daily_game_win) + _positive_or_zero(yesterday_game_win)
+    max_allowed_win = int(total_net * 80 / 200)
+    available_limit = max(max_allowed_win - already_won, 0)
+
+    # Скільки реально можна нарахувати на баланс з цього виграшу
+    payout_amount = min(taken, available_limit)
+
+    if payout_amount > 0:
+        await add_to_balance(user_id, payout_amount)
+        await add_daily_game_win(user_id, payout_amount)
+
+    # add_money_win рахуємо повною сумою виграшу (як облік виграного в грі)
+    await add_money_win(user_id, taken)
+
+    if payout_amount >= taken:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"✅ Нараховано на баланс 💸"
+            ),
+            parse_mode="HTML"
+        )
+    elif payout_amount > 0:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"⚠️ Ліміт виграшів вичерпано.\n"
+                f"Вам зараховано <b>{payout_amount} грн</b> на баланс."
+            ),
+            parse_mode="HTML"
+        )
+    else:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"❌ Ліміт виграшів вичерпано.\n"
+            ),
+            parse_mode="HTML"
+        )
+
+
 async def finish_game(chat_id: int, bot, game: dict):
-    """Видаляє статус і надсилає фінальне фото."""
+    """Видаляє статус, надсилає фінальне фото і окремо розраховує виграш кожного гравця."""
     try:
         await bot.delete_message(chat_id, game["status_msg_id"])
     except:
@@ -171,6 +273,11 @@ async def finish_game(chat_id: int, bot, game: dict):
         caption=final_text(game),
         parse_mode="HTML"
     )
+
+    for uid in game["ranking"]:
+        info = game["participants"][uid]
+        await _payout_player(chat_id, bot, uid, info["name"], info.get("taken", 0))
+
     active_pograb.pop(chat_id, None)
 
 
@@ -181,10 +288,11 @@ async def advance_turn(chat_id: int, bot, game: dict):
         await finish_game(chat_id, bot, game)
         return
 
+    is_last_turn = game["current_turn"] == len(game["ranking"]) - 1
     new_status = await bot.send_message(
         chat_id=chat_id,
         text=status_text(game),
-        reply_markup=build_loot_keyboard(game["remaining_loot"]),
+        reply_markup=build_loot_keyboard(game["remaining_loot"], is_last_turn),
         parse_mode="HTML"
     )
     try:
@@ -383,10 +491,11 @@ async def handle_pograb_message(message: Message):
         except:
             pass
 
+        is_last_turn = game["current_turn"] == len(game["ranking"]) - 1
         new_status = await message.answer_photo(
             photo=FSInputFile(IMAGE_LOOTING),
             caption=status_text(game),
-            reply_markup=build_loot_keyboard(game["remaining_loot"]),
+            reply_markup=build_loot_keyboard(game["remaining_loot"], is_last_turn),
             parse_mode="HTML"
         )
         game["status_msg_id"] = new_status.message_id
@@ -415,25 +524,27 @@ async def pograb_take_money(callback: CallbackQuery):
     if user_id != game["ranking"][game["current_turn"]]:
         return await callback.answer("Не твоя черга!", show_alert=True)
 
+    is_last = game["current_turn"] == len(game["ranking"]) - 1
+
     try:
         amount = int(callback.data.split("_take_")[1])
     except:
         return await callback.answer("Помилка", show_alert=True)
 
-    if amount < 1 or amount > game["remaining_loot"]:
+    max_allowed = min(game["remaining_loot"], LAST_PLAYER_MAX) if is_last else game["remaining_loot"]
+    if amount < 1 or amount > max_allowed:
         return await callback.answer("Невірна сума!", show_alert=True)
 
     await callback.answer("Обробляємо...")
 
     name = game["participants"][user_id]["name"]
-    is_last = game["current_turn"] == len(game["ranking"]) - 1
     risk = RISK_CHANCES.get(amount, 0)
 
     if is_last:
-        # Останній гравець — без ризику, забирає залишок
-        final_amount = game["remaining_loot"]
+        # Останній гравець — без ризику, але максимум LAST_PLAYER_MAX
+        final_amount = amount
         await callback.message.answer(
-            f"💰 <b>{name}</b> спокійно забирає залишок — <b>{final_amount} грн</b>",
+            f"💰 <b>{name}</b> спокійно забирає <b>{final_amount} грн</b>",
             parse_mode="HTML"
         )
     elif risk > 0:
