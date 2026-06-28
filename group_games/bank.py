@@ -26,8 +26,8 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # =====================================
 # НАЛАШТУВАННЯ
 # =====================================
-REQUIRED_PLAYERS = 2
-MAX_ROUNDS = 2
+REQUIRED_PLAYERS = 3
+MAX_ROUNDS = 3
 TOTAL_LOOT = 150
 CODE_LENGTH = 2
 TURN_TIMEOUT_SECONDS = 45
