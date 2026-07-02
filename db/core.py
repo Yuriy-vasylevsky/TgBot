@@ -131,8 +131,7 @@ async def create_used_monobank_txs_table():
         await db.commit()
 
 
-
-
+from db.winlog import ensure_win_log_table 
 
 async def init_db():
     print("🔧 init_db() запущено...")
@@ -142,6 +141,7 @@ async def init_db():
             await create_pending_payments_table()
             await create_used_monobank_txs_table()
 
+            await ensure_win_log_table() 
             # Інші таблиці
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",

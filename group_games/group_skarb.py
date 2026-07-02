@@ -271,6 +271,9 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
         # Кулдаун ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
         await set_game_cooldown(user_id)
 
+        from db.winlog import log_win
+        await log_win(user_id, None, name, "group", "Скарб (7×7)", payout_amount)
+
     await add_money_win(user_id, taken)
 
     if payout_amount >= taken:

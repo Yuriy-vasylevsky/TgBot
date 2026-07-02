@@ -106,6 +106,13 @@ async def open_boxes(cb: CallbackQuery):
             await add_game_win(user_id)
             await add_daily_game_win(user_id, 30)
 
+            from db.winlog import log_win
+
+            await log_win(
+                user_id, cb.from_user.username, cb.from_user.full_name,
+                "game", "Один з трьох", 30
+            )
+
             await result_msg.edit_text(
                 f"{header}{boxes_str}\n\n"
                 f"<b>🎉 Вітаю!</b>\n"

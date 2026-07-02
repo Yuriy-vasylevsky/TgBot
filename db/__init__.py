@@ -25,6 +25,14 @@ set_game_cooldown,
 )
 
 
+from .winlog import (
+log_win,
+_target_date,
+get_win_log_page,
+get_top_winners,
+
+)
+
 
 # ==================== WALLET ====================
 from .wallet import (

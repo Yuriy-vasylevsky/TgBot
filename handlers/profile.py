@@ -545,7 +545,8 @@ async def cb_claim_cashback(callback: types.CallbackQuery):
     new_balance = result.get("new_balance", 0)
 
     await callback.answer(f"✅ Кешбек {amount} грн успішно нараховано!", show_alert=True)
-
+    from db.winlog import log_win
+    await log_win(user_id, username, full_name, "cashback", "Кешбек 10%", amount)
     # Сповіщення адміністратору
     try:
         admin_text = (

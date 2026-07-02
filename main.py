@@ -68,7 +68,7 @@ from handlers.admin.router import router as admin_router
 from handlers.profile import router as profile_router
 from handlers.referral import router as referral_router
 # from handlers.ma import router as matic_gis_router
-
+from handlers.admin_winlog import router as winlog_router
 
 from games import (
     slot_router,
@@ -140,6 +140,8 @@ dp.include_router(wallet_router)
 dp.include_router(simple_win_router)
 dp.include_router(referral_router)
 # dp.include_router(matic_gis_router)
+dp.include_router(winlog_router)
+
 
 # Мідлвари (застосовуємо один раз)
 dp.message.middleware(BanMiddleware())
@@ -148,6 +150,10 @@ dp.message.middleware(SaveUserMiddleware())
 dp.callback_query.middleware(SaveUserMiddleware())
 
 ADMIN_ID = config.ADMIN_ID
+
+
+
+
 
 # ==========================
 # API ДЛЯ ВЕБ-АПУ СЕЙФА (порт 3000)

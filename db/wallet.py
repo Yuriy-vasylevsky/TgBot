@@ -81,6 +81,51 @@ CASHBACK_GOAL = 1000
 #             logging.info(f"✅ Reset daily_net + cashback для user {user_id} (новий день)")
  
  
+# async def ensure_daily_reset(user_id: int):
+#     today_str = datetime.now(KYIV_TZ).date().isoformat()
+#     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         row = await cursor.fetchone()
+
+#         if not row:
+#             await db.execute(
+#                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, cashback_claimed_base) "
+#                 "VALUES (?, 0, 0, ?, 0)",
+#                 (user_id, today_str)
+#             )
+#             await db.commit()
+#             return
+
+#         daily_net, yesterday_net, last_net_date = row
+
+#         if last_net_date == today_str:
+#             return  # вже актуально
+
+#         if last_net_date == yesterday_str:
+#             # Вчора була активність — коректно переносимо
+#             new_yesterday = daily_net or 0
+#         else:
+#             # Пропущено більше одного дня — вчора не було активності
+#             new_yesterday = 0
+
+#         await db.execute("""
+#             UPDATE users 
+#             SET 
+#                 yesterday_net = ?,
+#                 daily_net = 0,
+#                 cashback_claimed_base = 0,
+#                 last_net_date = ?
+#             WHERE user_id = ?
+#         """, (new_yesterday, today_str, user_id))
+#         await db.commit()
+#         logging.info(f"✅ Reset daily_net + cashback для user {user_id} | yesterday_net={new_yesterday}")
+
+
 async def ensure_daily_reset(user_id: int):
     today_str = datetime.now(KYIV_TZ).date().isoformat()
     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
@@ -94,8 +139,9 @@ async def ensure_daily_reset(user_id: int):
 
         if not row:
             await db.execute(
-                "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, cashback_claimed_base) "
-                "VALUES (?, 0, 0, ?, 0)",
+                "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, "
+                "cashback_claimed_base, promo_claimed_base) "
+                "VALUES (?, 0, 0, ?, 0, 0)",
                 (user_id, today_str)
             )
             await db.commit()
@@ -119,12 +165,12 @@ async def ensure_daily_reset(user_id: int):
                 yesterday_net = ?,
                 daily_net = 0,
                 cashback_claimed_base = 0,
+                promo_claimed_base = 0,
                 last_net_date = ?
             WHERE user_id = ?
         """, (new_yesterday, today_str, user_id))
         await db.commit()
-        logging.info(f"✅ Reset daily_net + cashback для user {user_id} | yesterday_net={new_yesterday}")
-
+        logging.info(f"✅ Reset daily_net + cashback + promo для user {user_id} | yesterday_net={new_yesterday}")
 
 
 # ==================== КЕШБЕК: ДОПОМІЖНІ ФУНКЦІЇ ====================

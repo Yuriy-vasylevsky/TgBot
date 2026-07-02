@@ -261,6 +261,18 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                 await add_to_balance(message.from_user.id, 30)
                 await add_game_win(message.from_user.id)
                 await add_daily_game_win(message.from_user.id, 30)
+
+
+
+                from db.winlog import log_win
+                await log_win(
+                    message.from_user.id, message.from_user.username, message.from_user.full_name,
+                    "game", "Blackjack", 30
+                )
+
+
+
+
                 final_text = "🎉 Вітаю! +30 грн нараховано на баланс!"
                 admin_status = " | +30 грн на баланс"
             else:

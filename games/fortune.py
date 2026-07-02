@@ -424,6 +424,13 @@ async def perform_fortune_spin(cb: CallbackQuery):
         await add_daily_game_win(user_id, prize_value)
         payout_text = f"<b>+{prize_value} грн</b> нараховано на баланс 💸"
         admin_status = "на баланс"
+
+        from db.winlog import log_win
+        await log_win(
+            user_id, username, full_name,
+            "fortune", f"Колесо фортуни ({prize['title']})", prize_value
+        )
+ 
     else:
         # Ліміт вичерпано — приз йде до депозиту,
         # тому НЕ рахуємо його як виграш у іграх
