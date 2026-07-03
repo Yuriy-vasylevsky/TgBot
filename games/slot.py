@@ -214,6 +214,15 @@ async def slot_spin(message: types.Message, state: FSMContext):
                 await add_to_balance(user_id, 30)
                 await add_game_win(user_id)
                 await add_daily_game_win(user_id, 30)
+                from db.winlog import log_win
+
+                await log_win(
+                    message.from_user.id, message.from_user.username, message.from_user.full_name,
+                    "game", "🎰 Слоти", 30
+                )
+
+
+                
                 result_text = "🎉 Вітаю! +30 грн нараховано на баланс!"
                 admin_status = " | +30 грн на баланс"
             else:

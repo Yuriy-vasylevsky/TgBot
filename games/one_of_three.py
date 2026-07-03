@@ -110,7 +110,7 @@ async def open_boxes(cb: CallbackQuery):
 
             await log_win(
                 user_id, cb.from_user.username, cb.from_user.full_name,
-                "game", "Один з трьох", 30
+                "game", "🎯 Один з трьох", 30
             )
 
             await result_msg.edit_text(

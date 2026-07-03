@@ -1,12 +1,25 @@
-
-
 from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
 import logging
 import random
+import time
 
 from handlers.config import ADMIN_ID
+from db import add_money_win, add_daily_game_win
+from db.game_cooldown import (
+    is_game_on_cooldown,
+    get_game_cooldown_remaining,
+    set_game_cooldown,
+    format_cooldown as format_game_cooldown,
+)
+from db.wallet import (
+    add_to_balance,
+    get_daily_net,
+    get_yesterday_net,
+    get_daily_game_win,
+    get_yesterday_game_win,
+)
 
 router = Router(name="group_numbers")
 
@@ -14,6 +27,115 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
 # chat_id → {"secret": str, "revealed": list[str], "messages": list[int]}
 active_numbers_games = {}
+
+PRIZE_AMOUNT = 50
+WIN_COOLDOWN_HOURS = 1
+
+# user_id → час, до якого діє кулдаун "вже вигравав"
+winners_cooldown = {}
+
+
+# =====================================
+# ДОПОМІЖНІ (кулдауни/виплата — як у wordle)
+# =====================================
+
+def _positive_or_zero(value: int) -> int:
+    return value if value > 0 else 0
+
+
+def is_on_cooldown(user_id: int) -> tuple[bool, int]:
+    if user_id in winners_cooldown:
+        remaining = winners_cooldown[user_id] - time.time()
+        if remaining > 0:
+            return True, int(remaining)
+        del winners_cooldown[user_id]
+    return False, 0
+
+
+def format_cooldown(remaining_seconds: int) -> str:
+    hours = remaining_seconds // 3600
+    minutes = (remaining_seconds % 3600) // 60
+    seconds = remaining_seconds % 60
+    parts = []
+    if hours: parts.append(f"{hours}г")
+    if minutes: parts.append(f"{minutes}хв")
+    if seconds and not hours and not minutes: parts.append(f"{seconds}с")
+    return " ".join(parts) or "менше хвилини"
+
+
+async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int) -> int:
+    """Повертає суму, яку реально нараховано на баланс (0, якщо нічого не нараховано)."""
+    if taken <= 0:
+        return 0
+
+    today_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+
+    if total_net <= 0:
+        # Немає депозиту — гроші не нараховуємо, кулдаун гри НЕ ставимо
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"❌ Не було депозиту! Виграш не нараховано❗"
+            ),
+            parse_mode="HTML"
+        )
+        return 0
+
+    daily_game_win = await get_daily_game_win(user_id)
+    yesterday_game_win = await get_yesterday_game_win(user_id)
+
+    already_won = _positive_or_zero(daily_game_win) + _positive_or_zero(yesterday_game_win)
+    # Ліміт пропорційний депозиту: 80 грн на кожні 200 грн депу
+    max_allowed_win = int(total_net * 80 / 200)
+    available_limit = max(max_allowed_win - already_won, 0)
+
+    payout_amount = min(taken, available_limit)
+
+    if payout_amount > 0:
+        await add_to_balance(user_id, payout_amount)
+        await add_daily_game_win(user_id, payout_amount)
+        # Кулдаун гри ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
+        await set_game_cooldown(user_id)
+
+        from db.winlog import log_win
+        await log_win(user_id, None, name, "group", "Secret Code", payout_amount)
+
+    await add_money_win(user_id, taken)
+
+    if payout_amount >= taken:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"✅ Нараховано на баланс 💸"
+            ),
+            parse_mode="HTML"
+        )
+    elif payout_amount > 0:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"⚠️ Ліміт виграшів вичерпано.\n"
+                f"Вам зараховано <b>{payout_amount} грн</b> на баланс."
+            ),
+            parse_mode="HTML"
+        )
+    else:
+        # Ліміт вичерпано повністю — нічого не нараховано, кулдаун гри НЕ ставимо
+        await bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
+                f"❌ Ліміт виграшів вичерпано."
+            ),
+            parse_mode="HTML"
+        )
+
+    return payout_amount
 
 
 @router.message(Command("numbers"))
@@ -43,6 +165,7 @@ async def start_numbers(message: Message):
         "🟩 — цифра на правильному місці\n"
         "🟨 — цифра є, але не там\n"
         "⬛ — такої цифри немає\n\n"
+        f"<b>Приз — {PRIZE_AMOUNT} грн!</b>\n"
         "<b>Перший, хто вгадає — переможець!</b> 🏆\n"
         "Після перемоги чат буде очищено (залишиться тільки старт + перемога).",
         parse_mode="HTML"
@@ -89,21 +212,40 @@ async def handle_numbers(message: Message):
     if chat_id not in active_numbers_games:
         return
 
+    if len(text) != 5 or not text.isdigit():
+        return  # ігноруємо все, що не схоже на спробу — не смітимо в чат
+
     game = active_numbers_games[chat_id]
     secret = game["secret"]
     revealed = game["revealed"]
     messages = game["messages"]
 
-    # Зберігаємо повідомлення гравця
-    messages.append(message.message_id)
-
-    if len(text) != 5 or not text.isdigit():
-        err_msg = await message.answer(
-            f"❌ {user.mention_html()}, потрібно **рівно 5 цифр** (00000–99999)",
+    # --- Кулдаун "вже вигравав" (1 година після перемоги) ---
+    on_cd, rem = is_on_cooldown(user.id)
+    if on_cd:
+        cd_msg = await message.answer(
+            f"⏳ {user.mention_html()}, ти вже вигравав!\n"
+            f"Наступна гра через {format_cooldown(rem)}",
             parse_mode="HTML"
         )
-        messages.append(err_msg.message_id)
+        messages.append(message.message_id)
+        messages.append(cd_msg.message_id)
         return
+
+    # --- Загальний ігровий кулдаун (спільний для всіх ігор) ---
+    if await is_game_on_cooldown(user.id):
+        remaining = await get_game_cooldown_remaining(user.id)
+        cd_text = format_game_cooldown(*remaining) if remaining else "невідомо"
+        cd_msg = await message.answer(
+            f"⏳ {user.mention_html()}, не так швидко! Зачекай ще {cd_text}",
+            parse_mode="HTML"
+        )
+        messages.append(message.message_id)
+        messages.append(cd_msg.message_id)
+        return
+
+    # Зберігаємо повідомлення гравця
+    messages.append(message.message_id)
 
     feedback = get_feedback(text, secret)
 
@@ -123,6 +265,8 @@ async def handle_numbers(message: Message):
 
     # Перемога
     if text == secret:
+        name = f"@{user.username}" if user.username else user.full_name
+
         win_msg = await message.answer(
             f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
             f"{user.mention_html()} вгадав число!\n"
@@ -131,6 +275,13 @@ async def handle_numbers(message: Message):
             parse_mode="HTML"
         )
         messages.append(win_msg.message_id)
+
+        # Нарахування призу з перевіркою депозиту та ліміту виграшів
+        payout_amount = await _payout_winner(chat_id, message.bot, user.id, name, PRIZE_AMOUNT)
+
+        # Кулдаун на годину ставимо ТІЛЬКИ якщо гроші реально нарахувались
+        if payout_amount > 0:
+            winners_cooldown[user.id] = time.time() + WIN_COOLDOWN_HOURS * 3600
 
         # Захищені повідомлення: стартове + перемога
         protected = [messages[0], win_msg.message_id]
@@ -143,9 +294,6 @@ async def handle_numbers(message: Message):
                 await message.bot.delete_message(chat_id=chat_id, message_id=msg_id)
             except:
                 pass  # вже видалено / немає прав / бот заблокований тощо
-
-        # Оновлюємо список (залишаємо тільки захищені)
-        active_numbers_games[chat_id]["messages"] = protected
 
         # Завершуємо гру
         del active_numbers_games[chat_id]

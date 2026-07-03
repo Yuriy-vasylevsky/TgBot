@@ -235,7 +235,7 @@ async def _payout_player(chat_id: int, bot, user_id: int, name: str, taken: int)
         await set_game_cooldown(user_id)
 
         from db.winlog import log_win
-        await log_win(user_id, None, name, "group", "Пограб", payout_amount)
+        await log_win(user_id, None, name, "group", "💰 Банк", payout_amount)
 
     # Облік повного виграшу в іграх
     await add_money_win(user_id, taken)

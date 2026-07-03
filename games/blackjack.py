@@ -267,7 +267,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
                 from db.winlog import log_win
                 await log_win(
                     message.from_user.id, message.from_user.username, message.from_user.full_name,
-                    "game", "Blackjack", 30
+                    "game", "🃏 Blackjack", 30
                 )
 
 
