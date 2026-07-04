@@ -286,7 +286,7 @@ PRIZES = [
     {"title": "500 грн", "value": 500, "emoji": "🏆"},
 ]
 
-WEIGHTS = [40, 32, 20, 8, 0]
+WEIGHTS = [44, 32, 20, 4, 0]
 
 
 def _positive_or_zero(value: int) -> int:
