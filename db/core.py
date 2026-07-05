@@ -72,6 +72,7 @@ async def ensure_users_table_and_columns():
             ("last_game_win_date", "ALTER TABLE users ADD COLUMN last_game_win_date TEXT"),
             ("game_cooldown_until", "ALTER TABLE users ADD COLUMN game_cooldown_until TEXT"),
             ("promo_cooldown_until", "ALTER TABLE users ADD COLUMN promo_cooldown_until TEXT"),
+            ("total_losses_all_time", "ALTER TABLE users ADD COLUMN total_losses_all_time INTEGER DEFAULT 0"),
 
             
         ]:

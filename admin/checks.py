@@ -882,7 +882,7 @@ from db import get_balance, add_to_balance, log_check_issued, delete_issued_chec
 from db import get_issued_checks_for_user
 from handlers.menu import checks_menu
 from handlers.casino_api import create_invoice, create_matic_checks, close_invoice, check_invoice, add_to_invoice
-from handlers.admin.bans import is_banned
+from admin.bans import is_banned
 
 router = Router(name="admin_checks")
 

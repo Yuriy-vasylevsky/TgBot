@@ -64,7 +64,7 @@ from group_games.bank import router as bank_router
 
 from handlers.stats import router as stats_router
 from handlers.general import router as general_router
-from handlers.admin.router import router as admin_router
+from admin.router import router as admin_router
 from handlers.profile import router as profile_router
 from handlers.referral import router as referral_router
 # from handlers.ma import router as matic_gis_router

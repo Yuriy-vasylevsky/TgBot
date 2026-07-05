@@ -126,6 +126,59 @@ CASHBACK_GOAL = 1000
 #         logging.info(f"✅ Reset daily_net + cashback для user {user_id} | yesterday_net={new_yesterday}")
 
 
+# async def ensure_daily_reset(user_id: int):
+#     today_str = datetime.now(KYIV_TZ).date().isoformat()
+#     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
+
+#     async with aiosqlite.connect(DB_PATH) as db:
+#         cursor = await db.execute(
+#             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
+#             (user_id,)
+#         )
+#         row = await cursor.fetchone()
+
+#         if not row:
+#             await db.execute(
+#                 "INSERT INTO users (user_id, daily_net, yesterday_net, last_net_date, "
+#                 "cashback_claimed_base, promo_claimed_base) "
+#                 "VALUES (?, 0, 0, ?, 0, 0)",
+#                 (user_id, today_str)
+#             )
+#             await db.commit()
+#             return
+
+#         daily_net, yesterday_net, last_net_date = row
+
+#         if last_net_date == today_str:
+#             return  # вже актуально
+
+#         if last_net_date == yesterday_str:
+#             # Вчора була активність — коректно переносимо
+#             new_yesterday = daily_net or 0
+#         else:
+#             # Пропущено більше одного дня — вчора не було активності
+#             new_yesterday = 0
+
+#         await db.execute("""
+#             UPDATE users 
+#             SET 
+#                 yesterday_net = ?,
+#                 daily_net = 0,
+#                 cashback_claimed_base = 0,
+#                 promo_claimed_base = 0,
+#                 last_net_date = ?
+#             WHERE user_id = ?
+#         """, (new_yesterday, today_str, user_id))
+#         await db.commit()
+#         logging.info(f"✅ Reset daily_net + cashback + promo для user {user_id} | yesterday_net={new_yesterday}")
+
+
+
+
+
+
+
+
 async def ensure_daily_reset(user_id: int):
     today_str = datetime.now(KYIV_TZ).date().isoformat()
     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
@@ -159,6 +212,10 @@ async def ensure_daily_reset(user_id: int):
             # Пропущено більше одного дня — вчора не було активності
             new_yesterday = 0
 
+        # Глобальний накопичувальний рахунок: додаємо daily_net дня, що завершився
+        # (і плюсові, і мінусові значення — щодня, без перевірки знаку)
+        closed_day_net = daily_net or 0
+
         await db.execute("""
             UPDATE users 
             SET 
@@ -166,11 +223,21 @@ async def ensure_daily_reset(user_id: int):
                 daily_net = 0,
                 cashback_claimed_base = 0,
                 promo_claimed_base = 0,
-                last_net_date = ?
+                last_net_date = ?,
+                total_losses_all_time = COALESCE(total_losses_all_time, 0) + ?
             WHERE user_id = ?
-        """, (new_yesterday, today_str, user_id))
+        """, (new_yesterday, today_str, closed_day_net, user_id))
         await db.commit()
-        logging.info(f"✅ Reset daily_net + cashback + promo для user {user_id} | yesterday_net={new_yesterday}")
+        logging.info(
+            f"✅ Reset daily_net + cashback + promo для user {user_id} | "
+            f"yesterday_net={new_yesterday} | +{closed_day_net} до total_losses_all_time"
+        )
+
+
+
+
+
+
 
 
 # ==================== КЕШБЕК: ДОПОМІЖНІ ФУНКЦІЇ ====================
@@ -967,3 +1034,18 @@ async def claim_promo(user_id: int) -> dict:
 
 
 
+async def get_total_losses_all_time(user_id: int) -> int:
+    """
+    Глобальний накопичувальний програш/виграш користувача.
+    Кожного дня при переході на новий день до цього значення додається
+    daily_net того дня, що завершився (плюсові й мінусові значення однаково).
+    """
+    await ensure_daily_reset(user_id)   # гарантує, що вчорашній день вже "закритий" і врахований
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(total_losses_all_time, 0) FROM users WHERE user_id = ?",
+            (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else 0

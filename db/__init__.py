@@ -70,6 +70,7 @@ from .wallet import (
     get_promo_status,
     get_promo_claimed_base,
     _generate_promo_code,
+    get_total_losses_all_time,
 )
 
 # ==================== USERS ====================

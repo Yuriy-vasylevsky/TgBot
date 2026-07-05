@@ -5,7 +5,7 @@ from db import get_all_users_info, search_users, get_issued_checks_for_user, get
 from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status
+from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status, get_total_losses_all_time 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 
@@ -273,7 +273,9 @@ async def show_user_detail(callback: types.CallbackQuery):
     yesterday_game_win = await get_yesterday_game_win(user_id)
 
     cashback_status = await get_cashback_status(user_id)
+    total_losses_all_time = await get_total_losses_all_time(user_id)
 
+    total_losses_label = "💔 ПРОГРАШ" if total_losses_all_time >= 0 else "💚 ВИГРАШ"
 
     cb = cashback_status
     cashback_text = (
@@ -361,6 +363,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"🎉 Виграш <b>вчора</b>: <b>{yesterday_game_win} грн</b>\n"   
         # f"💸 Кеш {cashback_status} грн\n"  
         f"{cashback_text}\n\n" 
+        f"{total_losses_label}: <b>{abs(total_losses_all_time)} грн</b>\n\n"
         f"{cooldown_text}\n\n"
         f"{checks_block}\n"
         f"{actions_block}"
