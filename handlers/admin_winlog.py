@@ -75,7 +75,7 @@ async def build_summary_text(date_offset: int) -> str:
         promo_total = sum(d["total"] for d in promo_entries.values())
         promo_count = sum(d["count"] for d in promo_entries.values())
 
-        lines.append(f"\n📌 <b>Акції:</b> <b>{promo_total} грн</b> ({promo_count} шт)")
+        lines.append(f"\n📌 <b>Акції:</b> <b>{promo_total} грн</b> ({promo_count} шт)\n")
         if promo_entries:
             for win_type, data in sorted(promo_entries.items(), key=lambda x: -x[1]["total"]):
                 lines.append(
