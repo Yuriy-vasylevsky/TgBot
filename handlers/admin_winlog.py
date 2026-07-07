@@ -75,7 +75,7 @@ async def build_summary_text(date_offset: int) -> str:
         promo_total = sum(d["total"] for d in promo_entries.values())
         promo_count = sum(d["count"] for d in promo_entries.values())
 
-        lines.append("\n📌 <b>Акції:</b>")
+        lines.append(f"\n📌 <b>Акції:</b> <b>{promo_total} грн</b> ({promo_count} шт)")
         if promo_entries:
             for win_type, data in sorted(promo_entries.items(), key=lambda x: -x[1]["total"]):
                 lines.append(
@@ -83,7 +83,7 @@ async def build_summary_text(date_offset: int) -> str:
                 )
         else:
             lines.append("Немає нарахувань.")
-        lines.append(f"Разом акції: <b>{promo_total} грн</b> ({promo_count} шт)")
+        # lines.append(f"Разом акції: <b>{promo_total} грн</b> ({promo_count} шт)")
 
         total = (cashback["total"] if cashback else 0) + promo_total
         lines.append(f"\n💰 <b>Всього за день: {total} грн</b>")
