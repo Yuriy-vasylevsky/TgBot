@@ -21,32 +21,6 @@ def _label(win_type: str) -> str:
     return TYPE_LABELS.get(win_type, win_type)
 
 
-# async def build_summary_text(date_offset: int) -> str:
-#     summary = await get_win_summary(date_offset)
-#     day_label = "Сьогодні" if date_offset == 0 else "Вчора"
-
-#     lines = [f"📊 <b>Виграші — {day_label} ({summary['date']})</b>\n"]
-
-#     if not summary["by_type"]:
-#         lines.append("Поки що немає жодного виграшу за цей день.")
-#     else:
-#         for win_type, data in sorted(
-#             summary["by_type"].items(), key=lambda x: -x[1]["total"]
-#         ):
-#             lines.append(
-#                 f"{_label(win_type)}: <b>{data['total']} грн</b> ({data['count']} шт)"
-#             )
-#         lines.append(f"\n💰 <b>Всього за день: {summary['total']} грн</b>")
-
-#     top = await get_top_winners(date_offset, limit=5)
-#     if top:
-#         lines.append("\n🏆 <b>Топ гравців:</b>")
-#         for i, t in enumerate(top, 1):
-#             uname = f"@{t['username']}" if t["username"] and t["username"] != "—" else t["full_name"]
-#             lines.append(f"{i}. {uname} — <b>{t['total']} грн</b>")
-
-#     return "\n".join(lines)
-
 PROMO_TYPES = ("fortune", "game", "group", "promo")
 
 
