@@ -466,7 +466,7 @@ def is_auto_topup_time() -> bool:
 
 async def send_manual_topup_info(message: Message):
     cards = await get_cards()
-    cards_text = "\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
+    cards_text = "\n\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -475,11 +475,12 @@ async def send_manual_topup_info(message: Message):
     )
 
     await message.answer(
-        f"⏰ Автоматичне поповнення доступне лише з "
+        f"⏰ Автооплата працює з "
         f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
-        f"Зараз поповнення через картку та касира:\n\n"
+        # f"Зараз поповнення через картку та касира:\n\n"
         f"{cards_text}\n\n"
-        f"Після оплати напишіть касиру для зарахування коштів.",
+        f"‼️Мінімальне поповнення 200 грн‼️\n\n",
+        f"‼️Після оплати напишіть касиру чек для зарахування коштів‼️",
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -796,7 +797,7 @@ async def autopay_admin_menu(message: Message):
     await message.answer(
         f"⚙️ <b>Керування автооплатою</b>\n\n"
         f"Поточний режим: <b>{_mode_label(_autopay_mode)}</b>\n\n"
-        f"За розкладом автоплата працює з 22:00 до 09:00 (Київ). "
+        f"Автооплата працює з 22:00 до 09:00"
         f"Можеш примусово перемкнути в будь-яку сторону — режим збережеться "
         f"навіть після перезапуску бота.",
         parse_mode="HTML",
