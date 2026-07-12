@@ -64,6 +64,6 @@ async def save_new_card(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ Картку для {bank_name} оновлено на:\n<code>{new_number}</code>",
         parse_mode="HTML",
-        reply_markup=admin_menu(is_admin=True),
-    )
+        reply_markup=admin_menu()),
+    
     await state.clear()
