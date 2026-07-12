@@ -5,7 +5,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemo
 
 from db import get_cards, update_card
 from handlers.config import ADMIN_ID
-from handlers.menu import admin_menu, main_menu
+from handlers.menu import admin_menu
 
 router = Router(name="admin_cards")
 
@@ -28,7 +28,7 @@ async def manage_cards(message: types.Message, state: FSMContext):
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Карта 1"), KeyboardButton(text="Карта 2")],
-            [KeyboardButton(text="❌ Відмінити")],
+            [KeyboardButton(text="❌ Відмінити дію")],
         ],
         resize_keyboard=True,
     )
@@ -42,7 +42,7 @@ async def manage_cards(message: types.Message, state: FSMContext):
 @router.message(CardFSM.waiting_for_bank)
 async def ask_new_card(message: types.Message, state: FSMContext):
     bank = message.text
-    if bank == "❌ Відмінити":
+    if bank == "❌ Відмінити дію":
         await state.clear()
         await message.answer("❌ Скасовано.", reply_markup=admin_menu())
         return
@@ -64,6 +64,6 @@ async def save_new_card(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ Картку для {bank_name} оновлено на:\n<code>{new_number}</code>",
         parse_mode="HTML",
-        reply_markup=main_menu(is_admin=True),
+        reply_markup=admin_menu(is_admin=True),
     )
     await state.clear()

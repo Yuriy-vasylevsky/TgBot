@@ -27,7 +27,7 @@ from db import (
     get_winrate,
 )
 from handlers.states import PromoFSM, EnterPromoFSM
-from handlers.menu import main_menu
+from handlers.menu import main_menu, admin_menu2
 from handlers.config import ADMIN_ID
 from games import games_menu as imported_games_menu
 
@@ -62,7 +62,7 @@ async def save_promocode_handler(message: types.Message, state: FSMContext):
     await add_promocode(code)
     await message.answer(
         f"✅ Промокод <b>{code}</b> збережено",
-        reply_markup=main_menu(is_admin=True),
+        reply_markup=admin_menu2(),
         parse_mode="HTML",
     )
     await state.clear()

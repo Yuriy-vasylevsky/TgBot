@@ -30,6 +30,7 @@
 #     add_payment_log,
 #     mark_referral_paid,
 #     update_daily_net,
+#     get_cards,
 # )
 
 # import asyncio
@@ -41,6 +42,38 @@
 
 # MIN_SUM = 200
 # REFERRAL_BONUS = 50
+
+# CASHIER_URL = "https://t.me/KaSSa_4444"
+# KYIV_OFFSET = timedelta(hours=3)
+# AUTO_TOPUP_START_HOUR = 0
+# AUTO_TOPUP_END_HOUR = 9
+
+
+# def is_auto_topup_time() -> bool:
+#     """Автоплата через бота доступна лише з 00:00 до 09:00 (Київ)."""
+#     now_kyiv = datetime.utcnow() + KYIV_OFFSET
+#     return AUTO_TOPUP_START_HOUR <= now_kyiv.hour < AUTO_TOPUP_END_HOUR
+
+
+# async def send_manual_topup_info(message: Message):
+#     cards = await get_cards()
+#     cards_text = "\n\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
+
+#     kb = InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [InlineKeyboardButton(text="👨‍💼 Касир", url=CASHIER_URL)]
+#         ]
+#     )
+
+#     await message.answer(
+#         f"⏰ Автоматичне поповнення доступне лише з "
+#         f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
+#         f"💸 Зараз поповнення через касира:\n\n"
+#         f"{cards_text}\n\n"
+#         f"‼️Після оплати напишіть касиру скрін для зарахування коштів‼️",
+#         reply_markup=kb,
+#         parse_mode="HTML",
+#     )
 
 
 # class WalletStates(StatesGroup):
@@ -71,6 +104,11 @@
 # # ==================== ПОПОВНЕННЯ ====================
 # @router.callback_query(F.data == "wallet_topup")
 # async def start_topup(callback: CallbackQuery, state: FSMContext):
+#     if not is_auto_topup_time():
+#         await send_manual_topup_info(callback.message)
+#         await callback.answer()
+#         return
+
 #     cancel_kb = InlineKeyboardMarkup(
 #         inline_keyboard=[
 #             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -94,6 +132,11 @@
 
 # @router.message(WalletStates.enter_amount)
 # async def process_amount(message: Message, state: FSMContext):
+#     if not is_auto_topup_time():
+#         await state.clear()
+#         await send_manual_topup_info(message)
+#         return
+
 #     cancel_kb = InlineKeyboardMarkup(
 #         inline_keyboard=[
 #             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -312,9 +355,10 @@
 #             await message.answer("❌ Помилка при обробці платежу.")
 
 
-
 import time
+import json
 import logging
+from pathlib import Path
 from datetime import datetime, timedelta
 
 from aiogram import Router, F
@@ -358,19 +402,71 @@ REFERRAL_BONUS = 50
 
 CASHIER_URL = "https://t.me/KaSSa_4444"
 KYIV_OFFSET = timedelta(hours=3)
-AUTO_TOPUP_START_HOUR = 0
+
+# Розклад автооплати: з 22:00 до 09:00 (Київ)
+AUTO_TOPUP_START_HOUR = 22
 AUTO_TOPUP_END_HOUR = 9
+
+# ==================== РЕЖИМ АВТООПЛАТИ (керування адміном) ====================
+
+AUTOPAY_MODE_AUTO = "auto"           # за розкладом 22:00–09:00
+AUTOPAY_MODE_FORCE_ON = "force_on"   # адмін примусово увімкнув автооплату
+AUTOPAY_MODE_FORCE_OFF = "force_off" # адмін примусово вимкнув автооплату (ручний режим)
+
+_SETTINGS_FILE = Path(__file__).resolve().parent.parent / "data" / "wallet_settings.json"
+
+
+def _load_autopay_mode() -> str:
+    try:
+        if _SETTINGS_FILE.exists():
+            data = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+            mode = data.get("autopay_mode", AUTOPAY_MODE_AUTO)
+            if mode in (AUTOPAY_MODE_AUTO, AUTOPAY_MODE_FORCE_ON, AUTOPAY_MODE_FORCE_OFF):
+                return mode
+    except Exception as e:
+        logging.error(f"❌ Не вдалося прочитати wallet_settings.json: {e}")
+    return AUTOPAY_MODE_AUTO
+
+
+def _save_autopay_mode(mode: str) -> None:
+    try:
+        _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SETTINGS_FILE.write_text(json.dumps({"autopay_mode": mode}), encoding="utf-8")
+    except Exception as e:
+        logging.error(f"❌ Не вдалося зберегти wallet_settings.json: {e}")
+
+
+_autopay_mode: str = _load_autopay_mode()
+
+
+def _mode_label(mode: str) -> str:
+    return {
+        AUTOPAY_MODE_AUTO: "🕒 За розкладом (22:00–09:00)",
+        AUTOPAY_MODE_FORCE_ON: "✅ Примусово УВІМКНЕНО",
+        AUTOPAY_MODE_FORCE_OFF: "🚫 Примусово ВИМКНЕНО (ручний режим)",
+    }.get(mode, mode)
 
 
 def is_auto_topup_time() -> bool:
-    """Автоплата через бота доступна лише з 00:00 до 09:00 (Київ)."""
+    """
+    True, якщо зараз доступна автоплата через бота.
+    Враховує ручний режим адміна (force_on / force_off),
+    інакше — розклад 22:00–09:00 за Києвом.
+    """
+    if _autopay_mode == AUTOPAY_MODE_FORCE_ON:
+        return True
+    if _autopay_mode == AUTOPAY_MODE_FORCE_OFF:
+        return False
+
     now_kyiv = datetime.utcnow() + KYIV_OFFSET
-    return AUTO_TOPUP_START_HOUR <= now_kyiv.hour < AUTO_TOPUP_END_HOUR
+    hour = now_kyiv.hour
+    # проміжок переходить через північ: 22:00 -> 09:00
+    return hour >= AUTO_TOPUP_START_HOUR or hour < AUTO_TOPUP_END_HOUR
 
 
 async def send_manual_topup_info(message: Message):
     cards = await get_cards()
-    cards_text = "\n\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
+    cards_text = "\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
 
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
@@ -381,9 +477,9 @@ async def send_manual_topup_info(message: Message):
     await message.answer(
         f"⏰ Автоматичне поповнення доступне лише з "
         f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
-        f"💸 Зараз поповнення через касира:\n\n"
+        f"Зараз поповнення через картку та касира:\n\n"
         f"{cards_text}\n\n"
-        f"‼️Після оплати напишіть касиру скрін для зарахування коштів‼️",
+        f"Після оплати напишіть касиру для зарахування коштів.",
         reply_markup=kb,
         parse_mode="HTML",
     )
@@ -666,3 +762,70 @@ async def check_payment(event: Message | CallbackQuery):
         except Exception as e:
             logging.error(f"❌ Критична помилка в check_payment: {e}", exc_info=True)
             await message.answer("❌ Помилка при обробці платежу.")
+
+
+# ==================== АДМІНКА: РУЧНЕ КЕРУВАННЯ АВТООПЛАТОЮ ====================
+
+def autopay_admin_kb() -> InlineKeyboardMarkup:
+    def mark(mode: str) -> str:
+        return "🔘 " if _autopay_mode == mode else "⚪️ "
+
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text=f"{mark(AUTOPAY_MODE_AUTO)}🕒 За розкладом (22:00–09:00)",
+                callback_data="autopay_mode_auto"
+            )],
+            [InlineKeyboardButton(
+                text=f"{mark(AUTOPAY_MODE_FORCE_ON)}✅ Примусово увімкнути",
+                callback_data="autopay_mode_on"
+            )],
+            [InlineKeyboardButton(
+                text=f"{mark(AUTOPAY_MODE_FORCE_OFF)}🚫 Примусово вимкнути (ручний режим)",
+                callback_data="autopay_mode_off"
+            )],
+        ]
+    )
+
+
+@router.message(F.text == "⚙️ Автооплата")
+@router.message(Command("autopay"))
+async def autopay_admin_menu(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await message.answer(
+        f"⚙️ <b>Керування автооплатою</b>\n\n"
+        f"Поточний режим: <b>{_mode_label(_autopay_mode)}</b>\n\n"
+        f"За розкладом автоплата працює з 22:00 до 09:00 (Київ). "
+        f"Можеш примусово перемкнути в будь-яку сторону — режим збережеться "
+        f"навіть після перезапуску бота.",
+        parse_mode="HTML",
+        reply_markup=autopay_admin_kb(),
+    )
+
+
+@router.callback_query(F.data.startswith("autopay_mode_"))
+async def set_autopay_mode(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer()
+        return
+
+    global _autopay_mode
+    key = callback.data.removeprefix("autopay_mode_")
+    mode_map = {
+        "auto": AUTOPAY_MODE_AUTO,
+        "on": AUTOPAY_MODE_FORCE_ON,
+        "off": AUTOPAY_MODE_FORCE_OFF,
+    }
+    new_mode = mode_map.get(key, AUTOPAY_MODE_AUTO)
+    _autopay_mode = new_mode
+    _save_autopay_mode(new_mode)
+
+    await callback.message.edit_text(
+        f"⚙️ <b>Керування автооплатою</b>\n\n"
+        f"Поточний режим: <b>{_mode_label(_autopay_mode)}</b>\n\n"
+        f"За розкладом автоплата працює з 22:00 до 09:00 (Київ).",
+        parse_mode="HTML",
+        reply_markup=autopay_admin_kb(),
+    )
+    await callback.answer("✅ Збережено")
