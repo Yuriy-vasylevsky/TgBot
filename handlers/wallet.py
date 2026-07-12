@@ -474,13 +474,16 @@ async def send_manual_topup_info(message: Message):
         ]
     )
 
-    await message.answer(
+    text = (
         f"⏰ Автооплата працює з "
         f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
-        # f"Зараз поповнення через картку та касира:\n\n"
         f"{cards_text}\n\n"
-        f"‼️Мінімальне поповнення 200 грн‼️\n\n",
-        f"‼️Після оплати напишіть касиру чек для зарахування коштів‼️",
+        "‼️ Мінімальне поповнення 200 грн‼️\n\n"
+        "‼️ Після оплати надішліть касиру чек для зарахування коштів‼️"
+    )
+
+    await message.answer(
+        text,
         reply_markup=kb,
         parse_mode="HTML",
     )
