@@ -12,7 +12,7 @@ from aiogram.fsm.state import StatesGroup, State
 
 router = Router(name="admin_users")
 
-USERS_PER_PAGE = 7
+USERS_PER_PAGE = 5
 MAX_ACTIONS_TO_SHOW = 7
 MAX_ACTIONS_EXPANDED = 20
 
@@ -28,6 +28,67 @@ class AdminSearch(StatesGroup):
 
 KYIV = timezone(timedelta(hours=3))
 
+
+# def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
+#     kb = InlineKeyboardBuilder()
+#     kb.row(
+#         types.InlineKeyboardButton(text="1", callback_data=f"numpad:{action}:digit:1"),
+#         types.InlineKeyboardButton(text="2", callback_data=f"numpad:{action}:digit:2"),
+#         types.InlineKeyboardButton(text="3", callback_data=f"numpad:{action}:digit:3"),
+
+#     )
+#     kb.row(
+#         types.InlineKeyboardButton(text="4", callback_data=f"numpad:{action}:digit:4"),
+#         types.InlineKeyboardButton(text="5", callback_data=f"numpad:{action}:digit:5"),
+#         types.InlineKeyboardButton(text="6", callback_data=f"numpad:{action}:digit:6"),
+#     )
+#     kb.row(
+#         types.InlineKeyboardButton(text="7", callback_data=f"numpad:{action}:digit:7"),
+#         types.InlineKeyboardButton(text="8", callback_data=f"numpad:{action}:digit:8"),
+#         types.InlineKeyboardButton(text="9", callback_data=f"numpad:{action}:digit:9"),
+#     )
+#     kb.row(
+#         types.InlineKeyboardButton(text="⌫", callback_data=f"numpad:{action}:back:0"),
+#         types.InlineKeyboardButton(text="0", callback_data=f"numpad:{action}:digit:0"),
+#         types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"),
+#     )
+#     kb.row(
+#         types.InlineKeyboardButton(text="+50", callback_data=f"numpad:{action}:quick:50"),
+#         types.InlineKeyboardButton(text="+100", callback_data=f"numpad:{action}:quick:100"),
+#         types.InlineKeyboardButton(text="+200", callback_data=f"numpad:{action}:quick:200"),
+#     )
+#     kb.row(types.InlineKeyboardButton(text="❌ Скасувати", callback_data=f"numpad:{action}:cancel:0"))
+#     return kb.as_markup()
+
+
+def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.row(
+        types.InlineKeyboardButton(text="1", callback_data=f"numpad:{action}:digit:1"),
+        types.InlineKeyboardButton(text="2", callback_data=f"numpad:{action}:digit:2"),
+        types.InlineKeyboardButton(text="3", callback_data=f"numpad:{action}:digit:3"),
+        types.InlineKeyboardButton(text="4", callback_data=f"numpad:{action}:digit:4"),
+        types.InlineKeyboardButton(text="5", callback_data=f"numpad:{action}:digit:5"),
+
+        
+    )
+    kb.row(
+        types.InlineKeyboardButton(text="6", callback_data=f"numpad:{action}:digit:6"),
+        types.InlineKeyboardButton(text="7", callback_data=f"numpad:{action}:digit:7"),
+        types.InlineKeyboardButton(text="8", callback_data=f"numpad:{action}:digit:8"),
+        types.InlineKeyboardButton(text="9", callback_data=f"numpad:{action}:digit:9"),
+        types.InlineKeyboardButton(text="0", callback_data=f"numpad:{action}:digit:0"),
+    )
+
+    kb.row(
+        types.InlineKeyboardButton(text="+50", callback_data=f"numpad:{action}:quick:50"),
+        types.InlineKeyboardButton(text="+100", callback_data=f"numpad:{action}:quick:100"),
+        types.InlineKeyboardButton(text="+200", callback_data=f"numpad:{action}:quick:200"),
+        types.InlineKeyboardButton(text="⌫", callback_data=f"numpad:{action}:back:0"),
+    )
+    kb.row( types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"))
+    kb.row(types.InlineKeyboardButton(text="❌ Скасувати", callback_data=f"numpad:{action}:cancel:0"))
+    return kb.as_markup()
 
 def parse_dt_safe(dt_str: str | None) -> datetime:
     if not dt_str:
@@ -464,15 +525,30 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
     await show_user_detail(callback)
 
 
+# @router.callback_query(F.data.startswith("balance_add:"))
+# async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
+#     if callback.from_user.id != ADMIN_ID:
+#         return
+
+#     _, user_id, page = callback.data.split(":")
+#     await state.update_data(user_id=int(user_id), page=int(page))
+#     await state.set_state(BalanceFSM.add_amount)
+#     await callback.message.answer("💰 Введіть суму для поповнення балансу:")
+#     await callback.answer()
+
 @router.callback_query(F.data.startswith("balance_add:"))
 async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
 
     _, user_id, page = callback.data.split(":")
-    await state.update_data(user_id=int(user_id), page=int(page))
+    await state.update_data(user_id=int(user_id), page=int(page), input="")
     await state.set_state(BalanceFSM.add_amount)
-    await callback.message.answer("💰 Введіть суму для поповнення балансу:")
+    await callback.message.answer(
+        "💰 Введіть суму для поповнення балансу:\n\nСума: <b>0 грн</b>",
+        parse_mode="HTML",
+        reply_markup=build_numpad_kb("add")
+    )
     await callback.answer()
 
 
@@ -509,17 +585,32 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
     await state.clear()
 
 
+# @router.callback_query(F.data.startswith("balance_remove:"))
+# async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext):
+#     if callback.from_user.id != ADMIN_ID:
+#         return
+
+#     _, user_id, page = callback.data.split(":")
+#     await state.update_data(user_id=int(user_id), page=int(page))
+#     await state.set_state(BalanceFSM.remove_amount)
+#     await callback.message.answer("💸 Введіть суму для списання:")
+#     await callback.answer()
+
+
 @router.callback_query(F.data.startswith("balance_remove:"))
 async def balance_remove_start(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID:
         return
 
     _, user_id, page = callback.data.split(":")
-    await state.update_data(user_id=int(user_id), page=int(page))
+    await state.update_data(user_id=int(user_id), page=int(page), input="")
     await state.set_state(BalanceFSM.remove_amount)
-    await callback.message.answer("💸 Введіть суму для списання:")
+    await callback.message.answer(
+        "💸 Введіть суму для списання:\n\nСума: <b>0 грн</b>",
+        parse_mode="HTML",
+        reply_markup=build_numpad_kb("remove")
+    )
     await callback.answer()
-
 
 @router.message(BalanceFSM.remove_amount)
 async def balance_remove_finish(message: types.Message, state: FSMContext):
@@ -712,3 +803,115 @@ async def do_remove_promo(callback: types.CallbackQuery):
 
     await callback.answer("✅ Знято 1 промо!", show_alert=True)
     await show_user_detail(callback.model_copy(update={"data": f"user_detail:{user_id}:{from_page}:0"}))
+
+
+
+@router.callback_query(F.data.startswith("numpad:"))
+async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, action, sub, value = callback.data.split(":")
+    except:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    data = await state.get_data()
+    user_id = data.get("user_id")
+    current = data.get("input", "")
+
+    if user_id is None:
+        await callback.answer("Сесія застаріла, спробуйте ще раз", show_alert=True)
+        return
+
+    if sub == "cancel":
+        await state.clear()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
+        await callback.answer("Скасовано")
+        return
+
+    if sub == "digit":
+        if len(current) < 7:
+            current += value
+
+    elif sub == "back":
+        current = current[:-1]
+
+    elif sub == "quick":
+        base = int(current) if current else 0
+        current = str(base + int(value))
+
+    elif sub == "confirm":
+            if not current or int(current) <= 0:
+                await callback.answer("Введіть суму більше 0", show_alert=True)
+                return
+
+            amount = int(current)
+            await state.clear()
+
+            # отримуємо ім'я користувача
+            users = await get_all_users_info()
+            user_info = next((u for u in users if u["user_id"] == user_id), None)
+            full_name = (user_info.get("full_name") if user_info else None) or "Без імені"
+
+            if action == "add":
+                await add_to_balance(user_id, amount)
+                await update_daily_net(user_id, amount)
+                balance = await get_balance(user_id)
+
+                result_text = (
+                    f"✅ Баланс поповнено на {amount} грн\n"
+                    f"👤 {full_name}\n\n"
+                    f"💰 Новий баланс: {balance} грн"
+                )
+                try:
+                    await callback.message.edit_text(result_text)
+                except Exception:
+                    await callback.message.answer(result_text)
+
+                try:
+                    await callback.bot.send_message(
+                        user_id,
+                        f"💰 Вам нараховано <b>{amount} грн</b>\n\n💳 Ваш баланс: <b>{balance} грн</b>",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    await callback.message.answer("⚠️ Не вдалось надіслати сповіщення користувачу")
+
+            else:  # remove
+                await add_to_balance(user_id, -amount)
+                await update_daily_net(user_id, -amount)
+                balance = await get_balance(user_id)
+
+                result_text = (
+                    f"✅ Списано {amount} грн\n"
+                    f"👤 {full_name}\n\n"
+                    f"💰 Новий баланс: {balance} грн"
+                )
+                try:
+                    await callback.message.edit_text(result_text)
+                except Exception:
+                    await callback.message.answer(result_text)
+
+            await callback.answer()
+            return
+
+    await state.update_data(input=current)
+    display = current if current else "0"
+    label = "поповнення" if action == "add" else "списання"
+
+    try:
+        await callback.message.edit_text(
+            f"💰 Введіть суму для {label} балансу:\n\nСума: <b>{display} грн</b>",
+            parse_mode="HTML",
+            reply_markup=build_numpad_kb(action)
+        )
+    except Exception:
+        pass
+
+    await callback.answer()
