@@ -8,6 +8,8 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from db import ban_user, unban_user, DB_PATH, ensure_ban_table
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu, admin_menu2
+from db import ban_user, unban_user, DB_PATH, ensure_ban_table
+from db import ban_profile_user, unban_profile_user, is_profile_banned, list_banned_profile
 
 router = Router(name="admin_bans")
 
@@ -37,11 +39,28 @@ async def list_banned() -> list[tuple]:
             return await cur.fetchall()
 
 
+# class BanStates(StatesGroup):
+#     waiting_for_ban_id = State()
+#     waiting_for_unban_id = State()
+#     waiting_for_ban_reason = State()
+
 class BanStates(StatesGroup):
     waiting_for_ban_id = State()
     waiting_for_unban_id = State()
     waiting_for_ban_reason = State()
+    waiting_for_profile_ban_id = State()
+    waiting_for_profile_unban_id = State()
+    waiting_for_profile_ban_reason = State()
 
+
+# def bans_inline_kb() -> InlineKeyboardMarkup:
+#     return InlineKeyboardMarkup(
+#         inline_keyboard=[
+#             [InlineKeyboardButton(text="🚫 Забанити", callback_data="bans_start_ban")],
+#             [InlineKeyboardButton(text="🔓 Розбанити", callback_data="bans_start_unban")],
+#             [InlineKeyboardButton(text="📋 Список банів", callback_data="bans_list")],
+#         ]
+#     )
 
 def bans_inline_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -49,6 +68,9 @@ def bans_inline_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🚫 Забанити", callback_data="bans_start_ban")],
             [InlineKeyboardButton(text="🔓 Розбанити", callback_data="bans_start_unban")],
             [InlineKeyboardButton(text="📋 Список банів", callback_data="bans_list")],
+            [InlineKeyboardButton(text="🔒 Забанити кабінет", callback_data="pban_start_ban")],
+            [InlineKeyboardButton(text="🔑 Розбанити кабінет", callback_data="pban_start_unban")],
+            [InlineKeyboardButton(text="📋 Список банів кабінету", callback_data="pban_list")],
         ]
     )
 
@@ -205,3 +227,112 @@ async def cancel_state(message: Message, state: FSMContext):
         "❌ Дія скасована.",
         reply_markup=admin_menu2() if message.from_user.id == ADMIN_ID else main_menu(is_admin=False),
     )
+
+
+# ==========================
+# 🔒 Бан кабінету
+# ==========================
+@router.callback_query(F.data == "pban_start_ban")
+async def cmd_start_profile_ban(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Введи ID користувача для бану кабінету:", reply_markup=bans_cancel_kb()
+    )
+    await state.set_state(BanStates.waiting_for_profile_ban_id)
+    await callback.answer()
+
+
+@router.message(BanStates.waiting_for_profile_ban_id)
+async def handle_profile_ban_id(message: Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Введи тільки числовий ID.", reply_markup=bans_cancel_kb())
+        return
+    uid = int(message.text)
+    if uid == ADMIN_ID:
+        await message.answer("⛔ Нельзя банити себе.")
+        await state.clear()
+        return
+    await state.update_data(profile_ban_target=uid)
+    await message.answer(
+        "Введи причину бану кабінету (можеш залишити порожньою):", reply_markup=bans_cancel_kb()
+    )
+    await state.set_state(BanStates.waiting_for_profile_ban_reason)
+
+
+@router.message(BanStates.waiting_for_profile_ban_reason)
+async def handle_profile_ban_reason(message: Message, state: FSMContext):
+    data = await state.get_data()
+    uid = data.get("profile_ban_target")
+    reason = message.text.strip() or None
+    await ban_profile_user(uid, banned_by=message.from_user.id, reason=reason)
+    await state.clear()
+    await message.answer(
+        f"✅ Кабінет користувача <code>{uid}</code> заблокований.\nПричина: {reason or '—'}",
+        parse_mode="HTML",
+        reply_markup=admin_menu2(),
+    )
+
+
+# ==========================
+# 🔑 Розбан кабінету
+# ==========================
+@router.callback_query(F.data == "pban_start_unban")
+async def cmd_start_profile_unban(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Введи ID користувача для розбану кабінету (тільки цифри):", reply_markup=bans_cancel_kb()
+    )
+    await state.set_state(BanStates.waiting_for_profile_unban_id)
+    await callback.answer()
+
+
+@router.message(BanStates.waiting_for_profile_unban_id)
+async def handle_profile_unban_id(message: Message, state: FSMContext):
+    text = message.text.strip()
+    if not text.isdigit():
+        await message.answer(
+            "Невірний формат. Введи тільки числовий ID.", reply_markup=bans_cancel_kb()
+        )
+        return
+    uid = int(text)
+    await unban_profile_user(uid)
+    await state.clear()
+    await message.answer(
+        f"✅ Кабінет користувача <code>{uid}</code> розблоковано.",
+        parse_mode="HTML",
+        reply_markup=admin_menu2(),
+    )
+
+
+# ==========================
+# 📋 Список банів кабінету
+# ==========================
+@router.callback_query(F.data == "pban_list")
+async def view_banned_profile_list(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+
+    await callback.answer()
+
+    rows = await list_banned_profile()
+    if not rows:
+        await callback.message.answer(
+            "📭 Список банів кабінету пустий.", reply_markup=admin_menu2()
+        )
+        return
+
+    lines = []
+    for uid, full_name, reason, banned_by, ts in rows:
+        name = full_name or "—"
+        r = reason if reason else "—"
+        lines.append(
+            f"👤 <b>{name}</b>\n 🔮ID: <code>{uid}</code>\n 📄Причина: {r}\n🕒 {ts}\n"
+        )
+
+    text = "📋 <b>Заблоковані кабінети:</b>\n\n" + "\n".join(lines)
+    await callback.message.answer(text, parse_mode="HTML", reply_markup=admin_menu2())

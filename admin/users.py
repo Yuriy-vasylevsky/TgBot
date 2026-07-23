@@ -29,37 +29,6 @@ class AdminSearch(StatesGroup):
 KYIV = timezone(timedelta(hours=3))
 
 
-# def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
-#     kb = InlineKeyboardBuilder()
-#     kb.row(
-#         types.InlineKeyboardButton(text="1", callback_data=f"numpad:{action}:digit:1"),
-#         types.InlineKeyboardButton(text="2", callback_data=f"numpad:{action}:digit:2"),
-#         types.InlineKeyboardButton(text="3", callback_data=f"numpad:{action}:digit:3"),
-
-#     )
-#     kb.row(
-#         types.InlineKeyboardButton(text="4", callback_data=f"numpad:{action}:digit:4"),
-#         types.InlineKeyboardButton(text="5", callback_data=f"numpad:{action}:digit:5"),
-#         types.InlineKeyboardButton(text="6", callback_data=f"numpad:{action}:digit:6"),
-#     )
-#     kb.row(
-#         types.InlineKeyboardButton(text="7", callback_data=f"numpad:{action}:digit:7"),
-#         types.InlineKeyboardButton(text="8", callback_data=f"numpad:{action}:digit:8"),
-#         types.InlineKeyboardButton(text="9", callback_data=f"numpad:{action}:digit:9"),
-#     )
-#     kb.row(
-#         types.InlineKeyboardButton(text="⌫", callback_data=f"numpad:{action}:back:0"),
-#         types.InlineKeyboardButton(text="0", callback_data=f"numpad:{action}:digit:0"),
-#         types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"),
-#     )
-#     kb.row(
-#         types.InlineKeyboardButton(text="+50", callback_data=f"numpad:{action}:quick:50"),
-#         types.InlineKeyboardButton(text="+100", callback_data=f"numpad:{action}:quick:100"),
-#         types.InlineKeyboardButton(text="+200", callback_data=f"numpad:{action}:quick:200"),
-#     )
-#     kb.row(types.InlineKeyboardButton(text="❌ Скасувати", callback_data=f"numpad:{action}:cancel:0"))
-#     return kb.as_markup()
-
 
 def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()

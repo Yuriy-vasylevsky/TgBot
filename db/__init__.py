@@ -141,6 +141,11 @@ from .admin import (
     get_active_tasks,
     get_user_task_progress,
     ensure_ban_table,
+    ensure_profile_ban_table,
+    ban_profile_user,
+    unban_profile_user,
+    is_profile_banned,
+    list_banned_profile
 )
 
 

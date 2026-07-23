@@ -202,3 +202,53 @@ async def get_daily_winnings_summary() -> dict:
     return {**totals, "grand_total": grand_total}
 
 
+async def ensure_profile_ban_table():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""CREATE TABLE IF NOT EXISTS banned_profile_users (
+            user_id INTEGER PRIMARY KEY,
+            reason TEXT,
+            banned_by INTEGER,
+            ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+        )""")
+        await db.commit()
+
+
+async def ban_profile_user(user_id: int, banned_by: int, reason: str | None = None):
+    await ensure_profile_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR REPLACE INTO banned_profile_users (user_id, reason, banned_by) VALUES (?, ?, ?)",
+            (user_id, reason, banned_by)
+        )
+        await db.commit()
+
+
+async def unban_profile_user(user_id: int):
+    await ensure_profile_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM banned_profile_users WHERE user_id=?", (user_id,))
+        await db.commit()
+
+
+async def is_profile_banned(user_id: int) -> bool:
+    await ensure_profile_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT 1 FROM banned_profile_users WHERE user_id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return bool(row)
+
+
+async def list_banned_profile() -> list[tuple]:
+    await ensure_profile_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT b.user_id, u.full_name, b.reason, b.banned_by, b.ts
+            FROM banned_profile_users b
+            LEFT JOIN users u ON u.user_id = b.user_id
+            ORDER BY b.ts DESC
+            """
+        ) as cur:
+            return await cur.fetchall()

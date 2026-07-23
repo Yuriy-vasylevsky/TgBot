@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone, timedelta
-
+from db import is_profile_banned  
 import aiosqlite
 from aiogram import Router, F, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -196,6 +196,10 @@ async def show_profile(message: types.Message):
     user_id = message.from_user.id
     username = message.from_user.username or "—"
     full_name = message.from_user.full_name or "—"
+
+    if await is_profile_banned(user_id):
+        await message.answer("⛔ В розробці")
+        return
 
     await add_or_update_user(user_id, username, full_name)
 
