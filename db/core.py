@@ -157,7 +157,7 @@ async def init_db():
                 "pending_rewards (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, code_id INTEGER, casino_type TEXT, status TEXT DEFAULT 'pending', ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "banned_users (user_id INTEGER PRIMARY KEY, reason TEXT, banned_by INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "banned_profile_users (user_id INTEGER PRIMARY KEY, reason TEXT, banned_by INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
-                "cards (id INTEGER PRIMARY KEY AUTOINCREMENT, bank_name TEXT, card_number TEXT)",
+                "cards (id INTEGER PRIMARY KEY AUTOINCREMENT, bank_name TEXT, display_name TEXT, card_number TEXT)",
                 "weekly_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, description TEXT, reward TEXT, duration TEXT, is_active INTEGER DEFAULT 1, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "user_tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, task_id INTEGER NOT NULL, is_completed INTEGER DEFAULT 0, completed_at DATETIME)",
                 "safe_state (key TEXT PRIMARY KEY, value TEXT)",
@@ -170,12 +170,30 @@ async def init_db():
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
 
+            # Назва слота (Карта 1/Карта 2) не змінюється, а назва банку
+            # зберігається окремо й показується користувачам у реквізитах.
+            async with db.execute("PRAGMA table_info(cards)") as cur:
+                card_columns = {row[1] for row in await cur.fetchall()}
+            if "display_name" not in card_columns:
+                await db.execute("ALTER TABLE cards ADD COLUMN display_name TEXT")
+                await db.execute(
+                    """
+                    UPDATE cards
+                    SET display_name = CASE bank_name
+                        WHEN 'Карта 1' THEN 'Абанк'
+                        WHEN 'Карта 2' THEN 'Приват'
+                        ELSE bank_name
+                    END
+                    WHERE display_name IS NULL OR TRIM(display_name) = ''
+                    """
+                )
+
             # Дефолтні картки
             cur = await db.execute("SELECT COUNT(*) FROM cards")
             if (await cur.fetchone())[0] == 0:
                 await db.executemany(
-                    "INSERT INTO cards (bank_name, card_number) VALUES (?, ?)",
-                    [("Карта 1", ""), ("Карта 2", "")]
+                    "INSERT INTO cards (bank_name, display_name, card_number) VALUES (?, ?, ?)",
+                    [("Карта 1", "Абанк", ""), ("Карта 2", "Приват", "")]
                 )
                 print("✅ Default cards added")
 

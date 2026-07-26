@@ -12,6 +12,7 @@ router = Router(name="admin_cards")
 
 class CardFSM(StatesGroup):
     waiting_for_bank = State()
+    waiting_for_display_name = State()
     waiting_for_number = State()
 
 
@@ -22,7 +23,10 @@ async def manage_cards(message: types.Message, state: FSMContext):
 
     cards = await get_cards()
     text = "🏦 Поточні картки:\n\n" + "\n".join(
-        [f"{bank}: <code>{num}</code>" for bank, num in cards]
+        [
+            f"Карта {index}: {bank}: <code>{num}</code>"
+            for index, (bank, num) in enumerate(cards, start=1)
+        ]
     )
 
     kb = ReplyKeyboardMarkup(
@@ -49,8 +53,21 @@ async def ask_new_card(message: types.Message, state: FSMContext):
 
     await state.update_data(bank_name=bank)
     await message.answer(
-        f"💳 Введіть новий номер картки для {bank}:", reply_markup=ReplyKeyboardRemove()
+        f"🏦 Введіть назву банку для {bank}:",
+        reply_markup=ReplyKeyboardRemove(),
     )
+    await state.set_state(CardFSM.waiting_for_display_name)
+
+
+@router.message(CardFSM.waiting_for_display_name)
+async def ask_new_card_number(message: types.Message, state: FSMContext):
+    display_name = message.text.strip()
+    if not display_name:
+        await message.answer("❌ Назва банку не може бути порожньою. Введіть назву:")
+        return
+
+    await state.update_data(display_name=display_name)
+    await message.answer(f"💳 Введіть новий номер картки для {display_name}:")
     await state.set_state(CardFSM.waiting_for_number)
 
 
@@ -58,11 +75,13 @@ async def ask_new_card(message: types.Message, state: FSMContext):
 async def save_new_card(message: types.Message, state: FSMContext):
     data = await state.get_data()
     bank_name = data.get("bank_name")
+    display_name = data.get("display_name")
     new_number = message.text.strip()
 
-    await update_card(bank_name, new_number)
+    await update_card(bank_name, display_name, new_number)
     await message.answer(
-        f"✅ Картку для {bank_name} оновлено на:\n<code>{new_number}</code>",
+        f"✅ {bank_name} оновлено:\n"
+        f"🏦 {display_name}: <code>{new_number}</code>",
         parse_mode="HTML",
         reply_markup=admin_menu()),
     

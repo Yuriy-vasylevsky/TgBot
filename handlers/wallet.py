@@ -119,8 +119,9 @@ async def send_manual_topup_info(message: Message):
     )
 
     text = (
-        f"⏰ Автооплата працює з "
-        f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
+        # f"⏰ Автооплата працює з "
+        # f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
+        f"⏰ Касир працює з 09:00 до 00:00.\n\n"
         f"{cards_text}\n\n"
         "‼️ Мінімальне поповнення 200 грн‼️\n\n"
         "‼️ Після оплати надішліть касиру чек для зарахування коштів‼️"

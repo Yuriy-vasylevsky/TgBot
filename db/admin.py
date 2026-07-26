@@ -50,15 +50,25 @@ async def get_all_banned():
 
 async def get_cards():
     async with aiosqlite.connect(DB_PATH) as db:
-        cursor = await db.execute("SELECT bank_name, card_number FROM cards")
+        cursor = await db.execute(
+            """
+            SELECT COALESCE(NULLIF(TRIM(display_name), ''), bank_name), card_number
+            FROM cards
+            ORDER BY id
+            """
+        )
         return await cursor.fetchall()
 
 
-async def update_card(bank_name: str, new_number: str):
+async def update_card(bank_name: str, display_name: str, new_number: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE cards SET card_number = ? WHERE bank_name = ?",
-            (new_number, bank_name)
+            """
+            UPDATE cards
+            SET display_name = ?, card_number = ?
+            WHERE bank_name = ?
+            """,
+            (display_name, new_number, bank_name)
         )
         await db.commit()
 
