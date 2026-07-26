@@ -8,6 +8,7 @@ import aiosqlite
 from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status, get_total_losses_all_time 
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+import asyncio
 
 
 router = Router(name="admin_users")
@@ -28,34 +29,55 @@ class AdminSearch(StatesGroup):
 
 KYIV = timezone(timedelta(hours=3))
 
+# Часті натискання об'єднуємо в одне редагування повідомлення, щоб не
+# впиратися в ліміти Telegram і не показувати довгий індикатор завантаження.
+_numpad_edit_tasks: dict[tuple[int, int], asyncio.Task] = {}
+_numpad_locks: dict[tuple[int, int], asyncio.Lock] = {}
+
+
+async def _debounced_numpad_edit(
+    message: types.Message,
+    action: str,
+    display: str,
+    edit_key: tuple[int, int],
+) -> None:
+    try:
+        await asyncio.sleep(0.15)
+        label = "поповнення" if action == "add" else "списання"
+        await message.edit_text(
+            f"💰 Введіть суму для {label} балансу:\n\n"
+            f"Сума: <b>{display} грн</b>",
+            parse_mode="HTML",
+            reply_markup=build_numpad_kb(action),
+        )
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        pass
+    finally:
+        if _numpad_edit_tasks.get(edit_key) is asyncio.current_task():
+            _numpad_edit_tasks.pop(edit_key, None)
+
 
 
 def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        types.InlineKeyboardButton(text="1", callback_data=f"numpad:{action}:digit:1"),
-        types.InlineKeyboardButton(text="2", callback_data=f"numpad:{action}:digit:2"),
-        types.InlineKeyboardButton(text="3", callback_data=f"numpad:{action}:digit:3"),
-        types.InlineKeyboardButton(text="4", callback_data=f"numpad:{action}:digit:4"),
-        types.InlineKeyboardButton(text="5", callback_data=f"numpad:{action}:digit:5"),
-
-        
+        types.InlineKeyboardButton(text="+1", callback_data=f"numpad:{action}:quick:1"),
+        types.InlineKeyboardButton(text="+5", callback_data=f"numpad:{action}:quick:5"),
+        types.InlineKeyboardButton(text="+10", callback_data=f"numpad:{action}:quick:10"),
     )
-    kb.row(
-        types.InlineKeyboardButton(text="6", callback_data=f"numpad:{action}:digit:6"),
-        types.InlineKeyboardButton(text="7", callback_data=f"numpad:{action}:digit:7"),
-        types.InlineKeyboardButton(text="8", callback_data=f"numpad:{action}:digit:8"),
-        types.InlineKeyboardButton(text="9", callback_data=f"numpad:{action}:digit:9"),
-        types.InlineKeyboardButton(text="0", callback_data=f"numpad:{action}:digit:0"),
-    )
-
     kb.row(
         types.InlineKeyboardButton(text="+50", callback_data=f"numpad:{action}:quick:50"),
         types.InlineKeyboardButton(text="+100", callback_data=f"numpad:{action}:quick:100"),
         types.InlineKeyboardButton(text="+200", callback_data=f"numpad:{action}:quick:200"),
-        types.InlineKeyboardButton(text="⌫", callback_data=f"numpad:{action}:back:0"),
     )
-    kb.row( types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"))
+    kb.row(
+        types.InlineKeyboardButton(text="+500", callback_data=f"numpad:{action}:quick:500"),
+        types.InlineKeyboardButton(text="+1000", callback_data=f"numpad:{action}:quick:1000"),
+        types.InlineKeyboardButton(text="⌫ Стерти", callback_data=f"numpad:{action}:clear:0"),
+    )
+    kb.row(types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"))
     kb.row(types.InlineKeyboardButton(text="❌ Скасувати", callback_data=f"numpad:{action}:cancel:0"))
     return kb.as_markup()
 
@@ -401,7 +423,7 @@ async def show_user_detail(callback: types.CallbackQuery):
     # ==================== КНОПКИ ====================
     kb = InlineKeyboardBuilder()
 
-    kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
+    # kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
     kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
     kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}") 
     kb.button(text="➕1 промо", callback_data=f"ask_add_promo:{user_id}:{from_page}")
@@ -416,9 +438,11 @@ async def show_user_detail(callback: types.CallbackQuery):
     else:
         kb.button(text="▼ Останні дії", callback_data=f"user_detail:{user_id}:{from_page}:1:{1 if show_checks else 0}")
 
+    kb.button(text="💰 Поповнити баланс", callback_data=f"balance_add:{user_id}:{from_page}")
+
     kb.button(text="← Назад до списку", callback_data=f"users_list:{from_page}")
 
-    kb.adjust(2, 2, 2, 1)
+    kb.adjust(1, 2, 2, 1,1)
 
     try:
         await callback.message.edit_text(
@@ -787,39 +811,51 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
         await callback.answer("Помилка обробки", show_alert=True)
         return
 
-    data = await state.get_data()
-    user_id = data.get("user_id")
-    current = data.get("input", "")
+    edit_key = (callback.message.chat.id, callback.message.message_id)
+    lock = _numpad_locks.setdefault(edit_key, asyncio.Lock())
 
-    if user_id is None:
-        await callback.answer("Сесія застаріла, спробуйте ще раз", show_alert=True)
-        return
+    async with lock:
+        data = await state.get_data()
+        user_id = data.get("user_id")
+        current = data.get("input", "")
 
-    if sub == "cancel":
-        await state.clear()
-        try:
-            await callback.message.delete()
-        except Exception:
-            pass
-        await callback.answer("Скасовано")
-        return
+        if user_id is None:
+            await callback.answer("Сесія застаріла, спробуйте ще раз", show_alert=True)
+            return
 
-    if sub == "digit":
-        if len(current) < 7:
-            current += value
+        if sub == "cancel":
+            pending_edit = _numpad_edit_tasks.pop(edit_key, None)
+            if pending_edit:
+                pending_edit.cancel()
+            await state.clear()
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
+            await callback.answer("Скасовано")
+            _numpad_locks.pop(edit_key, None)
+            return
 
-    elif sub == "back":
-        current = current[:-1]
+        if sub == "digit":
+            if len(current) < 7:
+                current += value
 
-    elif sub == "quick":
-        base = int(current) if current else 0
-        current = str(base + int(value))
+        elif sub == "clear":
+            current = ""
 
-    elif sub == "confirm":
+        elif sub == "quick":
+            base = int(current) if current else 0
+            current = str(base + int(value))
+
+        elif sub == "confirm":
             if not current or int(current) <= 0:
                 await callback.answer("Введіть суму більше 0", show_alert=True)
                 return
 
+            pending_edit = _numpad_edit_tasks.pop(edit_key, None)
+            if pending_edit:
+                pending_edit.cancel()
+            await callback.answer()
             amount = int(current)
             await state.clear()
 
@@ -867,20 +903,20 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
                 except Exception:
                     await callback.message.answer(result_text)
 
-            await callback.answer()
+            _numpad_locks.pop(edit_key, None)
             return
 
-    await state.update_data(input=current)
-    display = current if current else "0"
-    label = "поповнення" if action == "add" else "списання"
+        await state.update_data(input=current)
+        await callback.answer()
 
-    try:
-        await callback.message.edit_text(
-            f"💰 Введіть суму для {label} балансу:\n\nСума: <b>{display} грн</b>",
-            parse_mode="HTML",
-            reply_markup=build_numpad_kb(action)
+        pending_edit = _numpad_edit_tasks.get(edit_key)
+        if pending_edit:
+            pending_edit.cancel()
+        _numpad_edit_tasks[edit_key] = asyncio.create_task(
+            _debounced_numpad_edit(
+                callback.message,
+                action,
+                current if current else "0",
+                edit_key,
+            )
         )
-    except Exception:
-        pass
-
-    await callback.answer()
