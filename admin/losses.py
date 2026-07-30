@@ -38,7 +38,10 @@ async def _get_losses() -> tuple[list[dict], list[dict]]:
                 full_name,
                 COALESCE(daily_net, 0) AS daily_net,
                 COALESCE(yesterday_net, 0) AS yesterday_net,
-                last_net_date
+                last_net_date,
+                COALESCE(daily_game_win, 0) AS daily_game_win,
+                COALESCE(yesterday_game_win, 0) AS yesterday_game_win,
+                last_game_win_date
             FROM users
             """
         )
@@ -66,26 +69,62 @@ async def _get_losses() -> tuple[list[dict], list[dict]]:
             today_value = 0
             yesterday_value = 0
 
+        last_win_date_raw = row["last_game_win_date"]
+        try:
+            last_win_date = datetime.fromisoformat(str(last_win_date_raw)).date()
+        except (TypeError, ValueError):
+            last_win_date = None
+
+        if last_win_date == today:
+            today_win = row["daily_game_win"]
+            yesterday_win = row["yesterday_game_win"]
+        elif last_win_date == yesterday:
+            today_win = 0
+            yesterday_win = row["daily_game_win"]
+        else:
+            today_win = 0
+            yesterday_win = 0
+
         player = {
             "user_id": row["user_id"],
             "username": row["username"],
             "full_name": row["full_name"],
         }
-        if today_value > 0:
-            today_losses.append({**player, "amount": today_value})
-        if yesterday_value > 0:
-            yesterday_losses.append({**player, "amount": yesterday_value})
+        today_loss = max(today_value, 0)
+        yesterday_loss = max(yesterday_value, 0)
+        today_win = max(today_win, 0)
+        yesterday_win = max(yesterday_win, 0)
 
-    today_losses.sort(key=lambda item: item["amount"], reverse=True)
-    yesterday_losses.sort(key=lambda item: item["amount"], reverse=True)
+        if today_loss > 0 or today_win > 0:
+            today_losses.append(
+                {
+                    **player,
+                    "loss": today_loss,
+                    "win": today_win,
+                    "result": today_loss - today_win,
+                }
+            )
+        if yesterday_loss > 0 or yesterday_win > 0:
+            yesterday_losses.append(
+                {
+                    **player,
+                    "loss": yesterday_loss,
+                    "win": yesterday_win,
+                    "result": yesterday_loss - yesterday_win,
+                }
+            )
+
+    today_losses.sort(key=lambda item: item["result"], reverse=True)
+    yesterday_losses.sort(key=lambda item: item["result"], reverse=True)
     return today_losses, yesterday_losses
 
 
 def _format_players(players: list[dict]) -> list[str]:
     return [
         (
-            f"{index}. {_player_label(item['user_id'], item['username'], item['full_name'])}"
-            f" — <b>{item['amount']} грн</b>"
+            f"{index}. {_player_label(item['user_id'], item['username'], item['full_name'])}\n"
+            f"   💔 {item['loss']} | 🎉 {item['win']} | "
+            f"📊 <b>{item['result']:+} грн</b>"
         )
         for index, item in enumerate(players, start=1)
     ]
@@ -101,18 +140,22 @@ async def _build_summary_text(date_offset: int) -> str:
     today_losses, yesterday_losses = await _get_losses()
     players = _losses_for_day(today_losses, yesterday_losses, date_offset)
     day_label = "Сьогодні" if date_offset == 0 else "Вчора"
-    total = sum(item["amount"] for item in players)
+    total_losses = sum(item["loss"] for item in players)
+    total_wins = sum(item["win"] for item in players)
+    total_result = total_losses - total_wins
 
     lines = [
-        f"📉 <b>Програші — {day_label}</b>\n",
-        f"💰 Всього за день: <b>{total} грн</b>",
+        f"📊 <b>Результат — {day_label}</b>\n",
+        f"💔 Програші: <b>{total_losses} грн</b>",
+        f"🎉 Виграші: <b>{total_wins} грн</b>",
+        f"💰 Чистий результат: <b>{total_result:+} грн</b>",
         f"👥 Гравців: <b>{len(players)}</b>",
     ]
     if players:
-        lines.append("\n🔝 <b>Найбільші програші:</b>")
+        lines.append("\n🔝 <b>Результати гравців:</b>")
         lines.extend(_format_players(players[:5]))
     else:
-        lines.append("\nПоки що немає програшів за цей день.")
+        lines.append("\nПоки що немає програшів або виграшів за цей день.")
     return "\n".join(lines)
 
 
@@ -222,16 +265,17 @@ async def show_losses_list(callback: types.CallbackQuery):
     day_label = "Сьогодні" if date_offset == 0 else "Вчора"
 
     if page_players:
-        lines = [f"📋 <b>Програші — {day_label}</b>\n"]
+        lines = [f"📋 <b>Результати — {day_label}</b>\n"]
         for index, item in enumerate(page_players, start=start + 1):
             lines.append(
                 f"{index}. "
-                f"{_player_label(item['user_id'], item['username'], item['full_name'])}"
-                f" — <b>{item['amount']} грн</b>"
+                f"{_player_label(item['user_id'], item['username'], item['full_name'])}\n"
+                f"   💔 {item['loss']} | 🎉 {item['win']} | "
+                f"📊 <b>{item['result']:+} грн</b>"
             )
         text = "\n".join(lines)
     else:
-        text = f"📋 <b>Програші — {day_label}</b>\n\nСписок порожній."
+        text = f"📋 <b>Результати — {day_label}</b>\n\nСписок порожній."
 
     await callback.message.edit_text(
         text,
