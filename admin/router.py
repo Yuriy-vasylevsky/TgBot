@@ -15,12 +15,14 @@ from .notifications import router as notifications_router
 from .safe import router as safe_router
 from .checks import router as admin_checks_router
 from .payment_history import router as payment_history_router
+from .losses import router as losses_router
 
 router = Router(name="admin")
 
 # Підключаємо всі підроутери
 router.include_router(admin_checks_router) 
 router.include_router(payment_history_router)
+router.include_router(losses_router)
 router.include_router(base_router)
 router.include_router(winrate_router)
 router.include_router(users_router)

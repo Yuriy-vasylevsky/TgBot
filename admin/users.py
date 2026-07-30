@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from db import get_all_users_info, search_users, get_issued_checks_for_user, get_all_balances
 from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
+from handlers.menu import main_menu
 import aiosqlite
 from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status, get_total_losses_all_time 
 from aiogram.fsm.context import FSMContext
@@ -63,18 +64,13 @@ async def _debounced_numpad_edit(
 def build_numpad_kb(action: str) -> types.InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.row(
-        types.InlineKeyboardButton(text="+1", callback_data=f"numpad:{action}:quick:1"),
-        types.InlineKeyboardButton(text="+5", callback_data=f"numpad:{action}:quick:5"),
-        types.InlineKeyboardButton(text="+10", callback_data=f"numpad:{action}:quick:10"),
-    )
-    kb.row(
         types.InlineKeyboardButton(text="+50", callback_data=f"numpad:{action}:quick:50"),
         types.InlineKeyboardButton(text="+100", callback_data=f"numpad:{action}:quick:100"),
         types.InlineKeyboardButton(text="+200", callback_data=f"numpad:{action}:quick:200"),
     )
     kb.row(
+        types.InlineKeyboardButton(text="+250", callback_data=f"numpad:{action}:quick:250"),
         types.InlineKeyboardButton(text="+500", callback_data=f"numpad:{action}:quick:500"),
-        types.InlineKeyboardButton(text="+1000", callback_data=f"numpad:{action}:quick:1000"),
         types.InlineKeyboardButton(text="⌫ Стерти", callback_data=f"numpad:{action}:clear:0"),
     )
     kb.row(types.InlineKeyboardButton(text="✅ Підтвердити", callback_data=f"numpad:{action}:confirm:0"))
@@ -542,6 +538,9 @@ async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
         parse_mode="HTML",
         reply_markup=build_numpad_kb("add")
     )
+    await callback.message.answer(
+        "Або введіть потрібну суму вручну:"
+    )
     await callback.answer()
 
 
@@ -562,7 +561,8 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
 
     await message.answer(
         f"✅ Баланс поповнено на {amount} грн\n\n"
-        f"💰 Новий баланс: {balance} грн"
+        f"💰 Новий баланс: {balance} грн",
+        reply_markup=main_menu(is_admin=True),
     )
 
     try:
@@ -836,11 +836,7 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
             _numpad_locks.pop(edit_key, None)
             return
 
-        if sub == "digit":
-            if len(current) < 7:
-                current += value
-
-        elif sub == "clear":
+        if sub == "clear":
             current = ""
 
         elif sub == "quick":
@@ -879,6 +875,11 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
                 except Exception:
                     await callback.message.answer(result_text)
 
+                await callback.message.answer(
+                    "↩️ Головне меню",
+                    reply_markup=main_menu(is_admin=True),
+                )
+
                 try:
                     await callback.bot.send_message(
                         user_id,
@@ -902,6 +903,11 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
                     await callback.message.edit_text(result_text)
                 except Exception:
                     await callback.message.answer(result_text)
+
+                await callback.message.answer(
+                    "↩️ Головне меню",
+                    reply_markup=main_menu(is_admin=True),
+                )
 
             _numpad_locks.pop(edit_key, None)
             return
