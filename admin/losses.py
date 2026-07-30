@@ -90,12 +90,12 @@ async def _get_losses() -> tuple[list[dict], list[dict]]:
             "username": row["username"],
             "full_name": row["full_name"],
         }
-        today_loss = max(today_value, 0)
-        yesterday_loss = max(yesterday_value, 0)
+        today_loss = today_value
+        yesterday_loss = yesterday_value
         today_win = max(today_win, 0)
         yesterday_win = max(yesterday_win, 0)
 
-        if today_loss > 0 or today_win > 0:
+        if today_loss != 0 or today_win > 0:
             today_losses.append(
                 {
                     **player,
@@ -104,7 +104,7 @@ async def _get_losses() -> tuple[list[dict], list[dict]]:
                     "result": today_loss - today_win,
                 }
             )
-        if yesterday_loss > 0 or yesterday_win > 0:
+        if yesterday_loss != 0 or yesterday_win > 0:
             yesterday_losses.append(
                 {
                     **player,
