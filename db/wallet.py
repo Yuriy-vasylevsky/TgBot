@@ -298,6 +298,164 @@ async def remove_pending_payment(user_id: int):
         await db.commit()
 
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Ручні поповнення за скриншотом
+# ───────────────────────────────────────────────────────────────────────────────
+
+async def create_manual_payment(
+    user_id: int,
+    username: str | None,
+    full_name: str | None,
+    amount: int,
+    receipt_file_id: str,
+    receipt_type: str,
+) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            INSERT INTO manual_payments
+            (user_id, username, full_name, amount, receipt_file_id, receipt_type)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                username,
+                full_name,
+                amount,
+                receipt_file_id,
+                receipt_type,
+            ),
+        )
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def delete_pending_manual_payment(payment_id: int, user_id: int) -> None:
+    """Прибирає заявку, якщо скриншот не вдалося переслати адміністратору."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM manual_payments "
+            "WHERE id = ? AND user_id = ? AND status = 'pending'",
+            (payment_id, user_id),
+        )
+        await db.commit()
+
+
+async def review_manual_payment(
+    payment_id: int, admin_id: int, decision: str
+) -> dict:
+    """
+    Атомарно підтверджує або відхиляє ручний платіж.
+    При підтвердженні в одній транзакції оновлює баланс, денний net
+    та історію оплат, тому повторний клік не може зарахувати гроші двічі.
+    """
+    if decision not in {"approved", "rejected"}:
+        return {"ok": False, "reason": "invalid_decision"}
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id FROM manual_payments WHERE id = ?", (payment_id,)
+        )
+        initial = await cursor.fetchone()
+    if not initial:
+        return {"ok": False, "reason": "not_found"}
+
+    user_id = initial[0]
+    if decision == "approved":
+        await ensure_daily_reset(user_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await db.execute(
+                """
+                SELECT user_id, username, full_name, amount, status
+                FROM manual_payments
+                WHERE id = ?
+                """,
+                (payment_id,),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                await db.rollback()
+                return {"ok": False, "reason": "not_found"}
+
+            user_id, username, full_name, amount, status = row
+            if status != "pending":
+                await db.rollback()
+                return {
+                    "ok": False,
+                    "reason": "already_reviewed",
+                    "status": status,
+                }
+
+            await db.execute(
+                """
+                UPDATE manual_payments
+                SET status = ?,
+                    reviewed_at = DATETIME('now', '+3 hours'),
+                    reviewed_by = ?
+                WHERE id = ? AND status = 'pending'
+                """,
+                (decision, admin_id, payment_id),
+            )
+
+            if decision == "approved":
+                today_str = datetime.now(KYIV_TZ).date().isoformat()
+                await db.execute(
+                    """
+                    INSERT OR IGNORE INTO users (user_id, username, full_name)
+                    VALUES (?, ?, ?)
+                    """,
+                    (user_id, username, full_name),
+                )
+                await db.execute(
+                    """
+                    UPDATE users
+                    SET balance = COALESCE(balance, 0) + ?,
+                        daily_net = COALESCE(daily_net, 0) + ?,
+                        last_net_date = ?
+                    WHERE user_id = ?
+                    """,
+                    (amount, amount, today_str, user_id),
+                )
+                await db.execute(
+                    """
+                    INSERT INTO payment_logs (user_id, username, amount, comment)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        username or full_name,
+                        amount,
+                        f"MANUAL:{payment_id}",
+                    ),
+                )
+
+            await db.commit()
+
+            balance = None
+            if decision == "approved":
+                cursor = await db.execute(
+                    "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?",
+                    (user_id,),
+                )
+                balance = (await cursor.fetchone())[0]
+
+            return {
+                "ok": True,
+                "status": decision,
+                "user_id": user_id,
+                "username": username,
+                "full_name": full_name,
+                "amount": amount,
+                "balance": balance,
+            }
+        except Exception:
+            await db.rollback()
+            raise
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # mark_tx_used — АТОМАРНА ВЕРСІЯ З EXCLUSIVE LOCK
 # ═══════════════════════════════════════════════════════════════════════════════

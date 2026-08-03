@@ -147,6 +147,7 @@ async def init_db():
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",
                 "payment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, amount INTEGER, comment TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
+                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER)",
                 "game_stats (game_name TEXT PRIMARY KEY, total_games INTEGER DEFAULT 0, wins INTEGER DEFAULT 0)",
                 "slot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, result TEXT, final_balance INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "casino_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, casino_type TEXT, code TEXT, used INTEGER DEFAULT 0, assigned_to INTEGER, assigned_at DATETIME)",
@@ -169,6 +170,11 @@ async def init_db():
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
+
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manual_payments_status "
+                "ON manual_payments(status)"
+            )
 
             # Назва слота (Карта 1/Карта 2) не змінюється, а назва банку
             # зберігається окремо й показується користувачам у реквізитах.

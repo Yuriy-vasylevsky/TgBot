@@ -2,6 +2,7 @@
 import time
 import json
 import logging
+from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -32,7 +33,11 @@ from db import (
     mark_referral_paid,
     update_daily_net,
     get_cards,
+    create_manual_payment,
+    delete_pending_manual_payment,
+    review_manual_payment,
 )
+from handlers.menu import main_menu
 
 import asyncio
 
@@ -44,7 +49,6 @@ router = Router(name="wallet")
 MIN_SUM = 200
 REFERRAL_BONUS = 50
 
-CASHIER_URL = "https://t.me/KaSSa_4444"
 KYIV_OFFSET = timedelta(hours=3)
 
 # Розклад автооплати: з 22:00 до 09:00 (Київ)
@@ -108,34 +112,9 @@ def is_auto_topup_time() -> bool:
     return hour >= AUTO_TOPUP_START_HOUR or hour < AUTO_TOPUP_END_HOUR
 
 
-async def send_manual_topup_info(message: Message):
-    cards = await get_cards()
-    cards_text = "\n\n".join([f"🏦 {bank}: <code>{num}</code>" for bank, num in cards]) or "—"
-
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="👨‍💼 Касир", url=CASHIER_URL)]
-        ]
-    )
-
-    text = (
-        # f"⏰ Автооплата працює з "
-        # f"{AUTO_TOPUP_START_HOUR:02d}:00 до {AUTO_TOPUP_END_HOUR:02d}:00.\n\n"
-        f"⏰ Касир працює з 09:00 до 00:00.\n\n"
-        f"{cards_text}\n\n"
-        "‼️ Мінімальне поповнення 200 грн‼️\n\n"
-        "‼️ Після оплати надішліть касиру чек для зарахування коштів‼️"
-    )
-
-    await message.answer(
-        text,
-        reply_markup=kb,
-        parse_mode="HTML",
-    )
-
-
 class WalletStates(StatesGroup):
     enter_amount = State()
+    upload_receipt = State()
 
 
 # ==================== МЕНЮ ГАМАНЦЯ ====================
@@ -162,11 +141,6 @@ async def wallet_menu(message: Message):
 # ==================== ПОПОВНЕННЯ ====================
 @router.callback_query(F.data == "wallet_topup")
 async def start_topup(callback: CallbackQuery, state: FSMContext):
-    if not is_auto_topup_time():
-        await send_manual_topup_info(callback.message)
-        await callback.answer()
-        return
-
     cancel_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -175,6 +149,9 @@ async def start_topup(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"Введіть суму поповнення в гривнях (від {MIN_SUM} грн):",
         reply_markup=cancel_kb,
+    )
+    await state.update_data(
+        topup_mode="auto" if is_auto_topup_time() else "manual"
     )
     await state.set_state(WalletStates.enter_amount)
     await callback.answer()
@@ -190,11 +167,6 @@ async def cancel_topup(callback: CallbackQuery, state: FSMContext):
 
 @router.message(WalletStates.enter_amount)
 async def process_amount(message: Message, state: FSMContext):
-    if not is_auto_topup_time():
-        await state.clear()
-        await send_manual_topup_info(message)
-        return
-
     cancel_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -207,6 +179,45 @@ async def process_amount(message: Message, state: FSMContext):
             return
     except Exception:
         await message.answer("Введи суму поповнення або скасуй платіж", reply_markup=cancel_kb)
+        return
+
+    state_data = await state.get_data()
+    if state_data.get("topup_mode") == "manual":
+        cards = await get_cards()
+        cards_text = "\n\n".join(
+            f"🏦 {escape(bank)}: <code>{escape(number)}</code>"
+            for bank, number in cards
+            if number
+        ) or "Реквізити тимчасово недоступні."
+
+        await state.update_data(manual_amount=amount_grn)
+        await state.set_state(WalletStates.upload_receipt)
+        receipt_keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="⚠️ Не можу надіслати квитанцію",
+                        callback_data="wallet_no_receipt",
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="❌ Скасувати",
+                        callback_data="wallet_cancel",
+                    )
+                ],
+            ]
+        )
+        await message.answer(
+            f"💰 <b>Поповнення на {amount_grn} грн</b>\n\n"
+            f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
+            f"на одну з карток:\n\n"
+            f"{cards_text}\n\n"
+            f"📸 Після переказу надішліть сюди скриншот оплати.\n"
+            f"Заявка буде передана адміністратору на перевірку.",
+            parse_mode="HTML",
+            reply_markup=receipt_keyboard,
+        )
         return
 
     amount_kop = amount_grn * 100
@@ -241,6 +252,270 @@ async def process_amount(message: Message, state: FSMContext):
 
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
     await state.clear()
+
+
+@router.message(WalletStates.upload_receipt)
+async def receive_manual_receipt(message: Message, state: FSMContext):
+    receipt_type: str | None = None
+    receipt_file_id: str | None = None
+
+    if message.photo:
+        receipt_type = "photo"
+        receipt_file_id = message.photo[-1].file_id
+    elif message.document:
+        receipt_type = "document"
+        receipt_file_id = message.document.file_id
+
+    if not receipt_file_id or not receipt_type:
+        await message.answer(
+            "❌ Надішліть квитанцію як фото або документ чи скористайтеся "
+            "кнопкою «Не можу надіслати квитанцію»."
+        )
+        return
+
+    data = await state.get_data()
+    amount = data.get("manual_amount")
+    if not amount:
+        await state.clear()
+        await message.answer("❌ Заявка застаріла. Почніть поповнення ще раз.")
+        return
+
+    payment_id = await create_manual_payment(
+        user_id=message.from_user.id,
+        username=message.from_user.username,
+        full_name=message.from_user.full_name,
+        amount=amount,
+        receipt_file_id=receipt_file_id,
+        receipt_type=receipt_type,
+    )
+
+    username = (
+        f"@{escape(message.from_user.username)}"
+        if message.from_user.username
+        else "немає"
+    )
+    user_link = (
+        f'<a href="tg://user?id={message.from_user.id}">'
+        f"{escape(message.from_user.full_name)}</a>"
+    )
+    caption = (
+        f"🧾 <b>Нова заявка на поповнення №{payment_id}</b>\n\n"
+        f"👤 {user_link}\n"
+        f"🔗 {username}\n"
+        f"🆔 <code>{message.from_user.id}</code>\n"
+        f"💰 Сума: <b>{amount} грн</b>"
+    )
+    admin_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Підтвердити",
+                    callback_data=f"manualpay:approve:{payment_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Відхилити",
+                    callback_data=f"manualpay:reject:{payment_id}",
+                ),
+            ]
+        ]
+    )
+
+    try:
+        if receipt_type == "photo":
+            await message.bot.send_photo(
+                ADMIN_ID,
+                photo=receipt_file_id,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=admin_keyboard,
+            )
+        else:
+            await message.bot.send_document(
+                ADMIN_ID,
+                document=receipt_file_id,
+                caption=caption,
+                parse_mode="HTML",
+                reply_markup=admin_keyboard,
+            )
+    except Exception as error:
+        await delete_pending_manual_payment(payment_id, message.from_user.id)
+        logging.error(
+            f"❌ Не вдалося передати ручний платіж №{payment_id} адміну: {error}",
+            exc_info=True,
+        )
+        await message.answer(
+            "❌ Не вдалося передати скриншот адміністратору. "
+            "Спробуйте надіслати його ще раз."
+        )
+        return
+
+    await state.clear()
+    await message.answer(
+        f"✅ Скриншот надіслано адміністратору.\n\n"
+        f"💰 Сума: <b>{amount} грн</b>\n"
+        f"⏳ Очікуйте підтвердження платежу.",
+        parse_mode="HTML",
+    )
+
+
+@router.callback_query(
+    WalletStates.upload_receipt,
+    F.data == "wallet_no_receipt",
+)
+async def submit_manual_payment_without_receipt(
+    callback: CallbackQuery, state: FSMContext
+):
+    data = await state.get_data()
+    amount = data.get("manual_amount")
+    if not amount:
+        await state.clear()
+        await callback.answer("Заявка застаріла", show_alert=True)
+        return
+
+    payment_id = await create_manual_payment(
+        user_id=callback.from_user.id,
+        username=callback.from_user.username,
+        full_name=callback.from_user.full_name,
+        amount=amount,
+        receipt_file_id="",
+        receipt_type="none",
+    )
+
+    username = (
+        f"@{escape(callback.from_user.username)}"
+        if callback.from_user.username
+        else "немає"
+    )
+    user_link = (
+        f'<a href="tg://user?id={callback.from_user.id}">'
+        f"{escape(callback.from_user.full_name)}</a>"
+    )
+    text = (
+        f"🧾 <b>Нова заявка на поповнення №{payment_id}</b>\n\n"
+        f"👤 {user_link}\n"
+        f"🔗 {username}\n"
+        f"🆔 <code>{callback.from_user.id}</code>\n"
+        f"💰 Сума: <b>{amount} грн</b>\n\n"
+        f"⚠️ <b>Квитанцію не надано</b>"
+    )
+    admin_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Підтвердити",
+                    callback_data=f"manualpay:approve:{payment_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Відхилити",
+                    callback_data=f"manualpay:reject:{payment_id}",
+                ),
+            ]
+        ]
+    )
+
+    try:
+        await callback.bot.send_message(
+            ADMIN_ID,
+            text,
+            parse_mode="HTML",
+            reply_markup=admin_keyboard,
+        )
+    except Exception as error:
+        await delete_pending_manual_payment(payment_id, callback.from_user.id)
+        logging.error(
+            f"❌ Не вдалося передати ручний платіж №{payment_id} адміну: {error}",
+            exc_info=True,
+        )
+        await callback.answer("Помилка надсилання заявки", show_alert=True)
+        return
+
+    await state.clear()
+    await callback.message.edit_text(
+        f"✅ Заявку без квитанції надіслано адміністратору.\n\n"
+        f"💰 Сума: <b>{amount} грн</b>\n"
+        f"⏳ Очікуйте підтвердження платежу.",
+        parse_mode="HTML",
+    )
+    await callback.answer("Заявку надіслано")
+
+
+@router.callback_query(F.data.startswith("manualpay:"))
+async def review_manual_topup(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Недостатньо прав", show_alert=True)
+        return
+
+    try:
+        _, action, payment_id_raw = callback.data.split(":")
+        payment_id = int(payment_id_raw)
+    except (TypeError, ValueError):
+        await callback.answer("Некоректна заявка", show_alert=True)
+        return
+
+    if action not in {"approve", "reject"}:
+        await callback.answer("Некоректна дія", show_alert=True)
+        return
+
+    decision = "approved" if action == "approve" else "rejected"
+    result = await review_manual_payment(payment_id, callback.from_user.id, decision)
+    if not result.get("ok"):
+        if result.get("reason") == "already_reviewed":
+            status_label = (
+                "підтверджено" if result.get("status") == "approved" else "відхилено"
+            )
+            await callback.answer(
+                f"Цей платіж уже {status_label}", show_alert=True
+            )
+        else:
+            await callback.answer("Заявку не знайдено", show_alert=True)
+        return
+
+    await callback.answer("Платіж оброблено")
+    status_text = (
+        "✅ <b>ПІДТВЕРДЖЕНО</b>" if decision == "approved"
+        else "❌ <b>ВІДХИЛЕНО</b>"
+    )
+    try:
+        if callback.message.caption is not None:
+            await callback.message.edit_caption(
+                caption=f"{escape(callback.message.caption)}\n\n{status_text}",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+        else:
+            await callback.message.edit_text(
+                f"{escape(callback.message.text or '')}\n\n{status_text}",
+                parse_mode="HTML",
+                reply_markup=None,
+            )
+    except Exception as error:
+        logging.warning(f"Не вдалося оновити заявку №{payment_id}: {error}")
+
+    user_id = result["user_id"]
+    amount = result["amount"]
+    try:
+        if decision == "approved":
+            await callback.bot.send_message(
+                user_id,
+                f"✅ Ваш платіж підтверджено!\n\n"
+                f"💰 Зараховано: <b>{amount} грн</b>\n"
+                f"💳 Баланс: <b>{result['balance']} грн</b>",
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+        else:
+            await callback.bot.send_message(
+                user_id,
+                f"❌ Платіж на суму <b>{amount} грн</b> відхилено.\n\n"
+                f"Якщо це помилка, зверніться до касира.",
+                parse_mode="HTML",
+                reply_markup=main_menu(),
+            )
+    except Exception as error:
+        logging.error(
+            f"❌ Не вдалося повідомити користувача {user_id} "
+            f"про ручний платіж №{payment_id}: {error}"
+        )
 
 
 
