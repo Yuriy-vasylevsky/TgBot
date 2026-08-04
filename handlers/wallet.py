@@ -5,6 +5,7 @@ import logging
 from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from aiogram import Router, F
 from aiogram.filters import Command
@@ -19,8 +20,21 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import monobank
-from handlers.config import MONO_TOKEN, MONO_ACCOUNT, MONO_CARD, MONO_JAR_LINK, MONO_JAR_CARD
-from handlers.config import ADMIN_ID
+from handlers.config import (
+    ADMIN_ID,
+    GPT_MAX_TIME_DIFFERENCE_MINUTES,
+    GPT_MIN_CONFIDENCE,
+    MAX_RECEIPT_FILE_SIZE_MB,
+    MONO_ACCOUNT,
+    MONO_CARD,
+    MONO_JAR_CARD,
+    MONO_JAR_LINK,
+    MONO_TOKEN,
+    OPENAI_API_KEY,
+    OPENAI_MODEL,
+    OPENAI_TIMEOUT_SECONDS,
+    RECEIPT_PHASH_MAX_DISTANCE,
+)
 from db import (
     get_balance,
     add_pending_payment,
@@ -36,20 +50,40 @@ from db import (
     create_manual_payment,
     delete_pending_manual_payment,
     review_manual_payment,
+    has_recent_manual_payment,
+    set_manual_payment_route,
+    register_receipt_fingerprints,
+    save_manual_payment_analysis,
+    mark_manual_payment_analysis_started,
 )
 from handlers.menu import main_menu
+from services.receipt_analyzer import (
+    PaymentReceiptAnalysis,
+    ReceiptFileTooLarge,
+    UnsupportedReceiptFile,
+    analyze_receipt_with_openai,
+    download_and_prepare_receipt,
+    evaluate_auto_approval,
+)
 
 import asyncio
+
+# Налаштування автоматичної перевірки поповнень.
+# Змініть ці значення тут, якщо потрібні інші обмеження.
+MINUTES_BETWEEN_PAYMENT_REQUESTS = 15
+MAX_AMOUNT_FOR_GPT_CHECK = 500
 
 # user_id -> asyncio.Lock. Паралельні натискання "Перевірити" від одного
 # користувача виконуються послідовно, а не одночасно.
 _payment_locks: dict[int, asyncio.Lock] = {}
+_manual_receipt_locks: dict[int, asyncio.Lock] = {}
 router = Router(name="wallet")
 
 MIN_SUM = 200
 REFERRAL_BONUS = 50
 
 KYIV_OFFSET = timedelta(hours=3)
+KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
 # Розклад автооплати: з 22:00 до 09:00 (Київ)
 AUTO_TOPUP_START_HOUR = 22
@@ -254,17 +288,468 @@ async def process_amount(message: Message, state: FSMContext):
     await state.clear()
 
 
+def _manual_payment_keyboard(payment_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Підтвердити",
+                    callback_data=f"manualpay:approve:{payment_id}",
+                ),
+                InlineKeyboardButton(
+                    text="❌ Відхилити",
+                    callback_data=f"manualpay:reject:{payment_id}",
+                ),
+            ]
+        ]
+    )
+
+
+def _payment_user_block(user, payment_id: int, amount: int) -> str:
+    username = f"@{escape(user.username)}" if user.username else "немає"
+    user_link = (
+        f'<a href="tg://user?id={user.id}">{escape(user.full_name)}</a>'
+    )
+    return (
+        f"🧾 <b>Заявка на поповнення №{payment_id}</b>\n\n"
+        f"👤 {user_link}\n"
+        f"🔗 {username}\n"
+        f"🆔 <code>{user.id}</code>\n"
+        f"💰 Сума: <b>{amount} грн</b>"
+    )
+
+
+def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
+    if analysis is None:
+        return ""
+    found_amount = (
+        f"{analysis.amount_found} грн" if analysis.amount_found is not None else "не знайдено"
+    )
+    card = (
+        f"**** {escape(analysis.recipient_card_last4)}"
+        if analysis.recipient_card_last4
+        else "не знайдено"
+    )
+    payment_time = escape(analysis.payment_datetime or "не визначено")
+    return (
+        f"\n\n🤖 <b>Результат автоматичної перевірки</b>\n"
+        f"Рішення: ручна перевірка\n"
+        f"Впевненість: {analysis.confidence:.0%}\n"
+        f"Знайдена сума: {found_amount}\n"
+        f"Картка: {card}\n"
+        f"Час: {payment_time}\n"
+        f"Причина GPT: {escape(analysis.reason[:250])}"
+    )
+
+
+async def _send_receipt_to_admin(
+    bot,
+    *,
+    receipt_type: str,
+    receipt_file_id: str,
+    text: str,
+    keyboard: InlineKeyboardMarkup | None,
+) -> None:
+    if receipt_type == "photo":
+        await bot.send_photo(
+            ADMIN_ID,
+            photo=receipt_file_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    else:
+        await bot.send_document(
+            ADMIN_ID,
+            document=receipt_file_id,
+            caption=text,
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+
+
+async def _route_payment_to_manual_review(
+    message: Message,
+    *,
+    payment_id: int,
+    amount: int,
+    receipt_type: str,
+    receipt_file_id: str,
+    reason: str,
+    analysis: PaymentReceiptAnalysis | None = None,
+) -> None:
+    await set_manual_payment_route(payment_id, reason)
+    caption = (
+        f"{_payment_user_block(message.from_user, payment_id, amount)}\n\n"
+        f"⚠️ <b>Передано на ручну перевірку</b>\n"
+        f"Причина: {escape(reason)}"
+        f"{_analysis_admin_text(analysis)}"
+    )
+    keyboard = _manual_payment_keyboard(payment_id)
+    try:
+        await _send_receipt_to_admin(
+            message.bot,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            text=caption,
+            keyboard=keyboard,
+        )
+    except Exception:
+        logging.exception(
+            "Failed to send receipt media to admin | payment_id=%s", payment_id
+        )
+        await message.bot.send_message(
+            ADMIN_ID,
+            f"{caption}\n\n⚠️ Файл квитанції не вдалося прикріпити.",
+            parse_mode="HTML",
+            reply_markup=keyboard,
+        )
+    logging.info(
+        "Manual payment routed to admin | payment_id=%s user_id=%s amount=%s reason=%s",
+        payment_id,
+        message.from_user.id,
+        amount,
+        reason,
+    )
+    await message.answer(
+        f"✅ Квитанцію передано адміністратору.\n\n"
+        f"💰 Сума: <b>{amount} грн</b>\n"
+        f"⏳ Очікуйте підтвердження платежу.",
+        parse_mode="HTML",
+    )
+
+
+async def _send_auto_approval_to_admin(
+    message: Message,
+    *,
+    payment_id: int,
+    amount: int,
+    receipt_type: str,
+    receipt_file_id: str,
+    analysis: PaymentReceiptAnalysis,
+    computed_time_difference: int,
+) -> None:
+    card = escape(analysis.recipient_card_last4 or "—")
+    operation_time = escape(analysis.payment_datetime or "—")
+    caption = (
+        f"🤖 <b>Платіж автоматично підтверджено</b>\n\n"
+        f"{_payment_user_block(message.from_user, payment_id, amount)}\n"
+        f"💳 Картка: **** {card}\n"
+        f"🕐 Час операції: {operation_time}\n"
+        f"⏱ Різниця: {computed_time_difference} хв\n"
+        f"📊 Впевненість GPT: {analysis.confidence:.0%}"
+    )
+    try:
+        await _send_receipt_to_admin(
+            message.bot,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            text=caption,
+            keyboard=None,
+        )
+    except Exception:
+        logging.exception(
+            "Failed to attach auto-approved receipt | payment_id=%s", payment_id
+        )
+        await message.bot.send_message(
+            ADMIN_ID,
+            f"{caption}\n\n⚠️ Файл квитанції не вдалося прикріпити.",
+            parse_mode="HTML",
+        )
+
+
+async def _process_manual_receipt(
+    message: Message,
+    *,
+    amount: int,
+    receipt_type: str,
+    receipt_file_id: str,
+    declared_file_size: int | None,
+) -> None:
+    payment_id = await create_manual_payment(
+        user_id=message.from_user.id,
+        username=message.from_user.username,
+        full_name=message.from_user.full_name,
+        amount=amount,
+        receipt_file_id=receipt_file_id,
+        receipt_type=receipt_type,
+    )
+    logging.info(
+        "Manual payment created | payment_id=%s user_id=%s amount=%s",
+        payment_id,
+        message.from_user.id,
+        amount,
+    )
+
+    try:
+        prepared = await download_and_prepare_receipt(
+            message.bot,
+            receipt_file_id,
+            declared_file_size,
+            MAX_RECEIPT_FILE_SIZE_MB,
+        )
+    except (UnsupportedReceiptFile, ReceiptFileTooLarge) as error:
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=str(error),
+        )
+        return
+    except Exception as error:
+        logging.exception(
+            "Receipt download failed | payment_id=%s user_id=%s",
+            payment_id,
+            message.from_user.id,
+        )
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=f"помилка завантаження квитанції: {type(error).__name__}",
+        )
+        return
+
+    duplicate = await register_receipt_fingerprints(
+        payment_id,
+        prepared.file_sha256,
+        prepared.perceptual_hash,
+        RECEIPT_PHASH_MAX_DISTANCE,
+    )
+    if duplicate.get("duplicate"):
+        duplicate_kind = "ідентична" if duplicate.get("kind") == "exact" else "дуже схожа"
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=(
+                f"{duplicate_kind} квитанція вже була у заявці "
+                f"№{duplicate.get('payment_id')}"
+            ),
+        )
+        return
+
+    if amount > MAX_AMOUNT_FOR_GPT_CHECK:
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=f"сума перевищує {MAX_AMOUNT_FOR_GPT_CHECK} грн",
+        )
+        return
+
+    if await has_recent_manual_payment(
+        message.from_user.id,
+        payment_id,
+        MINUTES_BETWEEN_PAYMENT_REQUESTS,
+    ):
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=(
+                f"повторна заявка протягом {MINUTES_BETWEEN_PAYMENT_REQUESTS} хвилин"
+            ),
+        )
+        return
+
+    cards = await get_cards()
+    allowed_cards: list[dict[str, str]] = []
+    for bank, number in cards:
+        digits = "".join(character for character in (number or "") if character.isdigit())
+        if len(digits) >= 4:
+            allowed_cards.append({"bank": bank, "last4": digits[-4:]})
+    if not allowed_cards:
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason="у системі немає валідних дозволених карток",
+        )
+        return
+
+    if not OPENAI_API_KEY:
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason="OpenAI API не налаштований",
+        )
+        return
+
+    await mark_manual_payment_analysis_started(payment_id)
+    logging.info(
+        "Starting GPT receipt analysis | payment_id=%s user_id=%s amount=%s model=%s",
+        payment_id,
+        message.from_user.id,
+        amount,
+        OPENAI_MODEL,
+    )
+    try:
+        now_kyiv = datetime.now(KYIV_ZONE)
+        analysis = await analyze_receipt_with_openai(
+            api_key=OPENAI_API_KEY,
+            model=OPENAI_MODEL,
+            timeout_seconds=OPENAI_TIMEOUT_SECONDS,
+            image=prepared,
+            expected_amount=amount,
+            allowed_cards=allowed_cards,
+            now_kyiv=now_kyiv,
+            max_time_difference_minutes=GPT_MAX_TIME_DIFFERENCE_MINUTES,
+        )
+        approved, code_reason, computed_difference = evaluate_auto_approval(
+            analysis,
+            expected_amount=amount,
+            allowed_card_last4={card["last4"] for card in allowed_cards},
+            now_kyiv=now_kyiv,
+            min_confidence=GPT_MIN_CONFIDENCE,
+            max_time_difference_minutes=GPT_MAX_TIME_DIFFERENCE_MINUTES,
+        )
+        route_reason = "auto_approved" if approved else code_reason
+        await save_manual_payment_analysis(
+            payment_id,
+            result_json=analysis.model_dump_json(),
+            decision="approve" if approved else "manual_review",
+            reason=code_reason,
+            confidence=analysis.confidence,
+            route_reason=route_reason,
+        )
+        logging.info(
+            "GPT receipt result | payment_id=%s user_id=%s amount=%s "
+            "status=%s amount_found=%s card_last4=%s confidence=%.3f "
+            "model_decision=%s final=%s reason=%s",
+            payment_id,
+            message.from_user.id,
+            amount,
+            analysis.payment_status,
+            analysis.amount_found,
+            analysis.recipient_card_last4,
+            analysis.confidence,
+            analysis.decision,
+            "approve" if approved else "manual_review",
+            code_reason,
+        )
+    except Exception as error:
+        logging.exception(
+            "OpenAI receipt analysis failed | payment_id=%s user_id=%s error=%s",
+            payment_id,
+            message.from_user.id,
+            type(error).__name__,
+        )
+        reason = f"помилка OpenAI: {type(error).__name__}"
+        await save_manual_payment_analysis(
+            payment_id,
+            result_json=None,
+            decision="manual_review",
+            reason=reason,
+            confidence=None,
+            route_reason=reason,
+        )
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=reason,
+        )
+        return
+
+    if not approved:
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=code_reason,
+            analysis=analysis,
+        )
+        return
+
+    result = await review_manual_payment(
+        payment_id,
+        admin_id=0,
+        decision="approved",
+        review_source="gpt",
+    )
+    if not result.get("ok"):
+        logging.error(
+            "Automatic credit failed | payment_id=%s user_id=%s reason=%s",
+            payment_id,
+            message.from_user.id,
+            result.get("reason"),
+        )
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason=f"автоматичне зарахування не виконано: {result.get('reason')}",
+            analysis=analysis,
+        )
+        return
+
+    await message.answer(
+        f"✅ Ваш платіж автоматично підтверджено!\n\n"
+        f"💰 Зараховано: <b>{amount} грн</b>\n"
+        f"💳 Баланс: <b>{result['balance']} грн</b>",
+        parse_mode="HTML",
+        reply_markup=main_menu(),
+    )
+    try:
+        await _send_auto_approval_to_admin(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            analysis=analysis,
+            computed_time_difference=computed_difference or 0,
+        )
+    except Exception:
+        logging.exception(
+            "Failed to notify admin about auto approval | payment_id=%s",
+            payment_id,
+        )
+    logging.info(
+        "Manual payment automatically credited | payment_id=%s user_id=%s amount=%s balance=%s",
+        payment_id,
+        message.from_user.id,
+        amount,
+        result["balance"],
+    )
+
+
 @router.message(WalletStates.upload_receipt)
 async def receive_manual_receipt(message: Message, state: FSMContext):
     receipt_type: str | None = None
     receipt_file_id: str | None = None
+    declared_file_size: int | None = None
 
     if message.photo:
         receipt_type = "photo"
         receipt_file_id = message.photo[-1].file_id
+        declared_file_size = message.photo[-1].file_size
     elif message.document:
         receipt_type = "document"
         receipt_file_id = message.document.file_id
+        declared_file_size = message.document.file_size
 
     if not receipt_file_id or not receipt_type:
         await message.answer(
@@ -280,82 +765,33 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
         await message.answer("❌ Заявка застаріла. Почніть поповнення ще раз.")
         return
 
-    payment_id = await create_manual_payment(
-        user_id=message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name,
-        amount=amount,
-        receipt_file_id=receipt_file_id,
-        receipt_type=receipt_type,
-    )
-
-    username = (
-        f"@{escape(message.from_user.username)}"
-        if message.from_user.username
-        else "немає"
-    )
-    user_link = (
-        f'<a href="tg://user?id={message.from_user.id}">'
-        f"{escape(message.from_user.full_name)}</a>"
-    )
-    caption = (
-        f"🧾 <b>Нова заявка на поповнення №{payment_id}</b>\n\n"
-        f"👤 {user_link}\n"
-        f"🔗 {username}\n"
-        f"🆔 <code>{message.from_user.id}</code>\n"
-        f"💰 Сума: <b>{amount} грн</b>"
-    )
-    admin_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text="✅ Підтвердити",
-                    callback_data=f"manualpay:approve:{payment_id}",
-                ),
-                InlineKeyboardButton(
-                    text="❌ Відхилити",
-                    callback_data=f"manualpay:reject:{payment_id}",
-                ),
-            ]
-        ]
-    )
-
-    try:
-        if receipt_type == "photo":
-            await message.bot.send_photo(
-                ADMIN_ID,
-                photo=receipt_file_id,
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=admin_keyboard,
-            )
-        else:
-            await message.bot.send_document(
-                ADMIN_ID,
-                document=receipt_file_id,
-                caption=caption,
-                parse_mode="HTML",
-                reply_markup=admin_keyboard,
-            )
-    except Exception as error:
-        await delete_pending_manual_payment(payment_id, message.from_user.id)
-        logging.error(
-            f"❌ Не вдалося передати ручний платіж №{payment_id} адміну: {error}",
-            exc_info=True,
-        )
-        await message.answer(
-            "❌ Не вдалося передати скриншот адміністратору. "
-            "Спробуйте надіслати його ще раз."
-        )
+    lock = _manual_receipt_locks.setdefault(message.from_user.id, asyncio.Lock())
+    if lock.locked():
+        await message.answer("⏳ Ваша попередня квитанція вже обробляється.")
         return
 
     await state.clear()
-    await message.answer(
-        f"✅ Скриншот надіслано адміністратору.\n\n"
-        f"💰 Сума: <b>{amount} грн</b>\n"
-        f"⏳ Очікуйте підтвердження платежу.",
-        parse_mode="HTML",
-    )
+    await message.answer("🔍 Квитанцію отримано. Перевіряю платіж...")
+    async with lock:
+        try:
+            await _process_manual_receipt(
+                message,
+                amount=amount,
+                receipt_type=receipt_type,
+                receipt_file_id=receipt_file_id,
+                declared_file_size=declared_file_size,
+            )
+        except Exception:
+            logging.exception(
+                "Unexpected manual receipt error | user_id=%s amount=%s",
+                message.from_user.id,
+                amount,
+            )
+            await message.answer(
+                "❌ Сталася непередбачена помилка. Зверніться до адміністратора."
+            )
+        finally:
+            _manual_receipt_locks.pop(message.from_user.id, None)
 
 
 @router.callback_query(
@@ -380,6 +816,7 @@ async def submit_manual_payment_without_receipt(
         receipt_file_id="",
         receipt_type="none",
     )
+    await set_manual_payment_route(payment_id, "квитанцію не надано")
 
     username = (
         f"@{escape(callback.from_user.username)}"

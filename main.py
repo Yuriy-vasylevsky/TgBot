@@ -448,25 +448,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-#                          ssh root@77.42.71.244  
-#                           mPLmmcFnpcmK
-
-#    Подивитись логи:     journalctl -u tgbot -f
-#    Оновити код після змін у GitHub:    cd /root/tgbot/tgbot && git pull && systemctl restart tgbot
-
-
-#              systemctl restart tgbot    
-#              systemctl stop tgbot       
-#              systemctl start tgbot      
-#              systemctl status tgbot    
-
-# 77.42.71.244	
-
-# lTWMUl0FnG9yLS34bCLevmmK3W95ULmPupySbFDI28lWvb8S5GqJPIhWdX4hR2r7
-
-# cd /root/safe-250-web
-
-# systemctl start safe-250-web

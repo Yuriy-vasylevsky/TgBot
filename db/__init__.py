@@ -74,6 +74,11 @@ from .wallet import (
     create_manual_payment,
     delete_pending_manual_payment,
     review_manual_payment,
+    has_recent_manual_payment,
+    set_manual_payment_route,
+    register_receipt_fingerprints,
+    save_manual_payment_analysis,
+    mark_manual_payment_analysis_started,
 )
 
 # ==================== USERS ====================

@@ -147,7 +147,7 @@ async def init_db():
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",
                 "payment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, amount INTEGER, comment TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
-                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER)",
+                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER, review_source TEXT, route_reason TEXT, file_sha256 TEXT, perceptual_hash TEXT, gpt_result_json TEXT, gpt_decision TEXT, gpt_reason TEXT, gpt_confidence REAL, analysis_started_at DATETIME, analysis_completed_at DATETIME)",
                 "game_stats (game_name TEXT PRIMARY KEY, total_games INTEGER DEFAULT 0, wins INTEGER DEFAULT 0)",
                 "slot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, result TEXT, final_balance INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "casino_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, casino_type TEXT, code TEXT, used INTEGER DEFAULT 0, assigned_to INTEGER, assigned_at DATETIME)",
@@ -171,9 +171,35 @@ async def init_db():
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
 
+            async with db.execute("PRAGMA table_info(manual_payments)") as cur:
+                manual_payment_columns = {row[1] for row in await cur.fetchall()}
+            manual_payment_migrations = {
+                "review_source": "ALTER TABLE manual_payments ADD COLUMN review_source TEXT",
+                "route_reason": "ALTER TABLE manual_payments ADD COLUMN route_reason TEXT",
+                "file_sha256": "ALTER TABLE manual_payments ADD COLUMN file_sha256 TEXT",
+                "perceptual_hash": "ALTER TABLE manual_payments ADD COLUMN perceptual_hash TEXT",
+                "gpt_result_json": "ALTER TABLE manual_payments ADD COLUMN gpt_result_json TEXT",
+                "gpt_decision": "ALTER TABLE manual_payments ADD COLUMN gpt_decision TEXT",
+                "gpt_reason": "ALTER TABLE manual_payments ADD COLUMN gpt_reason TEXT",
+                "gpt_confidence": "ALTER TABLE manual_payments ADD COLUMN gpt_confidence REAL",
+                "analysis_started_at": "ALTER TABLE manual_payments ADD COLUMN analysis_started_at DATETIME",
+                "analysis_completed_at": "ALTER TABLE manual_payments ADD COLUMN analysis_completed_at DATETIME",
+            }
+            for column, sql in manual_payment_migrations.items():
+                if column not in manual_payment_columns:
+                    await db.execute(sql)
+
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_manual_payments_status "
                 "ON manual_payments(status)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manual_payments_user_created "
+                "ON manual_payments(user_id, created_at)"
+            )
+            await db.execute(
+                "CREATE INDEX IF NOT EXISTS idx_manual_payments_sha256 "
+                "ON manual_payments(file_sha256)"
             )
 
             # Назва слота (Карта 1/Карта 2) не змінюється, а назва банку

@@ -6,3 +6,7 @@ python-dotenv==1.0.1
 aiofiles==23.2.1
 monobank
 httpx>=0.27.0
+openai>=1.68.0,<3
+Pillow>=10.4.0,<13
+ImageHash>=4.3.1,<5
+tzdata>=2024.1

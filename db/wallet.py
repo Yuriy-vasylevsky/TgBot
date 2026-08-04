@@ -2,11 +2,13 @@
 import aiosqlite
 import time
 import logging
+from zoneinfo import ZoneInfo
 
 from .core import DB_PATH
 from datetime import datetime, timezone, timedelta
 
 KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
 async def add_to_balance(user_id: int, amount_grn: int):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -310,12 +312,13 @@ async def create_manual_payment(
     receipt_file_id: str,
     receipt_type: str,
 ) -> int:
+    created_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
             INSERT INTO manual_payments
-            (user_id, username, full_name, amount, receipt_file_id, receipt_type)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (user_id, username, full_name, amount, receipt_file_id, receipt_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -324,6 +327,7 @@ async def create_manual_payment(
                 amount,
                 receipt_file_id,
                 receipt_type,
+                created_at,
             ),
         )
         await db.commit()
@@ -341,8 +345,156 @@ async def delete_pending_manual_payment(payment_id: int, user_id: int) -> None:
         await db.commit()
 
 
+async def has_recent_manual_payment(
+    user_id: int, current_payment_id: int, window_minutes: int
+) -> bool:
+    """Ураховує всі попередні заявки незалежно від їхнього статусу."""
+    cutoff = datetime.now(KYIV_ZONE) - timedelta(minutes=window_minutes)
+    cutoff_db = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT 1
+            FROM manual_payments
+            WHERE user_id = ?
+              AND id <> ?
+              AND created_at >= ?
+            LIMIT 1
+            """,
+            (user_id, current_payment_id, cutoff_db),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def set_manual_payment_route(payment_id: int, reason: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE manual_payments SET route_reason = ? WHERE id = ?",
+            (reason, payment_id),
+        )
+        await db.commit()
+
+
+def _hash_distance(first: str, second: str) -> int | None:
+    try:
+        return (int(first, 16) ^ int(second, 16)).bit_count()
+    except (TypeError, ValueError):
+        return None
+
+
+async def register_receipt_fingerprints(
+    payment_id: int,
+    file_sha256: str,
+    perceptual_hash: str,
+    max_phash_distance: int,
+) -> dict:
+    """Атомарно записує хеші та шукає раніше використане схоже зображення."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            await db.execute(
+                """
+                UPDATE manual_payments
+                SET file_sha256 = ?, perceptual_hash = ?
+                WHERE id = ?
+                """,
+                (file_sha256, perceptual_hash, payment_id),
+            )
+            cursor = await db.execute(
+                """
+                SELECT id, file_sha256, perceptual_hash
+                FROM manual_payments
+                WHERE id <> ?
+                  AND (file_sha256 IS NOT NULL OR perceptual_hash IS NOT NULL)
+                ORDER BY id DESC
+                """,
+                (payment_id,),
+            )
+            previous = await cursor.fetchall()
+
+            duplicate = None
+            for previous_id, previous_sha, previous_phash in previous:
+                if previous_sha and previous_sha == file_sha256:
+                    duplicate = {
+                        "duplicate": True,
+                        "kind": "exact",
+                        "payment_id": previous_id,
+                        "distance": 0,
+                    }
+                    break
+                if previous_phash:
+                    distance = _hash_distance(perceptual_hash, previous_phash)
+                    if distance is not None and distance <= max_phash_distance:
+                        duplicate = {
+                            "duplicate": True,
+                            "kind": "similar",
+                            "payment_id": previous_id,
+                            "distance": distance,
+                        }
+                        break
+
+            await db.commit()
+            return duplicate or {"duplicate": False}
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def save_manual_payment_analysis(
+    payment_id: int,
+    *,
+    result_json: str | None,
+    decision: str,
+    reason: str,
+    confidence: float | None,
+    route_reason: str,
+) -> None:
+    completed_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE manual_payments
+            SET gpt_result_json = ?,
+                gpt_decision = ?,
+                gpt_reason = ?,
+                gpt_confidence = ?,
+                route_reason = ?,
+                analysis_completed_at = ?
+            WHERE id = ?
+            """,
+            (
+                result_json,
+                decision,
+                reason,
+                confidence,
+                route_reason,
+                completed_at,
+                payment_id,
+            ),
+        )
+        await db.commit()
+
+
+async def mark_manual_payment_analysis_started(payment_id: int) -> None:
+    started_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            UPDATE manual_payments
+            SET analysis_started_at = ?,
+                route_reason = 'gpt_analysis_started'
+            WHERE id = ? AND status = 'pending'
+            """,
+            (started_at, payment_id),
+        )
+        await db.commit()
+
+
 async def review_manual_payment(
-    payment_id: int, admin_id: int, decision: str
+    payment_id: int,
+    admin_id: int,
+    decision: str,
+    review_source: str = "manual",
 ) -> dict:
     """
     Атомарно підтверджує або відхиляє ручний платіж.
@@ -351,6 +503,8 @@ async def review_manual_payment(
     """
     if decision not in {"approved", "rejected"}:
         return {"ok": False, "reason": "invalid_decision"}
+    if review_source not in {"manual", "gpt"}:
+        return {"ok": False, "reason": "invalid_review_source"}
 
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
@@ -393,15 +547,22 @@ async def review_manual_payment(
                 """
                 UPDATE manual_payments
                 SET status = ?,
-                    reviewed_at = DATETIME('now', '+3 hours'),
-                    reviewed_by = ?
+                    reviewed_at = ?,
+                    reviewed_by = ?,
+                    review_source = ?
                 WHERE id = ? AND status = 'pending'
                 """,
-                (decision, admin_id, payment_id),
+                (
+                    decision,
+                    datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S"),
+                    admin_id,
+                    review_source,
+                    payment_id,
+                ),
             )
 
             if decision == "approved":
-                today_str = datetime.now(KYIV_TZ).date().isoformat()
+                today_str = datetime.now(KYIV_ZONE).date().isoformat()
                 await db.execute(
                     """
                     INSERT OR IGNORE INTO users (user_id, username, full_name)
@@ -441,6 +602,16 @@ async def review_manual_payment(
                     (user_id,),
                 )
                 balance = (await cursor.fetchone())[0]
+
+            logging.info(
+                "Manual payment reviewed | payment_id=%s user_id=%s amount=%s "
+                "status=%s source=%s",
+                payment_id,
+                user_id,
+                amount,
+                decision,
+                review_source,
+            )
 
             return {
                 "ok": True,
