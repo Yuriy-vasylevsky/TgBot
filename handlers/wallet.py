@@ -35,6 +35,8 @@ from handlers.config import (
 )
 from db import (
     get_balance,
+    get_freeze_info,
+    freeze_balance,
     add_pending_payment,
     get_pending_payments,
     remove_pending_payment,
@@ -70,8 +72,8 @@ import asyncio
 
 # Налаштування автоматичної перевірки поповнень.
 # Змініть ці значення тут, якщо потрібні інші обмеження.
-MINUTES_BETWEEN_PAYMENT_REQUESTS = 0
-MAX_AMOUNT_FOR_GPT_CHECK = 5000
+MINUTES_BETWEEN_PAYMENT_REQUESTS = 12
+MAX_AMOUNT_FOR_GPT_CHECK = 500
 
 # user_id -> asyncio.Lock. Паралельні натискання "Перевірити" від одного
 # користувача виконуються послідовно, а не одночасно.
@@ -151,10 +153,28 @@ class WalletStates(StatesGroup):
     upload_receipt = State()
 
 
+class FreezeStates(StatesGroup):
+    enter_amount = State()
+
+
+async def _format_freeze_status(user_id: int) -> str:
+    info = await get_freeze_info(user_id)
+    if not info.get("frozen_balance"):
+        return ""
+
+    hours = info.get("remaining_hours", 0)
+    minutes = info.get("remaining_minutes", 0)
+    return (
+        f"\n🔒 Заморожено: {info['frozen_balance']} грн"
+        f"\n⏳ Розмороження через: {hours} г {minutes} хв"
+    )
+
+
 # ==================== МЕНЮ ГАМАНЦЯ ====================
 @router.message(F.text.in_({"💰 Гаманець", "Гаманець"}))
 async def wallet_menu(message: Message):
     balance = await get_balance(message.from_user.id)
+    freeze_text = await _format_freeze_status(message.from_user.id)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -167,9 +187,122 @@ async def wallet_menu(message: Message):
                     text="Поповнити баланс", callback_data="wallet_topup"
                 )
             ],
+            [
+                InlineKeyboardButton(
+                    text="🔒 Заморозити кошти", callback_data="wallet_freeze"
+                )
+            ],
         ]
     )
-    await message.answer(f"💰 Ваш гаманець\nБаланс: {balance} грн", reply_markup=kb)
+    await message.answer(f"💰 Ваш гаманець\nБаланс: {balance} грн{freeze_text}", reply_markup=kb)
+
+
+@router.callback_query(F.data == "wallet_balance")
+async def wallet_balance(callback: CallbackQuery):
+    balance = await get_balance(callback.from_user.id)
+    freeze_text = await _format_freeze_status(callback.from_user.id)
+    await callback.answer()
+    await callback.message.edit_text(
+        f"💰 Ваш гаманець\nБаланс: {balance} грн{freeze_text}",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Поповнити баланс", callback_data="wallet_topup")],
+                [InlineKeyboardButton(text="🔒 Заморозити кошти", callback_data="wallet_freeze")],
+            ]
+        ),
+    )
+
+
+@router.callback_query(F.data == "wallet_freeze")
+async def start_freeze(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(FreezeStates.enter_amount)
+    await callback.message.answer(
+        "Введіть суму, яку хочете заморозити (грн):",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]]
+        ),
+    )
+    await callback.answer()
+
+
+# ==================== ЗАМОРОЗКА КОШТІВ ====================
+@router.message(FreezeStates.enter_amount)
+async def process_freeze_amount(message: Message, state: FSMContext):
+    cancel_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
+        ]
+    )
+    try:
+        amount = int(message.text)
+        if amount <= 0:
+            await message.answer("❌ Введіть додатню суму", reply_markup=cancel_kb)
+            return
+    except Exception:
+        await message.answer("❌ Введіть суму у гривнях", reply_markup=cancel_kb)
+        return
+
+    balance = await get_balance(message.from_user.id)
+    if amount > balance:
+        await message.answer("❌ У вас недостатньо доступного балансу", reply_markup=cancel_kb)
+        return
+
+    await state.update_data(freeze_amount=amount)
+
+    await message.answer(
+        f"Оберіть час заморозки для {amount} грн:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="1 година", callback_data="freeze_duration_1"),
+                    InlineKeyboardButton(text="3 години", callback_data="freeze_duration_3"),
+                    InlineKeyboardButton(text="6 годин", callback_data="freeze_duration_6"),
+                ],
+                [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")],
+            ]
+        ),
+    )
+
+
+@router.callback_query(F.data.startswith("freeze_duration_"))
+async def choose_freeze_duration(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    amount = data.get("freeze_amount")
+    if amount is None:
+        await callback.answer("❌ Схоже, попередній крок не виконано", show_alert=True)
+        return
+
+    try:
+        hours = int(callback.data.removeprefix("freeze_duration_"))
+    except Exception:
+        await callback.answer("❌ Невірний вибір", show_alert=True)
+        return
+
+    result = await freeze_balance(callback.from_user.id, amount, hours)
+    await state.clear()
+
+    if not result.get("success"):
+        reason = result.get("reason")
+        if reason == "already_frozen":
+            await callback.message.answer("❌ Ви вже маєте активну заморозку. Чекайте або зверніться до адміністратора.")
+        elif reason == "insufficient_funds":
+            await callback.message.answer("❌ У вас недостатньо доступного балансу для цієї суми.")
+        else:
+            await callback.message.answer("❌ Не вдалося заморозити кошти. Спробуйте ще раз.")
+        await callback.answer()
+        return
+
+    available_balance = await get_balance(callback.from_user.id)
+    await callback.message.answer(
+        f"✅ Заморожено {amount} грн на {hours} годин.\n"
+        f"Залишок на балансі: {available_balance} грн",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💰 Повернутись до гаманця", callback_data="wallet_balance")]
+            ]
+        ),
+    )
+    await callback.answer()
 
 
 # ==================== ПОПОВНЕННЯ ====================
@@ -664,10 +797,7 @@ async def _process_manual_receipt(
             model=OPENAI_MODEL,
             timeout_seconds=OPENAI_TIMEOUT_SECONDS,
             image=prepared,
-            expected_amount=amount,
-            allowed_cards=allowed_cards,
             now_kyiv=now_kyiv,
-            max_time_difference_minutes=GPT_MAX_TIME_DIFFERENCE_MINUTES,
         )
         approved, code_reason, computed_difference = evaluate_auto_approval(
             analysis,
@@ -688,7 +818,7 @@ async def _process_manual_receipt(
         logging.info(
             "GPT receipt result | payment_id=%s user_id=%s amount=%s "
             "status=%s amount_found=%s card_last4=%s allowed_last4=%s confidence=%.3f "
-            "model_decision=%s final=%s reason=%s",
+            "final=%s reason=%s",
             payment_id,
             message.from_user.id,
             amount,
@@ -697,7 +827,6 @@ async def _process_manual_receipt(
             analysis.recipient_card_last4,
             sorted(card["last4"] for card in allowed_cards),
             analysis.confidence,
-            analysis.decision,
             "approve" if approved else "manual_review",
             code_reason,
         )

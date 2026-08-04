@@ -409,12 +409,13 @@ async def set_commands():
 
     
 import asyncio
-from db import cleanup_old_payment_logs
+from db import cleanup_old_payment_logs, cleanup_expired_freezes
 from handlers.casino_api import _matic_api as matic_api
 
 async def run_cleanup_loop():
     while True:
         await cleanup_old_payment_logs()
+        await cleanup_expired_freezes()
         await asyncio.sleep(60 * 60)
 # ==========================
 # ЗАПУСК

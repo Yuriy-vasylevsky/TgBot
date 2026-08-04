@@ -6,7 +6,20 @@ from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 from handlers.menu import main_menu
 import aiosqlite
-from db import DB_PATH, get_balance, add_to_balance, get_daily_net, get_yesterday_net, update_daily_net, get_daily_game_win, get_yesterday_game_win,get_cashback_status, get_total_losses_all_time 
+from db import (
+    DB_PATH,
+    get_balance,
+    add_to_balance,
+    get_daily_net,
+    get_yesterday_net,
+    update_daily_net,
+    get_daily_game_win,
+    get_yesterday_game_win,
+    get_cashback_status,
+    get_total_losses_all_time,
+    get_freeze_info,
+    unfreeze_balance,
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 import asyncio
@@ -315,10 +328,19 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     games_played = user.get("games_played", 0)
     balance = await get_balance(user_id)
+    freeze_info = await get_freeze_info(user_id)
+    frozen_balance = freeze_info.get("frozen_balance", 0)
     daily_net = await get_daily_net(user_id)
     yesterday_net = await get_yesterday_net(user_id)
     daily_game_win = await get_daily_game_win(user_id) 
     yesterday_game_win = await get_yesterday_game_win(user_id)
+
+    freeze_text = ""
+    if frozen_balance:
+        freeze_text = (
+            f"🔒 Заморожено: <b>{frozen_balance}</b> грн\n"
+            f"⏳ Розмороження через: <b>{freeze_info.get('remaining_hours', 0)}</b> г {freeze_info.get('remaining_minutes', 0)} хв\n"
+        )
 
     cashback_status = await get_cashback_status(user_id)
     total_losses_all_time = await get_total_losses_all_time(user_id)
@@ -405,6 +427,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"🕒 Активність: {last_active}\n\n"
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
         f"💰 Баланс: <b>{balance}</b> грн\n"
+        f"{freeze_text}"
         f"📊 Програш сьогодні: <b>{daily_net} грн</b>\n"
         f"📊 Програш <b>вчора</b>: <b>{yesterday_net} грн</b>\n"
         f"🎉 Виграш сьогодні: <b>{daily_game_win} грн</b>\n" 
@@ -423,6 +446,9 @@ async def show_user_detail(callback: types.CallbackQuery):
     kb.button(text="💸 Зняти баланс", callback_data=f"balance_remove:{user_id}:{from_page}")
     kb.button(text="➖1 промо", callback_data=f"ask_remove_promo:{user_id}:{from_page}") 
     kb.button(text="➕1 промо", callback_data=f"ask_add_promo:{user_id}:{from_page}")
+
+    if frozen_balance:
+        kb.button(text="🔓 Розморозити кошти", callback_data=f"unfreeze_user:{user_id}:{from_page}")
 
     if show_checks:
         kb.button(text="▲ Сховати чеки", callback_data=f"user_detail:{user_id}:{from_page}:{1 if show_all_actions else 0}:0")
@@ -509,6 +535,30 @@ async def do_reset_cooldown(callback: types.CallbackQuery):
 
     await reset_promo_cooldown(user_id)
     await callback.answer("✅ Кулдаун скинуто!", show_alert=True)
+
+    callback.data = f"user_detail:{user_id}:{from_page}:0"
+    await show_user_detail(callback)
+
+
+@router.callback_query(F.data.startswith("unfreeze_user:"))
+async def unfreeze_user(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Тільки для адміна", show_alert=True)
+        return
+
+    try:
+        _, user_id_str, from_page_str = callback.data.split(":")
+        user_id = int(user_id_str)
+        from_page = int(from_page_str)
+    except Exception:
+        await callback.answer("Помилка обробки", show_alert=True)
+        return
+
+    result = await unfreeze_balance(user_id)
+    if result.get("success"):
+        await callback.answer("✅ Кошти розморожено", show_alert=True)
+    else:
+        await callback.answer("❌ Немає активної заморозки", show_alert=True)
 
     callback.data = f"user_detail:{user_id}:{from_page}:0"
     await show_user_detail(callback)

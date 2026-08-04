@@ -59,6 +59,8 @@ async def ensure_users_table_and_columns():
             # ("last_daily_bonus_date", "ALTER TABLE users ADD COLUMN last_daily_bonus_date TEXT"),
             # ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
             ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0"),
+            ("frozen_balance", "ALTER TABLE users ADD COLUMN frozen_balance INTEGER DEFAULT 0"),
+            ("freeze_until", "ALTER TABLE users ADD COLUMN freeze_until TEXT"),
       
             ("promo_claimed_base", "ALTER TABLE users ADD COLUMN promo_claimed_base INTEGER DEFAULT 0"),
             # ("project_net", "ALTER TABLE users ADD COLUMN project_net INTEGER DEFAULT 0"),

@@ -22,6 +22,180 @@ async def add_to_balance(user_id: int, amount_grn: int):
         await db.commit()
 
 
+async def _parse_iso_dt(dt_str: str | None) -> datetime | None:
+    if not dt_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=KYIV_TZ)
+        return dt
+    except Exception:
+        return None
+
+
+async def _release_expired_freeze(db: aiosqlite.Connection, user_id: int) -> bool:
+    cursor = await db.execute(
+        "SELECT COALESCE(frozen_balance, 0), freeze_until FROM users WHERE user_id = ?",
+        (user_id,),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        return False
+
+    frozen_balance, freeze_until = row
+    if not freeze_until:
+        return False
+
+    freeze_until_dt = await _parse_iso_dt(freeze_until)
+    if not freeze_until_dt:
+        return False
+
+    now = datetime.now(KYIV_TZ)
+    if now < freeze_until_dt:
+        return False
+
+    await db.execute(
+        "UPDATE users SET balance = COALESCE(balance, 0) + ?, frozen_balance = 0, freeze_until = NULL WHERE user_id = ?",
+        (frozen_balance or 0, user_id),
+    )
+    await db.commit()
+    return True
+
+
+async def cleanup_expired_freezes() -> int:
+    now = datetime.now(KYIV_TZ)
+    released_count = 0
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT user_id, COALESCE(frozen_balance, 0), freeze_until FROM users WHERE freeze_until IS NOT NULL"
+        )
+        rows = await cursor.fetchall()
+        for user_id, frozen_balance, freeze_until in rows:
+            freeze_until_dt = await _parse_iso_dt(freeze_until)
+            if not freeze_until_dt or now < freeze_until_dt:
+                continue
+
+            if frozen_balance:
+                await db.execute(
+                    "UPDATE users SET balance = COALESCE(balance, 0) + ?, frozen_balance = 0, freeze_until = NULL WHERE user_id = ?",
+                    (frozen_balance, user_id),
+                )
+            else:
+                await db.execute(
+                    "UPDATE users SET freeze_until = NULL WHERE user_id = ?",
+                    (user_id,),
+                )
+            released_count += 1
+
+        if released_count > 0:
+            await db.commit()
+    return released_count
+
+
+async def get_freeze_info(user_id: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _release_expired_freeze(db, user_id)
+        cursor = await db.execute(
+            "SELECT COALESCE(frozen_balance, 0), freeze_until FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+
+    frozen_balance = row[0] if row else 0
+    freeze_until = row[1] if row else None
+    if not frozen_balance or not freeze_until:
+        return {"frozen_balance": 0, "freeze_until": None}
+
+    freeze_until_dt = await _parse_iso_dt(freeze_until)
+    if not freeze_until_dt:
+        return {"frozen_balance": 0, "freeze_until": None}
+
+    now = datetime.now(KYIV_TZ)
+    remaining = freeze_until_dt - now
+    if remaining.total_seconds() <= 0:
+        return {"frozen_balance": 0, "freeze_until": None}
+
+    hours = int(remaining.total_seconds() // 3600)
+    minutes = int((remaining.total_seconds() % 3600) // 60)
+    return {
+        "frozen_balance": frozen_balance,
+        "freeze_until": freeze_until,
+        "remaining_hours": hours,
+        "remaining_minutes": minutes,
+    }
+
+
+async def get_frozen_balance(user_id: int) -> int:
+    info = await get_freeze_info(user_id)
+    return info["frozen_balance"]
+
+
+async def freeze_balance(user_id: int, amount: int, hours: int) -> dict:
+    if amount <= 0:
+        return {"success": False, "reason": "invalid_amount"}
+
+    if hours not in (1, 3, 6):
+        return {"success": False, "reason": "invalid_duration"}
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _release_expired_freeze(db, user_id)
+        cursor = await db.execute(
+            "SELECT COALESCE(balance, 0), COALESCE(frozen_balance, 0), freeze_until FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        current_balance = row[0] if row else 0
+        current_frozen = row[1] if row else 0
+        current_freeze_until = row[2] if row else None
+
+        if current_frozen and current_freeze_until:
+            freeze_until_dt = await _parse_iso_dt(current_freeze_until)
+            now = datetime.now(KYIV_TZ)
+            if freeze_until_dt and now < freeze_until_dt:
+                return {"success": False, "reason": "already_frozen"}
+
+        if amount > current_balance:
+            return {"success": False, "reason": "insufficient_funds"}
+
+        freeze_until = (datetime.now(KYIV_TZ) + timedelta(hours=hours)).isoformat(timespec="seconds")
+        await db.execute(
+            "INSERT INTO users (user_id, balance, frozen_balance, freeze_until) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id) DO UPDATE SET balance = balance - excluded.balance, "
+            "frozen_balance = COALESCE(frozen_balance, 0) + excluded.frozen_balance, "
+            "freeze_until = excluded.freeze_until",
+            (user_id, amount, amount, freeze_until),
+        )
+        await db.commit()
+
+    return {"success": True, "frozen_balance": amount, "freeze_until": freeze_until}
+
+
+async def unfreeze_balance(user_id: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COALESCE(frozen_balance, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        frozen_balance = row[0] if row else 0
+        if frozen_balance <= 0:
+            await db.execute(
+                "UPDATE users SET freeze_until = NULL WHERE user_id = ?",
+                (user_id,),
+            )
+            await db.commit()
+            return {"success": False, "reason": "no_active_freeze"}
+
+        await db.execute(
+            "UPDATE users SET balance = COALESCE(balance, 0) + ?, frozen_balance = 0, freeze_until = NULL WHERE user_id = ?",
+            (frozen_balance, user_id),
+        )
+        await db.commit()
+
+    return {"success": True, "released_amount": frozen_balance}
+
+
 # Обнова витрат ща сьогодні і вчора
 
 
@@ -262,8 +436,9 @@ async def get_yesterday_net(user_id: int) -> int:
 
 async def get_balance(user_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
+        await _release_expired_freeze(db, user_id)
         cursor = await db.execute(
-            "SELECT balance FROM users WHERE user_id = ?", (user_id,)
+            "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?", (user_id,)
         )
         row = await cursor.fetchone()
         return row[0] if row else 0
