@@ -147,7 +147,7 @@ async def init_db():
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",
                 "payment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, amount INTEGER, comment TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
-                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER, review_source TEXT, route_reason TEXT, file_sha256 TEXT, perceptual_hash TEXT, gpt_result_json TEXT, gpt_decision TEXT, gpt_reason TEXT, gpt_confidence REAL, analysis_started_at DATETIME, analysis_completed_at DATETIME)",
+                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER, review_source TEXT, route_reason TEXT, file_sha256 TEXT, perceptual_hash TEXT, gpt_result_json TEXT, gpt_decision TEXT, gpt_reason TEXT, gpt_confidence REAL, analysis_started_at DATETIME, analysis_completed_at DATETIME, receipt_retry_count INTEGER NOT NULL DEFAULT 0)",
                 "game_stats (game_name TEXT PRIMARY KEY, total_games INTEGER DEFAULT 0, wins INTEGER DEFAULT 0)",
                 "slot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, result TEXT, final_balance INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "casino_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, casino_type TEXT, code TEXT, used INTEGER DEFAULT 0, assigned_to INTEGER, assigned_at DATETIME)",
@@ -184,6 +184,7 @@ async def init_db():
                 "gpt_confidence": "ALTER TABLE manual_payments ADD COLUMN gpt_confidence REAL",
                 "analysis_started_at": "ALTER TABLE manual_payments ADD COLUMN analysis_started_at DATETIME",
                 "analysis_completed_at": "ALTER TABLE manual_payments ADD COLUMN analysis_completed_at DATETIME",
+                "receipt_retry_count": "ALTER TABLE manual_payments ADD COLUMN receipt_retry_count INTEGER NOT NULL DEFAULT 0",
             }
             for column, sql in manual_payment_migrations.items():
                 if column not in manual_payment_columns:

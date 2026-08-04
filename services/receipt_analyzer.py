@@ -2,9 +2,10 @@ import asyncio
 import base64
 import hashlib
 import io
+import re
 import warnings
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -146,12 +147,35 @@ async def analyze_receipt_with_openai(
 Максимальна абсолютна різниця часу: {max_time_difference_minutes} хвилин.
 
 Правила:
-- approve можливий лише для однозначно успішного й завершеного платежу;
-- processing, rejected, cancelled, failed та неоднозначний статус завжди manual_review;
 - сума має точно дорівнювати очікуваній;
+- сума зі знаком мінус означає списання з рахунку платника: наприклад,
+  -200 грн потрібно трактувати як переказ на 200 грн, тому amount_matches=true,
+  якщо абсолютне значення точно збігається з очікуваною сумою;
 - картка одержувача має збігатися за останніми 4 цифрами;
-- дата й час мають бути прочитані однозначно разом із часовим поясом;
-- неповний, нечіткий або ймовірно відредагований скриншот завжди manual_review;
+- recipient_card_last4 бери лише з реквізитів отримувача: полів
+  «Отримувач», «Отримувач переказу», «Картка отримувача», «На картку» або
+  аналогічних за змістом;
+- не використовуй для recipient_card_last4 картку платника, відправника,
+  картку списання, «З картки» чи номер рахунку платника;
+- якщо видно кілька карток, обов'язково розрізни відправника й отримувача та
+  поверни останні 4 цифри саме картки отримувача;
+- якщо картку отримувача визначити неможливо, поверни null, а не номер
+  картки відправника;
+- порівнюй лише цифри: якщо прочитані останні 4 цифри точно є у списку
+  дозволених карток, recipient_card_matches обов'язково має бути true;
+- не вважай картку невідповідною через пробіли, маску **** або те, що на
+  квитанції показано повний номер;
+- для payment_datetime спочатку використовуй дату й час самої операції;
+- якщо час операції на квитанції відсутній, але у верхній панелі телефона
+  чітко видно час, використовуй час телефона;
+- якщо використано лише час із панелі телефона без дати, підстав поточну дату
+  Europe/Kyiv із цього запиту та часовий пояс +03:00 або актуальне зміщення
+  Europe/Kyiv;
+- якщо видно і час операції, і час телефона, пріоритет має час операції;
+- не вигадуй час, якщо його неможливо прочитати в жодному з цих місць;
+- decision approve став лише тоді, коли одночасно збігаються сума, останні
+  4 цифри картки та час у дозволеному інтервалі;
+- інші поля заповнюй для інформації, але вони не змінюють ці три критерії;
 - ніколи не повертай остаточне відхилення, лише approve або manual_review;
 - у reason коротко поясни рішення українською мовою.
 """.strip()
@@ -200,10 +224,9 @@ def evaluate_auto_approval(
     expected_amount: int,
     allowed_card_last4: set[str],
     now_kyiv: datetime,
-    min_confidence: float,
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
-    """Повторно перевіряє в коді всі умови, не довіряючи лише decision моделі."""
+    """Перевіряє лише суму, картку та час за прочитаними моделлю даними."""
     card_digits = "".join(
         character
         for character in (analysis.recipient_card_last4 or "")
@@ -211,22 +234,14 @@ def evaluate_auto_approval(
     )
     found_card_last4 = card_digits[-4:] if len(card_digits) >= 4 else None
     checks: list[tuple[bool, str]] = [
-        (analysis.is_payment_receipt, "зображення не визначене як квитанція"),
-        (analysis.payment_status == "successful", "статус платежу не успішний"),
         (
-            analysis.amount_found == expected_amount and analysis.amount_matches,
+            analysis.amount_found is not None
+            and abs(analysis.amount_found) == expected_amount,
             "сума платежу не збігається",
         ),
         (
             bool(found_card_last4) and found_card_last4 in allowed_card_last4,
             "картка одержувача не збігається",
-        ),
-        (analysis.image_is_readable, "квитанція недостатньо читабельна"),
-        (not analysis.possible_editing, "можливі ознаки редагування"),
-        (analysis.decision == "approve", "модель вимагає ручної перевірки"),
-        (
-            analysis.confidence >= min_confidence,
-            "недостатній рівень впевненості",
         ),
     ]
     for passed, reason in checks:
@@ -235,25 +250,47 @@ def evaluate_auto_approval(
 
     if not analysis.payment_datetime:
         return False, "час операції не визначено", None
+    payment_datetime_text = analysis.payment_datetime.strip()
     try:
         payment_time = datetime.fromisoformat(
-            analysis.payment_datetime.replace("Z", "+00:00")
+            payment_datetime_text.replace("Z", "+00:00")
         )
     except ValueError:
-        return False, "час операції має невалідний формат", None
+        time_only = re.fullmatch(
+            r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
+            r"(?::(?P<second>[0-5]\d))?",
+            payment_datetime_text,
+        )
+        if not time_only:
+            return False, "час операції має невалідний формат", None
+
+        hour = int(time_only.group("hour"))
+        minute = int(time_only.group("minute"))
+        second = int(time_only.group("second") or 0)
+        local_now = now_kyiv.astimezone(KYIV_ZONE)
+        candidates = [
+            (local_now + timedelta(days=day_shift)).replace(
+                hour=hour,
+                minute=minute,
+                second=second,
+                microsecond=0,
+            )
+            for day_shift in (-1, 0, 1)
+        ]
+        payment_time = min(
+            candidates,
+            key=lambda candidate: abs((local_now - candidate).total_seconds()),
+        )
     if payment_time.tzinfo is None:
-        return False, "часовий пояс операції не визначено", None
+        payment_time = payment_time.replace(tzinfo=KYIV_ZONE)
 
     difference_minutes = round(
         abs((now_kyiv - payment_time.astimezone(KYIV_ZONE)).total_seconds()) / 60
     )
-    if not analysis.time_matches:
-        return False, "модель позначила час як невідповідний", difference_minutes
     if difference_minutes > max_time_difference_minutes:
         return (
             False,
             f"час операції перевищує допустимі {max_time_difference_minutes} хвилин",
             difference_minutes,
         )
-
-    return True, "усі обов'язкові перевірки пройдено", difference_minutes
+    return True, "сума, картка та час збігаються", difference_minutes

@@ -12,6 +12,7 @@ ALTER TABLE manual_payments ADD COLUMN gpt_reason TEXT;
 ALTER TABLE manual_payments ADD COLUMN gpt_confidence REAL;
 ALTER TABLE manual_payments ADD COLUMN analysis_started_at DATETIME;
 ALTER TABLE manual_payments ADD COLUMN analysis_completed_at DATETIME;
+ALTER TABLE manual_payments ADD COLUMN receipt_retry_count INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_manual_payments_status
     ON manual_payments(status);

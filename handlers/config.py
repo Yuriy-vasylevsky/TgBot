@@ -32,13 +32,11 @@ MONO_JAR_CARD = os.getenv("MONO_JAR_CARD")
 # ====================== OPENAI / ПЕРЕВІРКА КВИТАНЦІЙ ======================
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
-GPT_MIN_CONFIDENCE = float(os.getenv("GPT_MIN_CONFIDENCE", "0.95"))
 GPT_MAX_TIME_DIFFERENCE_MINUTES = int(
     os.getenv("GPT_MAX_TIME_DIFFERENCE_MINUTES", "10")
 )
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
 MAX_RECEIPT_FILE_SIZE_MB = int(os.getenv("MAX_RECEIPT_FILE_SIZE_MB", "10"))
-RECEIPT_PHASH_MAX_DISTANCE = int(os.getenv("RECEIPT_PHASH_MAX_DISTANCE", "6"))
   
 CASINO_API_BASE = "https://chcwhite.net"   
 CASINO_TR_PREFIX = "BOT_"  

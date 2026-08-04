@@ -345,6 +345,58 @@ async def delete_pending_manual_payment(payment_id: int, user_id: int) -> None:
         await db.commit()
 
 
+async def get_pending_manual_payment_for_retry(
+    payment_id: int, user_id: int
+) -> dict | None:
+    """Повертає суму лише для власної заявки, яка ще очікує перевірки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT amount
+            FROM manual_payments
+            WHERE id = ?
+              AND user_id = ?
+              AND status = 'pending'
+              AND COALESCE(receipt_retry_count, 0) < 1
+            """,
+            (payment_id, user_id),
+        )
+        row = await cursor.fetchone()
+        return {"amount": row[0]} if row else None
+
+
+async def update_pending_manual_payment_receipt(
+    payment_id: int,
+    user_id: int,
+    receipt_file_id: str,
+    receipt_type: str,
+) -> bool:
+    """Замінює квитанцію лише у власній заявці зі статусом pending."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            UPDATE manual_payments
+            SET receipt_file_id = ?,
+                receipt_type = ?,
+                gpt_result_json = NULL,
+                gpt_decision = NULL,
+                gpt_reason = NULL,
+                gpt_confidence = NULL,
+                analysis_started_at = NULL,
+                analysis_completed_at = NULL,
+                route_reason = 'retry_receipt_received',
+                receipt_retry_count = COALESCE(receipt_retry_count, 0) + 1
+            WHERE id = ?
+              AND user_id = ?
+              AND status = 'pending'
+              AND COALESCE(receipt_retry_count, 0) < 1
+            """,
+            (receipt_file_id, receipt_type, payment_id, user_id),
+        )
+        await db.commit()
+        return cursor.rowcount == 1
+
+
 async def has_recent_manual_payment(
     user_id: int, current_payment_id: int, window_minutes: int
 ) -> bool:
@@ -375,23 +427,30 @@ async def set_manual_payment_route(payment_id: int, reason: str) -> None:
         await db.commit()
 
 
-def _hash_distance(first: str, second: str) -> int | None:
-    try:
-        return (int(first, 16) ^ int(second, 16)).bit_count()
-    except (TypeError, ValueError):
-        return None
-
-
 async def register_receipt_fingerprints(
     payment_id: int,
     file_sha256: str,
     perceptual_hash: str,
-    max_phash_distance: int,
 ) -> dict:
-    """Атомарно записує хеші та шукає раніше використане схоже зображення."""
+    """Записує хеші та шукає лише повністю ідентичний файл.
+
+    Perceptual hash зберігається для діагностики, але не блокує платіж:
+    різні квитанції одного банку мають майже однаковий макет і можуть давати
+    однаковий або дуже близький pHash попри різні реквізити.
+    """
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
+            cursor = await db.execute(
+                """
+                SELECT file_sha256, perceptual_hash
+                FROM manual_payments
+                WHERE id = ?
+                """,
+                (payment_id,),
+            )
+            current = await cursor.fetchone()
+            previous_own_sha = current[0] if current else None
             await db.execute(
                 """
                 UPDATE manual_payments
@@ -402,10 +461,10 @@ async def register_receipt_fingerprints(
             )
             cursor = await db.execute(
                 """
-                SELECT id, file_sha256, perceptual_hash
+                SELECT id, file_sha256
                 FROM manual_payments
                 WHERE id <> ?
-                  AND (file_sha256 IS NOT NULL OR perceptual_hash IS NOT NULL)
+                  AND file_sha256 IS NOT NULL
                 ORDER BY id DESC
                 """,
                 (payment_id,),
@@ -413,7 +472,16 @@ async def register_receipt_fingerprints(
             previous = await cursor.fetchall()
 
             duplicate = None
-            for previous_id, previous_sha, previous_phash in previous:
+            if previous_own_sha and previous_own_sha == file_sha256:
+                duplicate = {
+                    "duplicate": True,
+                    "kind": "exact",
+                    "payment_id": payment_id,
+                    "distance": 0,
+                }
+            for previous_id, previous_sha in previous:
+                if duplicate:
+                    break
                 if previous_sha and previous_sha == file_sha256:
                     duplicate = {
                         "duplicate": True,
@@ -422,16 +490,6 @@ async def register_receipt_fingerprints(
                         "distance": 0,
                     }
                     break
-                if previous_phash:
-                    distance = _hash_distance(perceptual_hash, previous_phash)
-                    if distance is not None and distance <= max_phash_distance:
-                        duplicate = {
-                            "duplicate": True,
-                            "kind": "similar",
-                            "payment_id": previous_id,
-                            "distance": distance,
-                        }
-                        break
 
             await db.commit()
             return duplicate or {"duplicate": False}

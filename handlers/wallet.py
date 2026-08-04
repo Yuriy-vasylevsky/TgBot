@@ -23,7 +23,6 @@ import monobank
 from handlers.config import (
     ADMIN_ID,
     GPT_MAX_TIME_DIFFERENCE_MINUTES,
-    GPT_MIN_CONFIDENCE,
     MAX_RECEIPT_FILE_SIZE_MB,
     MONO_ACCOUNT,
     MONO_CARD,
@@ -33,7 +32,6 @@ from handlers.config import (
     OPENAI_API_KEY,
     OPENAI_MODEL,
     OPENAI_TIMEOUT_SECONDS,
-    RECEIPT_PHASH_MAX_DISTANCE,
 )
 from db import (
     get_balance,
@@ -49,6 +47,8 @@ from db import (
     get_cards,
     create_manual_payment,
     delete_pending_manual_payment,
+    get_pending_manual_payment_for_retry,
+    update_pending_manual_payment_receipt,
     review_manual_payment,
     has_recent_manual_payment,
     set_manual_payment_route,
@@ -305,6 +305,19 @@ def _manual_payment_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     )
 
 
+def _retry_receipt_keyboard(payment_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Надіслати іншу квитанцію",
+                    callback_data=f"wallet_retry_receipt:{payment_id}",
+                )
+            ]
+        ]
+    )
+
+
 def _payment_user_block(user, payment_id: int, amount: int) -> str:
     username = f"@{escape(user.username)}" if user.username else "немає"
     user_link = (
@@ -337,8 +350,7 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"Впевненість: {analysis.confidence:.0%}\n"
         f"Знайдена сума: {found_amount}\n"
         f"Картка: {card}\n"
-        f"Час: {payment_time}\n"
-        f"Причина GPT: {escape(analysis.reason[:250])}"
+        f"Час: {payment_time}"
     )
 
 
@@ -377,6 +389,7 @@ async def _route_payment_to_manual_review(
     receipt_file_id: str,
     reason: str,
     analysis: PaymentReceiptAnalysis | None = None,
+    offer_retry: bool = False,
 ) -> None:
     await set_manual_payment_route(payment_id, reason)
     caption = (
@@ -411,12 +424,32 @@ async def _route_payment_to_manual_review(
         amount,
         reason,
     )
-    await message.answer(
-        f"✅ Квитанцію передано адміністратору.\n\n"
-        f"💰 Сума: <b>{amount} грн</b>\n"
-        f"⏳ Очікуйте підтвердження платежу.",
-        parse_mode="HTML",
-    )
+    retry_available = False
+    if offer_retry:
+        retry_available = bool(
+            await get_pending_manual_payment_for_retry(
+                payment_id, message.from_user.id
+            )
+        )
+    if retry_available:
+        await message.answer(
+            f"⚠️ Автоматична перевірка не змогла підтвердити квитанцію.\n\n"
+            f"На квитанції має бути чітко видно:\n"
+            f"• <b>час переказу</b>;\n"
+            f"• <b>картку, на яку зроблено переказ</b>;\n"
+            f"• <b>суму переказу — {amount} грн</b>.\n\n"
+            f"Ви можете надіслати іншу квитанцію або нічого не робити й "
+            f"зачекати на підтвердження адміністратора.",
+            parse_mode="HTML",
+            reply_markup=_retry_receipt_keyboard(payment_id),
+        )
+    else:
+        await message.answer(
+            f"✅ Квитанцію передано адміністратору.\n\n"
+            f"💰 Сума: <b>{amount} грн</b>\n"
+            f"⏳ Очікуйте підтвердження платежу.",
+            parse_mode="HTML",
+        )
 
 
 async def _send_auto_approval_to_admin(
@@ -465,21 +498,44 @@ async def _process_manual_receipt(
     receipt_type: str,
     receipt_file_id: str,
     declared_file_size: int | None,
+    payment_id: int | None = None,
 ) -> None:
-    payment_id = await create_manual_payment(
-        user_id=message.from_user.id,
-        username=message.from_user.username,
-        full_name=message.from_user.full_name,
-        amount=amount,
-        receipt_file_id=receipt_file_id,
-        receipt_type=receipt_type,
-    )
-    logging.info(
-        "Manual payment created | payment_id=%s user_id=%s amount=%s",
-        payment_id,
-        message.from_user.id,
-        amount,
-    )
+    is_retry = payment_id is not None
+    if payment_id is None:
+        payment_id = await create_manual_payment(
+            user_id=message.from_user.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+            amount=amount,
+            receipt_file_id=receipt_file_id,
+            receipt_type=receipt_type,
+        )
+        logging.info(
+            "Manual payment created | payment_id=%s user_id=%s amount=%s",
+            payment_id,
+            message.from_user.id,
+            amount,
+        )
+
+    if is_retry:
+        updated = await update_pending_manual_payment_receipt(
+            payment_id,
+            message.from_user.id,
+            receipt_file_id,
+            receipt_type,
+        )
+        if not updated:
+            await message.answer(
+                "ℹ️ Іншу квитанцію для цієї заявки вже було надіслано або "
+                "заявку вже розглянув адміністратор.",
+                reply_markup=main_menu(),
+            )
+            return
+        logging.info(
+            "Manual payment receipt replaced | payment_id=%s user_id=%s",
+            payment_id,
+            message.from_user.id,
+        )
 
     try:
         prepared = await download_and_prepare_receipt(
@@ -496,6 +552,7 @@ async def _process_manual_receipt(
             receipt_type=receipt_type,
             receipt_file_id=receipt_file_id,
             reason=str(error),
+            offer_retry=True,
         )
         return
     except Exception as error:
@@ -511,6 +568,7 @@ async def _process_manual_receipt(
             receipt_type=receipt_type,
             receipt_file_id=receipt_file_id,
             reason=f"помилка завантаження квитанції: {type(error).__name__}",
+            offer_retry=True,
         )
         return
 
@@ -518,7 +576,6 @@ async def _process_manual_receipt(
         payment_id,
         prepared.file_sha256,
         prepared.perceptual_hash,
-        RECEIPT_PHASH_MAX_DISTANCE,
     )
     if duplicate.get("duplicate"):
         duplicate_kind = "ідентична" if duplicate.get("kind") == "exact" else "дуже схожа"
@@ -532,6 +589,7 @@ async def _process_manual_receipt(
                 f"{duplicate_kind} квитанція вже була у заявці "
                 f"№{duplicate.get('payment_id')}"
             ),
+            offer_retry=True,
         )
         return
 
@@ -616,7 +674,6 @@ async def _process_manual_receipt(
             expected_amount=amount,
             allowed_card_last4={card["last4"] for card in allowed_cards},
             now_kyiv=now_kyiv,
-            min_confidence=GPT_MIN_CONFIDENCE,
             max_time_difference_minutes=GPT_MAX_TIME_DIFFERENCE_MINUTES,
         )
         route_reason = "auto_approved" if approved else code_reason
@@ -679,6 +736,7 @@ async def _process_manual_receipt(
             receipt_file_id=receipt_file_id,
             reason=code_reason,
             analysis=analysis,
+            offer_retry=True,
         )
         return
 
@@ -689,6 +747,12 @@ async def _process_manual_receipt(
         review_source="gpt",
     )
     if not result.get("ok"):
+        if result.get("reason") == "already_reviewed":
+            await message.answer(
+                "ℹ️ Адміністратор уже розглянув цю заявку.",
+                reply_markup=main_menu(),
+            )
+            return
         logging.error(
             "Automatic credit failed | payment_id=%s user_id=%s reason=%s",
             payment_id,
@@ -761,6 +825,7 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
 
     data = await state.get_data()
     amount = data.get("manual_amount")
+    retry_payment_id = data.get("retry_payment_id")
     if not amount:
         await state.clear()
         await message.answer("❌ Заявка застаріла. Почніть поповнення ще раз.")
@@ -781,6 +846,7 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
                 receipt_type=receipt_type,
                 receipt_file_id=receipt_file_id,
                 declared_file_size=declared_file_size,
+                payment_id=retry_payment_id,
             )
         except Exception:
             logging.exception(
@@ -793,6 +859,51 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
             )
         finally:
             _manual_receipt_locks.pop(message.from_user.id, None)
+
+
+@router.callback_query(F.data.startswith("wallet_retry_receipt:"))
+async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
+    try:
+        payment_id = int(callback.data.rsplit(":", 1)[1])
+    except (AttributeError, ValueError, IndexError):
+        await callback.answer("Некоректна заявка", show_alert=True)
+        return
+
+    payment = await get_pending_manual_payment_for_retry(
+        payment_id, callback.from_user.id
+    )
+    if not payment:
+        await state.clear()
+        await callback.answer(
+            "Цю заявку вже підтверджено або відхилено",
+            show_alert=True,
+        )
+        return
+
+    amount = payment["amount"]
+    await state.update_data(
+        manual_amount=amount,
+        retry_payment_id=payment_id,
+    )
+    await state.set_state(WalletStates.upload_receipt)
+    await callback.message.answer(
+        f"📎 Надішліть іншу квитанцію для заявки №{payment_id} як фото "
+        f"або документ.\n\n"
+        f"На ній має бути чітко видно час, картку одержувача та "
+        f"суму <b>{amount} грн</b>.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text="❌ Скасувати",
+                        callback_data="wallet_cancel",
+                    )
+                ]
+            ]
+        ),
+    )
+    await callback.answer("Надішліть нову квитанцію")
 
 
 @router.callback_query(

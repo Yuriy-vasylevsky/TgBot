@@ -73,6 +73,8 @@ from .wallet import (
     get_total_losses_all_time,
     create_manual_payment,
     delete_pending_manual_payment,
+    get_pending_manual_payment_for_retry,
+    update_pending_manual_payment_receipt,
     review_manual_payment,
     has_recent_manual_payment,
     set_manual_payment_route,
