@@ -204,6 +204,12 @@ def evaluate_auto_approval(
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
     """Повторно перевіряє в коді всі умови, не довіряючи лише decision моделі."""
+    card_digits = "".join(
+        character
+        for character in (analysis.recipient_card_last4 or "")
+        if character.isdigit()
+    )
+    found_card_last4 = card_digits[-4:] if len(card_digits) >= 4 else None
     checks: list[tuple[bool, str]] = [
         (analysis.is_payment_receipt, "зображення не визначене як квитанція"),
         (analysis.payment_status == "successful", "статус платежу не успішний"),
@@ -212,9 +218,7 @@ def evaluate_auto_approval(
             "сума платежу не збігається",
         ),
         (
-            bool(analysis.recipient_card_last4)
-            and analysis.recipient_card_last4 in allowed_card_last4
-            and analysis.recipient_card_matches,
+            bool(found_card_last4) and found_card_last4 in allowed_card_last4,
             "картка одержувача не збігається",
         ),
         (analysis.image_is_readable, "квитанція недостатньо читабельна"),

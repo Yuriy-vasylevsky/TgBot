@@ -630,7 +630,7 @@ async def _process_manual_receipt(
         )
         logging.info(
             "GPT receipt result | payment_id=%s user_id=%s amount=%s "
-            "status=%s amount_found=%s card_last4=%s confidence=%.3f "
+            "status=%s amount_found=%s card_last4=%s allowed_last4=%s confidence=%.3f "
             "model_decision=%s final=%s reason=%s",
             payment_id,
             message.from_user.id,
@@ -638,6 +638,7 @@ async def _process_manual_receipt(
             analysis.payment_status,
             analysis.amount_found,
             analysis.recipient_card_last4,
+            sorted(card["last4"] for card in allowed_cards),
             analysis.confidence,
             analysis.decision,
             "approve" if approved else "manual_review",
