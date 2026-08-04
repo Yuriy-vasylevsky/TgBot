@@ -36,16 +36,11 @@ class PaymentReceiptAnalysis(BaseModel):
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
     amount_found: int | None
-    amount_matches: bool
     recipient_card_last4: str | None
-    recipient_card_matches: bool
     payment_datetime: str | None
-    time_difference_minutes: int | None
-    time_matches: bool
     image_is_readable: bool
     possible_editing: bool
     confidence: float = Field(ge=0, le=1)
-    decision: Literal["approve", "manual_review"]
     reason: str
 
 
@@ -81,6 +76,13 @@ def _normalize_image(original_bytes: bytes) -> PreparedReceipt:
 
     # Обмежуємо надмірні розміри, не спотворюючи пропорції квитанції.
     image.thumbnail((4096, 4096), Image.Resampling.LANCZOS)
+    longest_side = max(image.size)
+    if longest_side < 2000:
+        scale = min(3.0, 2000 / longest_side)
+        image = image.resize(
+            (round(image.width * scale), round(image.height * scale)),
+            Image.Resampling.LANCZOS,
+        )
     output = io.BytesIO()
     image.save(output, format="JPEG", quality=92, optimize=True)
     return PreparedReceipt(
@@ -126,32 +128,21 @@ async def analyze_receipt_with_openai(
     model: str,
     timeout_seconds: int,
     image: PreparedReceipt,
-    expected_amount: int,
-    allowed_cards: list[dict[str, str]],
     now_kyiv: datetime,
-    max_time_difference_minutes: int,
 ) -> PaymentReceiptAnalysis:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY не налаштований")
 
-    allowed_cards_text = "\n".join(
-        f"- {card['bank']}: **** {card['last4']}" for card in allowed_cards
-    )
     prompt = f"""
-Перевір банківську квитанцію або екран успішного переказу.
+Прочитай фактичні дані з банківської квитанції або екрана переказу.
+Ти не знаєш очікуваної суми чи дозволених карток. Нічого не порівнюй і не
+підставляй: повертай лише те, що справді видно на зображенні.
 
-Очікувана сума: {expected_amount} грн (ціле число).
-Дозволені картки одержувача:
-{allowed_cards_text}
 Поточний час Europe/Kyiv: {now_kyiv.isoformat()}
-Максимальна абсолютна різниця часу: {max_time_difference_minutes} хвилин.
 
 Правила:
-- сума має точно дорівнювати очікуваній;
-- сума зі знаком мінус означає списання з рахунку платника: наприклад,
-  -200 грн потрібно трактувати як переказ на 200 грн, тому amount_matches=true,
-  якщо абсолютне значення точно збігається з очікуваною сумою;
-- картка одержувача має збігатися за останніми 4 цифрами;
+- amount_found — фактична сума переказу цілим числом; знак мінус збережи,
+  якщо він показаний біля вибраної суми;
 - recipient_card_last4 бери лише з реквізитів отримувача: полів
   «Отримувач», «Отримувач переказу», «Картка отримувача», «На картку» або
   аналогічних за змістом;
@@ -161,10 +152,8 @@ async def analyze_receipt_with_openai(
   поверни останні 4 цифри саме картки отримувача;
 - якщо картку отримувача визначити неможливо, поверни null, а не номер
   картки відправника;
-- порівнюй лише цифри: якщо прочитані останні 4 цифри точно є у списку
-  дозволених карток, recipient_card_matches обов'язково має бути true;
-- не вважай картку невідповідною через пробіли, маску **** або те, що на
-  квитанції показано повний номер;
+- для recipient_card_last4 поверни рівно 4 прочитані цифри без пробілів і
+  маски ****; ніколи не домислюй нерозбірливі цифри;
 - для payment_datetime спочатку використовуй дату й час самої операції;
 - якщо час операції на квитанції відсутній, але у верхній панелі телефона
   чітко видно час, використовуй час телефона;
@@ -173,11 +162,7 @@ async def analyze_receipt_with_openai(
   Europe/Kyiv;
 - якщо видно і час операції, і час телефона, пріоритет має час операції;
 - не вигадуй час, якщо його неможливо прочитати в жодному з цих місць;
-- decision approve став лише тоді, коли одночасно збігаються сума, останні
-  4 цифри картки та час у дозволеному інтервалі;
-- інші поля заповнюй для інформації, але вони не змінюють ці три критерії;
-- ніколи не повертай остаточне відхилення, лише approve або manual_review;
-- у reason коротко поясни рішення українською мовою.
+- у reason коротко українською опиши, які фактичні дані вдалося прочитати.
 """.strip()
 
     image_base64 = base64.b64encode(image.image_bytes).decode("ascii")
@@ -191,8 +176,9 @@ async def analyze_receipt_with_openai(
                     {
                         "role": "system",
                         "content": (
-                            "Ти консервативний модуль перевірки банківських "
-                            "квитанцій. За будь-якого сумніву обирай manual_review."
+                            "Ти модуль точного розпізнавання банківських "
+                            "квитанцій. Не знаєш очікуваних значень, не порівнюєш "
+                            "їх і не домислюєш нерозбірливі цифри."
                         ),
                     },
                     {
