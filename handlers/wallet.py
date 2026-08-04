@@ -380,7 +380,8 @@ async def process_amount(message: Message, state: FSMContext):
             f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
             f"на одну з карток:\n\n"
             f"{cards_text}\n\n"
-            f"📸 Після переказу надішліть сюди скриншот оплати.\n"
+            f"🧾 Після переказу надішліть саме <b>скриншот платіжної "
+            f"квитанції</b>. Екран «переказ успішний» не підходить.\n"
             f"Заявка буде передана адміністратору на перевірку.",
             parse_mode="HTML",
             reply_markup=receipt_keyboard,
@@ -477,13 +478,18 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         else "не знайдено"
     )
     payment_time = escape(analysis.payment_datetime or "не визначено")
+    visible_time = escape(analysis.payment_time_visible_text or "не видно")
+    document_type = escape(analysis.document_type)
+    time_source = escape(analysis.payment_time_source)
     return (
         f"\n\n🤖 <b>Результат автоматичної перевірки</b>\n"
         f"Рішення: ручна перевірка\n"
         f"Впевненість: {analysis.confidence:.0%}\n"
         f"Знайдена сума: {found_amount}\n"
         f"Картка: {card}\n"
-        f"Час: {payment_time}"
+        f"Тип: {document_type}\n"
+        f"Час: {payment_time}\n"
+        f"Джерело часу: {time_source} ({visible_time})"
     )
 
 
@@ -571,6 +577,7 @@ async def _route_payment_to_manual_review(
             f"• <b>час переказу</b>;\n"
             f"• <b>картку, на яку зроблено переказ</b>;\n"
             f"• <b>суму переказу — {amount} грн</b>.\n\n"
+            f"Надішліть саме квитанцію, а не екран «переказ успішний».\n\n"
             f"Ви можете надіслати іншу квитанцію або нічого не робити й "
             f"зачекати на підтвердження адміністратора.",
             parse_mode="HTML",
@@ -1016,10 +1023,11 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(WalletStates.upload_receipt)
     await callback.message.answer(
-        f"📎 Надішліть іншу квитанцію для заявки №{payment_id} як фото "
+        f"📎 Надішліть інший скриншот платіжної квитанції для заявки "
+        f"№{payment_id} як фото "
         f"або документ.\n\n"
         f"На ній має бути чітко видно час, картку одержувача та "
-        f"суму <b>{amount} грн</b>.",
+        f"суму <b>{amount} грн</b>. Екран «переказ успішний» не підходить.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[

@@ -32,12 +32,20 @@ class PaymentReceiptAnalysis(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     is_payment_receipt: bool
+    document_type: Literal[
+        "payment_receipt",
+        "transfer_success_screen",
+        "bank_notification",
+        "other",
+    ]
     payment_status: Literal[
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
     amount_found: int | None
     recipient_card_last4: str | None
     payment_datetime: str | None
+    payment_time_source: Literal["operation", "phone_status_bar", "not_visible"]
+    payment_time_visible_text: str | None
     image_is_readable: bool
     possible_editing: bool
     confidence: float = Field(ge=0, le=1)
@@ -141,6 +149,13 @@ async def analyze_receipt_with_openai(
 Поточний час Europe/Kyiv: {now_kyiv.isoformat()}
 
 Правила:
+- document_type="payment_receipt" став лише для окремої платіжної квитанції
+  з реквізитами операції. Екран «переказ виконано/успішно», сторінка операції
+  в застосунку, банківське push-сповіщення чи головний екран застосунку не є
+  квитанцією: для них використовуй transfer_success_screen,
+  bank_notification або other та is_payment_receipt=false;
+- не називай зображення квитанцією лише через те, що на ньому видно суму,
+  картку та напис про успішний переказ;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
 - recipient_card_last4 бери лише з реквізитів отримувача: полів
@@ -155,13 +170,21 @@ async def analyze_receipt_with_openai(
 - для recipient_card_last4 поверни рівно 4 прочитані цифри без пробілів і
   маски ****; ніколи не домислюй нерозбірливі цифри;
 - для payment_datetime спочатку використовуй дату й час самої операції;
+- payment_time_source="operation" дозволено лише коли час операції реально
+  надрукований у квитанції; у payment_time_visible_text дослівно перепиши
+  видимий фрагмент дати й часу;
 - якщо час операції на квитанції відсутній, але у верхній панелі телефона
-  чітко видно час, використовуй час телефона;
+  чітко видно час, використовуй час телефона, постав
+  payment_time_source="phone_status_bar" і дослівно перепиши видимий час у
+  payment_time_visible_text;
 - якщо використано лише час із панелі телефона без дати, підстав поточну дату
   Europe/Kyiv із цього запиту та часовий пояс +03:00 або актуальне зміщення
   Europe/Kyiv;
 - якщо видно і час операції, і час телефона, пріоритет має час операції;
-- не вигадуй час, якщо його неможливо прочитати в жодному з цих місць;
+- якщо час не видно ані в квитанції, ані у верхній панелі телефона, постав
+  payment_datetime=null, payment_time_source="not_visible" та
+  payment_time_visible_text=null; категорично не використовуй поточний час із
+  тексту запиту як начебто прочитаний із зображення;
 - у reason коротко українською опиши, які фактичні дані вдалося прочитати.
 """.strip()
 
@@ -212,7 +235,7 @@ def evaluate_auto_approval(
     now_kyiv: datetime,
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
-    """Перевіряє лише суму, картку та час за прочитаними моделлю даними."""
+    """Перевіряє тип документа, видимий час, суму та картку."""
     card_digits = "".join(
         character
         for character in (analysis.recipient_card_last4 or "")
@@ -220,6 +243,15 @@ def evaluate_auto_approval(
     )
     found_card_last4 = card_digits[-4:] if len(card_digits) >= 4 else None
     checks: list[tuple[bool, str]] = [
+        (
+            analysis.is_payment_receipt
+            and analysis.document_type == "payment_receipt",
+            "зображення не є платіжною квитанцією",
+        ),
+        (
+            analysis.payment_status == "successful",
+            "платіж у квитанції не має успішного завершеного статусу",
+        ),
         (
             analysis.amount_found is not None
             and abs(analysis.amount_found) == expected_amount,
@@ -233,6 +265,17 @@ def evaluate_auto_approval(
     for passed, reason in checks:
         if not passed:
             return False, reason, None
+
+    if analysis.payment_time_source == "not_visible":
+        return False, "час не видно на квитанції або екрані телефона", None
+    visible_time_text = (analysis.payment_time_visible_text or "").strip()
+    visible_time_match = re.search(
+        r"(?<!\d)(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
+        r"(?::(?P<second>[0-5]\d))?(?!\d)",
+        visible_time_text,
+    )
+    if not visible_time_match:
+        return False, "немає підтвердження, що час видимий на зображенні", None
 
     if not analysis.payment_datetime:
         return False, "час операції не визначено", None
@@ -269,6 +312,12 @@ def evaluate_auto_approval(
         )
     if payment_time.tzinfo is None:
         payment_time = payment_time.replace(tzinfo=KYIV_ZONE)
+
+    if (
+        payment_time.hour != int(visible_time_match.group("hour"))
+        or payment_time.minute != int(visible_time_match.group("minute"))
+    ):
+        return False, "розпізнаний час не збігається з видимим текстом", None
 
     difference_minutes = round(
         abs((now_kyiv - payment_time.astimezone(KYIV_ZONE)).total_seconds()) / 60
