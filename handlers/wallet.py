@@ -70,8 +70,8 @@ import asyncio
 
 # Налаштування автоматичної перевірки поповнень.
 # Змініть ці значення тут, якщо потрібні інші обмеження.
-MINUTES_BETWEEN_PAYMENT_REQUESTS = 15
-MAX_AMOUNT_FOR_GPT_CHECK = 500
+MINUTES_BETWEEN_PAYMENT_REQUESTS = 0
+MAX_AMOUNT_FOR_GPT_CHECK = 5000
 
 # user_id -> asyncio.Lock. Паралельні натискання "Перевірити" від одного
 # користувача виконуються послідовно, а не одночасно.
