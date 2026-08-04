@@ -473,8 +473,8 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"{analysis.amount_found} грн" if analysis.amount_found is not None else "не знайдено"
     )
     card = (
-        f"**** {escape(analysis.recipient_card_last4)}"
-        if analysis.recipient_card_last4
+        f"**** {escape(analysis.recipient_card_suffix)}"
+        if analysis.recipient_card_suffix
         else "не знайдено"
     )
     payment_time = escape(analysis.payment_datetime or "не визначено")
@@ -602,7 +602,7 @@ async def _send_auto_approval_to_admin(
     analysis: PaymentReceiptAnalysis,
     computed_time_difference: int,
 ) -> None:
-    card = escape(analysis.recipient_card_last4 or "—")
+    card = escape(analysis.recipient_card_suffix or "—")
     operation_time = escape(analysis.payment_datetime or "—")
     caption = (
         f"🤖 <b>Платіж автоматично підтверджено</b>\n\n"
@@ -824,14 +824,14 @@ async def _process_manual_receipt(
         )
         logging.info(
             "GPT receipt result | payment_id=%s user_id=%s amount=%s "
-            "status=%s amount_found=%s card_last4=%s allowed_last4=%s confidence=%.3f "
+            "status=%s amount_found=%s card_suffix=%s allowed_last4=%s confidence=%.3f "
             "final=%s reason=%s",
             payment_id,
             message.from_user.id,
             amount,
             analysis.payment_status,
             analysis.amount_found,
-            analysis.recipient_card_last4,
+            analysis.recipient_card_suffix,
             sorted(card["last4"] for card in allowed_cards),
             analysis.confidence,
             "approve" if approved else "manual_review",

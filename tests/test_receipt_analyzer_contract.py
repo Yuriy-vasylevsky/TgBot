@@ -20,7 +20,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             "document_type": "payment_receipt",
             "payment_status": "successful",
             "amount_found": 200,
-            "recipient_card_last4": "2296",
+            "recipient_card_suffix": "2296",
             "payment_datetime": "2026-08-04T14:30:00+03:00",
             "payment_time_source": "operation",
             "payment_time_visible_text": "04.08.2026 14:30",
@@ -36,6 +36,16 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             analysis,
             expected_amount=200,
             allowed_card_last4={"2296"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+
+    def evaluate_with_cards(self, cards, **changes):
+        analysis = PaymentReceiptAnalysis(**(self.valid_data | changes))
+        return evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4=set(cards),
             now_kyiv=self.now,
             max_time_difference_minutes=10,
         )
@@ -98,6 +108,27 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             payment_time_visible_text="14:30",
         )
         self.assertTrue(result[0])
+
+    def test_two_visible_card_digits_are_allowed_when_unique(self):
+        result = self.evaluate_with_cards(
+            {"2296", "8204"},
+            recipient_card_suffix="96",
+        )
+        self.assertTrue(result[0])
+
+    def test_two_visible_card_digits_are_rejected_when_ambiguous(self):
+        result = self.evaluate_with_cards(
+            {"2296", "7496"},
+            recipient_card_suffix="96",
+        )
+        self.assertFalse(result[0])
+
+    def test_two_visible_card_digits_must_match_an_active_card(self):
+        result = self.evaluate_with_cards(
+            {"2296", "8204"},
+            recipient_card_suffix="77",
+        )
+        self.assertFalse(result[0])
 
 
 if __name__ == "__main__":

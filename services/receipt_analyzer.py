@@ -42,7 +42,7 @@ class PaymentReceiptAnalysis(BaseModel):
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
     amount_found: int | None
-    recipient_card_last4: str | None
+    recipient_card_suffix: str | None
     payment_datetime: str | None
     payment_time_source: Literal["operation", "phone_status_bar", "not_visible"]
     payment_time_visible_text: str | None
@@ -158,17 +158,20 @@ async def analyze_receipt_with_openai(
   картку та напис про успішний переказ;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
-- recipient_card_last4 бери лише з реквізитів отримувача: полів
+- recipient_card_suffix бери лише з реквізитів отримувача: полів
   «Отримувач», «Отримувач переказу», «Картка отримувача», «На картку» або
   аналогічних за змістом;
-- не використовуй для recipient_card_last4 картку платника, відправника,
+- не використовуй для recipient_card_suffix картку платника, відправника,
   картку списання, «З картки» чи номер рахунку платника;
 - якщо видно кілька карток, обов'язково розрізни відправника й отримувача та
   поверни останні 4 цифри саме картки отримувача;
 - якщо картку отримувача визначити неможливо, поверни null, а не номер
   картки відправника;
-- для recipient_card_last4 поверни рівно 4 прочитані цифри без пробілів і
-  маски ****; ніколи не домислюй нерозбірливі цифри;
+- для recipient_card_suffix поверни лише видимі кінцеві цифри картки
+  отримувача без пробілів і маски ****: зазвичай це 4 цифри, але якщо банк
+  показує тільки 2 або 3, поверни саме ці 2 або 3 цифри;
+- ніколи не доповнюй дві видимі цифри до чотирьох і не домислюй
+  нерозбірливі цифри;
 - для payment_datetime спочатку використовуй дату й час самої операції;
 - payment_time_source="operation" дозволено лише коли час операції реально
   надрукований у квитанції; у payment_time_visible_text дослівно перепиши
@@ -238,10 +241,25 @@ def evaluate_auto_approval(
     """Перевіряє тип документа, видимий час, суму та картку."""
     card_digits = "".join(
         character
-        for character in (analysis.recipient_card_last4 or "")
+        for character in (analysis.recipient_card_suffix or "")
         if character.isdigit()
     )
-    found_card_last4 = card_digits[-4:] if len(card_digits) >= 4 else None
+    if len(card_digits) >= 4:
+        found_card_suffix = card_digits[-4:]
+    elif len(card_digits) >= 2:
+        found_card_suffix = card_digits[-len(card_digits):]
+    else:
+        found_card_suffix = None
+
+    matching_cards = (
+        {
+            card_last4
+            for card_last4 in allowed_card_last4
+            if card_last4.endswith(found_card_suffix)
+        }
+        if found_card_suffix
+        else set()
+    )
     checks: list[tuple[bool, str]] = [
         (
             analysis.is_payment_receipt
@@ -257,14 +275,15 @@ def evaluate_auto_approval(
             and abs(analysis.amount_found) == expected_amount,
             "сума платежу не збігається",
         ),
-        (
-            bool(found_card_last4) and found_card_last4 in allowed_card_last4,
-            "картка одержувача не збігається",
-        ),
     ]
     for passed, reason in checks:
         if not passed:
             return False, reason, None
+
+    if not found_card_suffix or not matching_cards:
+        return False, "картка одержувача не збігається", None
+    if len(matching_cards) > 1:
+        return False, "видимих цифр недостатньо для однозначного вибору картки", None
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None
