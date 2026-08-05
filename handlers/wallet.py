@@ -381,7 +381,8 @@ async def process_amount(message: Message, state: FSMContext):
             f"на одну з карток:\n\n"
             f"{cards_text}\n\n"
             f"🧾 Після переказу надішліть саме <b>скриншот платіжної "
-            f"квитанції</b>. Екран «переказ успішний» не підходить.\n"
+            f"квитанції як фото</b>. Файл або екран «переказ успішний» "
+            f"не підходить.\n"
             f"Заявка буде передана адміністратору на перевірку.",
             parse_mode="HTML",
             reply_markup=receipt_keyboard,
@@ -943,18 +944,22 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
     receipt_file_id: str | None = None
     declared_file_size: int | None = None
 
+    if message.document:
+        await message.answer(
+            "❌ Файл не підходить. Надішліть скриншот платіжної квитанції "
+            "саме як фото."
+        )
+        return
+
     if message.photo:
         receipt_type = "photo"
         receipt_file_id = message.photo[-1].file_id
         declared_file_size = message.photo[-1].file_size
-    elif message.document:
-        receipt_type = "document"
-        receipt_file_id = message.document.file_id
-        declared_file_size = message.document.file_size
 
     if not receipt_file_id or not receipt_type:
         await message.answer(
-            "❌ Надішліть квитанцію як фото або документ чи скористайтеся "
+            "❌ Надішліть скриншот платіжної квитанції саме як фото або "
+            "скористайтеся "
             "кнопкою «Не можу надіслати квитанцію»."
         )
         return
@@ -1024,8 +1029,7 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
     await state.set_state(WalletStates.upload_receipt)
     await callback.message.answer(
         f"📎 Надішліть інший скриншот платіжної квитанції для заявки "
-        f"№{payment_id} як фото "
-        f"або документ.\n\n"
+        f"№{payment_id} саме як фото, не файлом.\n\n"
         f"На ній має бути чітко видно час, картку одержувача та "
         f"суму <b>{amount} грн</b>. Екран «переказ успішний» не підходить.",
         parse_mode="HTML",
