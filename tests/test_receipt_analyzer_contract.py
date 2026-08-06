@@ -6,6 +6,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from services.receipt_analyzer import (
+    CARD_MISMATCH_REASON,
     PaymentReceiptAnalysis,
     analyze_receipt_with_openai,
     evaluate_auto_approval,
@@ -157,6 +158,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             ],
         )
         self.assertFalse(result[0])
+        self.assertEqual(result[1], CARD_MISMATCH_REASON)
 
     def test_recipient_role_requires_recipient_label_evidence(self):
         result = self.evaluate(

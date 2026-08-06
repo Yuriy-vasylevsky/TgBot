@@ -588,6 +588,7 @@ async def _route_payment_to_manual_review(
     if retry_available:
         await message.answer(
             f"⚠️ Автоматична перевірка не змогла підтвердити квитанцію.\n\n"
+            f"❗ <b>Причина:</b> {escape(reason)}\n\n"
             f"На квитанції має бути чітко видно:\n"
             f"• <b>час переказу</b>;\n"
             f"• <b>картку, на яку зроблено переказ</b>;\n"
@@ -601,6 +602,7 @@ async def _route_payment_to_manual_review(
     else:
         await message.answer(
             f"✅ Квитанцію передано адміністратору.\n\n"
+            f"❗ <b>Причина:</b> {escape(reason)}\n\n"
             f"💰 Сума: <b>{amount} грн</b>\n"
             f"⏳ Очікуйте підтвердження платежу.",
             parse_mode="HTML",

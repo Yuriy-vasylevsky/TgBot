@@ -18,6 +18,9 @@ from pydantic import BaseModel, ConfigDict, Field
 
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 SUPPORTED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
+CARD_MISMATCH_REASON = (
+    "картка одержувача не збігається або її не вдалось правильно розпізнати"
+)
 
 
 class UnsupportedReceiptFile(ValueError):
@@ -421,13 +424,13 @@ def evaluate_auto_approval(
             return False, reason, None
 
     if not found_card_suffix or not matching_cards:
-        return False, "картка одержувача не збігається", None
+        return False, CARD_MISMATCH_REASON, None
     if found_card_suffix not in recipient_evidence_suffixes:
-        return False, "картка не підтверджена підписом отримувача на зображенні", None
+        return False, CARD_MISMATCH_REASON, None
     if len(recipient_evidence_suffixes) != 1:
-        return False, "на зображенні неоднозначно визначена картка отримувача", None
+        return False, CARD_MISMATCH_REASON, None
     if len(matching_cards) > 1:
-        return False, "видимих цифр недостатньо для однозначного вибору картки", None
+        return False, CARD_MISMATCH_REASON, None
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None
