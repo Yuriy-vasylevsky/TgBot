@@ -160,6 +160,33 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         self.assertFalse(result[0])
         self.assertEqual(result[1], CARD_MISMATCH_REASON)
 
+    def test_neutral_label_can_override_incorrect_sender_role(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "recipient_card_suffix": None,
+                    "card_candidates": [
+                        {
+                            "role": "sender",
+                            "visible_suffix": "2296",
+                            "context_label": "Карточка (унікальний ідентифікатор)",
+                            "evidence_text": "Карточка (унікальний ідентифікатор) **** 2296",
+                        }
+                    ],
+                }
+            )
+        )
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296", "8204"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_card_suffix, "2296")
+
     def test_recipient_role_requires_recipient_label_evidence(self):
         result = self.evaluate(
             card_candidates=[

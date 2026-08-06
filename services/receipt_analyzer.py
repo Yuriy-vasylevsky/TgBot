@@ -378,27 +378,22 @@ def evaluate_auto_approval(
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
     """Перевіряє тип документа, видимий час, суму та картку."""
-    found_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
-    recipient_evidence_suffixes: set[str] = set()
+    reported_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
+    explicit_recipient_suffixes: set[str] = set()
+    neutral_card_suffixes: set[str] = set()
     for candidate in analysis.card_candidates:
-        if candidate.role != "recipient":
-            continue
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
+        if not candidate_suffix:
+            continue
         context = f"{candidate.context_label} {candidate.evidence_text}".casefold()
         has_recipient_marker = any(marker in context for marker in _RECIPIENT_MARKERS)
         has_sender_marker = any(marker in context for marker in _SENDER_MARKERS)
-        if candidate_suffix and has_recipient_marker and not has_sender_marker:
-            recipient_evidence_suffixes.add(candidate_suffix)
-
-    matching_cards = (
-        {
-            card_last4
-            for card_last4 in allowed_card_last4
-            if card_last4.endswith(found_card_suffix)
-        }
-        if found_card_suffix
-        else set()
-    )
+        if has_recipient_marker and not has_sender_marker:
+            explicit_recipient_suffixes.add(candidate_suffix)
+        elif not has_sender_marker:
+            # Не довіряємо лише ролі від GPT: нейтральний підпис не робить
+            # картку відправником. Її ще має однозначно підтвердити база.
+            neutral_card_suffixes.add(candidate_suffix)
     checks: list[tuple[bool, str]] = [
         (
             analysis.document_type
@@ -423,14 +418,37 @@ def evaluate_auto_approval(
         if not passed:
             return False, reason, None
 
-    if not found_card_suffix or not matching_cards:
+    if len(explicit_recipient_suffixes) > 1:
         return False, CARD_MISMATCH_REASON, None
-    if found_card_suffix not in recipient_evidence_suffixes:
+
+    if explicit_recipient_suffixes:
+        selected_card_suffix = next(iter(explicit_recipient_suffixes))
+    else:
+        neutral_matching_suffixes = {
+            suffix
+            for suffix in neutral_card_suffixes
+            if any(card_last4.endswith(suffix) for card_last4 in allowed_card_last4)
+        }
+        if len(neutral_matching_suffixes) != 1:
+            return False, CARD_MISMATCH_REASON, None
+        selected_card_suffix = next(iter(neutral_matching_suffixes))
+
+    if reported_card_suffix and reported_card_suffix != selected_card_suffix:
         return False, CARD_MISMATCH_REASON, None
-    if len(recipient_evidence_suffixes) != 1:
+
+    matching_cards = {
+        card_last4
+        for card_last4 in allowed_card_last4
+        if card_last4.endswith(selected_card_suffix)
+    }
+    if not matching_cards:
         return False, CARD_MISMATCH_REASON, None
     if len(matching_cards) > 1:
         return False, CARD_MISMATCH_REASON, None
+
+    # Показуємо користувачу й адміну фактично вибране кодом закінчення,
+    # навіть якщо GPT залишив підсумкове поле порожнім через помилкову роль.
+    analysis.recipient_card_suffix = selected_card_suffix
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None
