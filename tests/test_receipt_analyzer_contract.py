@@ -20,6 +20,14 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             "document_type": "payment_receipt",
             "payment_status": "successful",
             "amount_found": 200,
+            "card_candidates": [
+                {
+                    "role": "recipient",
+                    "visible_suffix": "2296",
+                    "context_label": "Отримувач",
+                    "evidence_text": "Отримувач **** 2296",
+                }
+            ],
             "recipient_card_suffix": "2296",
             "payment_datetime": "2026-08-04T14:30:00+03:00",
             "payment_time_source": "operation",
@@ -91,6 +99,21 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = self.evaluate(payment_time_visible_text="04.08.2026 13:00")
         self.assertFalse(result[0])
 
+    def test_common_day_first_datetime_formats_are_supported(self):
+        values = (
+            "04.08.2026 14:30",
+            "04.08.2026, 14:30:15",
+            "04/08/2026 14:30",
+            "14:30 04-08-2026",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                result = self.evaluate(
+                    payment_datetime=value,
+                    payment_time_visible_text=value,
+                )
+                self.assertTrue(result[0], result[1])
+
     def test_success_screen_with_correct_data_is_approved(self):
         result = self.evaluate(
             is_payment_receipt=False,
@@ -115,6 +138,39 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
     def test_failed_receipt_is_not_approved(self):
         self.assertFalse(self.evaluate(payment_status="failed")[0])
 
+    def test_sender_card_cannot_be_used_as_recipient(self):
+        result = self.evaluate(
+            recipient_card_suffix="2296",
+            card_candidates=[
+                {
+                    "role": "sender",
+                    "visible_suffix": "2296",
+                    "context_label": "Платник",
+                    "evidence_text": "Картка платника **** 2296",
+                },
+                {
+                    "role": "recipient",
+                    "visible_suffix": "5327",
+                    "context_label": "Отримувач",
+                    "evidence_text": "Картка отримувача **** 5327",
+                },
+            ],
+        )
+        self.assertFalse(result[0])
+
+    def test_recipient_role_requires_recipient_label_evidence(self):
+        result = self.evaluate(
+            card_candidates=[
+                {
+                    "role": "recipient",
+                    "visible_suffix": "2296",
+                    "context_label": "Платник",
+                    "evidence_text": "Картка платника **** 2296",
+                }
+            ]
+        )
+        self.assertFalse(result[0])
+
     def test_phone_status_bar_time_is_allowed_on_a_receipt(self):
         result = self.evaluate(
             payment_datetime="14:30",
@@ -127,6 +183,14 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = self.evaluate_with_cards(
             {"2296", "8204"},
             recipient_card_suffix="96",
+            card_candidates=[
+                {
+                    "role": "recipient",
+                    "visible_suffix": "96",
+                    "context_label": "Отримувач",
+                    "evidence_text": "Картка отримувача **96",
+                }
+            ],
         )
         self.assertTrue(result[0])
 
@@ -134,6 +198,14 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = self.evaluate_with_cards(
             {"2296", "7496"},
             recipient_card_suffix="96",
+            card_candidates=[
+                {
+                    "role": "recipient",
+                    "visible_suffix": "96",
+                    "context_label": "Отримувач",
+                    "evidence_text": "Картка отримувача **96",
+                }
+            ],
         )
         self.assertFalse(result[0])
 
@@ -141,6 +213,14 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = self.evaluate_with_cards(
             {"2296", "8204"},
             recipient_card_suffix="77",
+            card_candidates=[
+                {
+                    "role": "recipient",
+                    "visible_suffix": "77",
+                    "context_label": "Отримувач",
+                    "evidence_text": "Картка отримувача **77",
+                }
+            ],
         )
         self.assertFalse(result[0])
 

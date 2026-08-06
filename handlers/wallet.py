@@ -481,12 +481,27 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
     visible_time = escape(analysis.payment_time_visible_text or "не видно")
     document_type = escape(analysis.document_type)
     time_source = escape(analysis.payment_time_source)
+    role_names = {
+        "recipient": "отримувач",
+        "sender": "відправник",
+        "unknown": "невідомо",
+    }
+    candidate_parts = []
+    for candidate in analysis.card_candidates[:5]:
+        suffix = "".join(
+            character for character in candidate.visible_suffix if character.isdigit()
+        )[-4:] or "—"
+        label = escape(candidate.context_label[:35] or "без підпису")
+        role = role_names.get(candidate.role, candidate.role)
+        candidate_parts.append(f"{role}: ****{suffix} ({label})")
+    card_candidates = "; ".join(candidate_parts) or "не знайдено"
     return (
         f"\n\n🤖 <b>Результат автоматичної перевірки</b>\n"
         f"Рішення: ручна перевірка\n"
         f"Впевненість: {analysis.confidence:.0%}\n"
         f"Знайдена сума: {found_amount}\n"
         f"Картка: {card}\n"
+        f"Знайдені картки: {card_candidates}\n"
         f"Тип: {document_type}\n"
         f"Час: {payment_time}\n"
         f"Джерело часу: {time_source} ({visible_time})"
@@ -824,7 +839,8 @@ async def _process_manual_receipt(
         )
         logging.info(
             "GPT receipt result | payment_id=%s user_id=%s amount=%s "
-            "status=%s amount_found=%s card_suffix=%s allowed_last4=%s confidence=%.3f "
+            "status=%s amount_found=%s card_suffix=%s card_candidates=%s "
+            "allowed_last4=%s confidence=%.3f "
             "final=%s reason=%s",
             payment_id,
             message.from_user.id,
@@ -832,6 +848,10 @@ async def _process_manual_receipt(
             analysis.payment_status,
             analysis.amount_found,
             analysis.recipient_card_suffix,
+            [
+                (candidate.role, candidate.visible_suffix[-4:])
+                for candidate in analysis.card_candidates[:5]
+            ],
             sorted(card["last4"] for card in allowed_cards),
             analysis.confidence,
             "approve" if approved else "manual_review",

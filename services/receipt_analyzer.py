@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import imagehash
 from aiogram import Bot
 from openai import AsyncOpenAI
-from PIL import Image, ImageOps, UnidentifiedImageError
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -26,6 +26,15 @@ class UnsupportedReceiptFile(ValueError):
 
 class ReceiptFileTooLarge(ValueError):
     pass
+
+
+class CardCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    role: Literal["recipient", "sender", "unknown"]
+    visible_suffix: str
+    context_label: str
+    evidence_text: str
 
 
 class PaymentReceiptAnalysis(BaseModel):
@@ -43,6 +52,7 @@ class PaymentReceiptAnalysis(BaseModel):
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
     amount_found: int | None
+    card_candidates: list[CardCandidate]
     recipient_card_suffix: str | None
     payment_datetime: str | None
     payment_time_source: Literal["operation", "phone_status_bar", "not_visible"]
@@ -92,6 +102,9 @@ def _normalize_image(original_bytes: bytes) -> PreparedReceipt:
             (round(image.width * scale), round(image.height * scale)),
             Image.Resampling.LANCZOS,
         )
+    image = ImageOps.autocontrast(image, cutoff=1)
+    image = ImageEnhance.Contrast(image).enhance(1.08)
+    image = image.filter(ImageFilter.UnsharpMask(radius=1.2, percent=115, threshold=3))
     output = io.BytesIO()
     image.save(output, format="JPEG", quality=92, optimize=True)
     return PreparedReceipt(
@@ -160,13 +173,24 @@ async def analyze_receipt_with_openai(
   зображення позначай other;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
+- спочатку знайди КОЖНУ видиму картку або платіжний інструмент і додай її до
+  card_candidates. Для кожної вкажи role, лише фактично видиме закінчення,
+  точний найближчий підпис у context_label та короткий дослівний фрагмент у
+  evidence_text;
+- role="recipient" використовуй тільки коли поруч явно написано
+  «Отримувач», «Одержувач», «Отримувач переказу», «Картка отримувача»,
+  «На картку», recipient або beneficiary;
+- role="sender" використовуй для «Платник», «Відправник», «З картки»,
+  «Картка списання», sender або payer. Якщо роль не підтверджена підписом,
+  використовуй unknown;
 - recipient_card_suffix бери лише з реквізитів отримувача: полів
   «Отримувач», «Отримувач переказу», «Картка отримувача», «На картку» або
   аналогічних за змістом;
 - не використовуй для recipient_card_suffix картку платника, відправника,
   картку списання, «З картки» чи номер рахунку платника;
 - якщо видно кілька карток, обов'язково розрізни відправника й отримувача та
-  поверни останні 4 цифри саме картки отримувача;
+  поверни закінчення саме картки отримувача; воно має повністю збігатися з
+  visible_suffix одного card_candidates з role="recipient";
 - якщо картку отримувача визначити неможливо, поверни null, а не номер
   картки відправника;
 - для recipient_card_suffix поверни лише видимі кінцеві цифри картки
@@ -175,6 +199,7 @@ async def analyze_receipt_with_openai(
 - ніколи не доповнюй дві видимі цифри до чотирьох і не домислюй
   нерозбірливі цифри;
 - для payment_datetime спочатку використовуй дату й час самої операції;
+- payment_datetime завжди нормалізуй у ISO 8601: YYYY-MM-DDTHH:MM:SS+HH:MM;
 - payment_time_source="operation" дозволено лише коли час операції реально
   видно у квитанції або на екрані конкретного платежу; у
   payment_time_visible_text дослівно перепиши видимий фрагмент дати й часу;
@@ -232,6 +257,115 @@ async def analyze_receipt_with_openai(
     return response.output_parsed
 
 
+_TIME_PATTERN = re.compile(
+    r"(?<!\d)(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
+    r"(?::(?P<second>[0-5]\d))?(?!\d)"
+)
+_DAY_FIRST_DATE_PATTERN = re.compile(
+    r"(?<!\d)(?P<day>0?[1-9]|[12]\d|3[01])[./-]"
+    r"(?P<month>0?[1-9]|1[0-2])[./-](?P<year>\d{2}|\d{4})(?!\d)"
+)
+_YEAR_FIRST_DATE_PATTERN = re.compile(
+    r"(?<!\d)(?P<year>\d{4})[./-](?P<month>0?[1-9]|1[0-2])[./-]"
+    r"(?P<day>0?[1-9]|[12]\d|3[01])(?!\d)"
+)
+_RECIPIENT_MARKERS = (
+    "отримувач",
+    "одержувач",
+    "получатель",
+    "recipient",
+    "beneficiary",
+    "на картку",
+    "на карту",
+    "картка отримувача",
+    "рахунок отримувача",
+)
+_SENDER_MARKERS = (
+    "платник",
+    "відправник",
+    "отправитель",
+    "sender",
+    "payer",
+    "з картки",
+    "с карты",
+    "картка списання",
+    "рахунок платника",
+)
+
+
+def _normalize_card_suffix(value: str | None) -> str | None:
+    digits = "".join(character for character in (value or "") if character.isdigit())
+    if len(digits) >= 4:
+        return digits[-4:]
+    if len(digits) >= 2:
+        return digits
+    return None
+
+
+def _parse_payment_datetime(value: str, now_kyiv: datetime) -> datetime | None:
+    text = " ".join(value.strip().replace(",", " ").split())
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=KYIV_ZONE)
+    except ValueError:
+        pass
+
+    time_match = _TIME_PATTERN.search(text)
+    if not time_match:
+        return None
+
+    hour = int(time_match.group("hour"))
+    minute = int(time_match.group("minute"))
+    second = int(time_match.group("second") or 0)
+    date_match = _DAY_FIRST_DATE_PATTERN.search(text)
+    if date_match:
+        year = int(date_match.group("year"))
+        if year < 100:
+            year += 2000
+        try:
+            return datetime(
+                year,
+                int(date_match.group("month")),
+                int(date_match.group("day")),
+                hour,
+                minute,
+                second,
+                tzinfo=KYIV_ZONE,
+            )
+        except ValueError:
+            return None
+
+    date_match = _YEAR_FIRST_DATE_PATTERN.search(text)
+    if date_match:
+        try:
+            return datetime(
+                int(date_match.group("year")),
+                int(date_match.group("month")),
+                int(date_match.group("day")),
+                hour,
+                minute,
+                second,
+                tzinfo=KYIV_ZONE,
+            )
+        except ValueError:
+            return None
+
+    local_now = now_kyiv.astimezone(KYIV_ZONE)
+    candidates = [
+        (local_now + timedelta(days=day_shift)).replace(
+            hour=hour,
+            minute=minute,
+            second=second,
+            microsecond=0,
+        )
+        for day_shift in (-1, 0, 1)
+    ]
+    return min(
+        candidates,
+        key=lambda candidate: abs((local_now - candidate).total_seconds()),
+    )
+
+
 def evaluate_auto_approval(
     analysis: PaymentReceiptAnalysis,
     *,
@@ -241,17 +375,17 @@ def evaluate_auto_approval(
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
     """Перевіряє тип документа, видимий час, суму та картку."""
-    card_digits = "".join(
-        character
-        for character in (analysis.recipient_card_suffix or "")
-        if character.isdigit()
-    )
-    if len(card_digits) >= 4:
-        found_card_suffix = card_digits[-4:]
-    elif len(card_digits) >= 2:
-        found_card_suffix = card_digits[-len(card_digits):]
-    else:
-        found_card_suffix = None
+    found_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
+    recipient_evidence_suffixes: set[str] = set()
+    for candidate in analysis.card_candidates:
+        if candidate.role != "recipient":
+            continue
+        candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
+        context = f"{candidate.context_label} {candidate.evidence_text}".casefold()
+        has_recipient_marker = any(marker in context for marker in _RECIPIENT_MARKERS)
+        has_sender_marker = any(marker in context for marker in _SENDER_MARKERS)
+        if candidate_suffix and has_recipient_marker and not has_sender_marker:
+            recipient_evidence_suffixes.add(candidate_suffix)
 
     matching_cards = (
         {
@@ -288,55 +422,26 @@ def evaluate_auto_approval(
 
     if not found_card_suffix or not matching_cards:
         return False, "картка одержувача не збігається", None
+    if found_card_suffix not in recipient_evidence_suffixes:
+        return False, "картка не підтверджена підписом отримувача на зображенні", None
+    if len(recipient_evidence_suffixes) != 1:
+        return False, "на зображенні неоднозначно визначена картка отримувача", None
     if len(matching_cards) > 1:
         return False, "видимих цифр недостатньо для однозначного вибору картки", None
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None
     visible_time_text = (analysis.payment_time_visible_text or "").strip()
-    visible_time_match = re.search(
-        r"(?<!\d)(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
-        r"(?::(?P<second>[0-5]\d))?(?!\d)",
-        visible_time_text,
-    )
+    visible_time_match = _TIME_PATTERN.search(visible_time_text)
     if not visible_time_match:
         return False, "немає підтвердження, що час видимий на зображенні", None
 
     if not analysis.payment_datetime:
         return False, "час операції не визначено", None
     payment_datetime_text = analysis.payment_datetime.strip()
-    try:
-        payment_time = datetime.fromisoformat(
-            payment_datetime_text.replace("Z", "+00:00")
-        )
-    except ValueError:
-        time_only = re.fullmatch(
-            r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)"
-            r"(?::(?P<second>[0-5]\d))?",
-            payment_datetime_text,
-        )
-        if not time_only:
-            return False, "час операції має невалідний формат", None
-
-        hour = int(time_only.group("hour"))
-        minute = int(time_only.group("minute"))
-        second = int(time_only.group("second") or 0)
-        local_now = now_kyiv.astimezone(KYIV_ZONE)
-        candidates = [
-            (local_now + timedelta(days=day_shift)).replace(
-                hour=hour,
-                minute=minute,
-                second=second,
-                microsecond=0,
-            )
-            for day_shift in (-1, 0, 1)
-        ]
-        payment_time = min(
-            candidates,
-            key=lambda candidate: abs((local_now - candidate).total_seconds()),
-        )
-    if payment_time.tzinfo is None:
-        payment_time = payment_time.replace(tzinfo=KYIV_ZONE)
+    payment_time = _parse_payment_datetime(payment_datetime_text, now_kyiv)
+    if payment_time is None:
+        return False, "час операції має невалідний формат", None
 
     if (
         payment_time.hour != int(visible_time_match.group("hour"))
