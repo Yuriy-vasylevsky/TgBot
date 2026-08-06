@@ -380,9 +380,8 @@ async def process_amount(message: Message, state: FSMContext):
             f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
             f"на одну з карток:\n\n"
             f"{cards_text}\n\n"
-            f"🧾 Після переказу надішліть саме <b>скриншот платіжної "
-            f"квитанції як фото</b>. Файл або екран «переказ успішний» "
-            f"не підходить.\n"
+            f"🧾 Після переказу надішліть <b>скриншот квитанції або екрана "
+            f"успішної оплати як фото</b>. Файл не підходить.\n"
             f"Заявка буде передана адміністратору на перевірку.",
             parse_mode="HTML",
             reply_markup=receipt_keyboard,
@@ -578,7 +577,7 @@ async def _route_payment_to_manual_review(
             f"• <b>час переказу</b>;\n"
             f"• <b>картку, на яку зроблено переказ</b>;\n"
             f"• <b>суму переказу — {amount} грн</b>.\n\n"
-            f"Надішліть саме квитанцію, а не екран «переказ успішний».\n\n"
+            f"Можна надіслати квитанцію або екран успішної оплати.\n\n"
             f"Ви можете надіслати іншу квитанцію або нічого не робити й "
             f"зачекати на підтвердження адміністратора.",
             parse_mode="HTML",
@@ -946,8 +945,8 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
 
     if message.document:
         await message.answer(
-            "❌ Файл не підходить. Надішліть скриншот платіжної квитанції "
-            "саме як фото."
+            "❌ Файл не підходить. Надішліть скриншот квитанції або екрана "
+            "успішної оплати саме як фото."
         )
         return
 
@@ -958,7 +957,8 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
 
     if not receipt_file_id or not receipt_type:
         await message.answer(
-            "❌ Надішліть скриншот платіжної квитанції саме як фото або "
+            "❌ Надішліть скриншот квитанції або екрана успішної оплати "
+            "саме як фото або "
             "скористайтеся "
             "кнопкою «Не можу надіслати квитанцію»."
         )
@@ -1028,10 +1028,10 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(WalletStates.upload_receipt)
     await callback.message.answer(
-        f"📎 Надішліть інший скриншот платіжної квитанції для заявки "
+        f"📎 Надішліть інший скриншот квитанції або успішної оплати для заявки "
         f"№{payment_id} саме як фото, не файлом.\n\n"
         f"На ній має бути чітко видно час, картку одержувача та "
-        f"суму <b>{amount} грн</b>. Екран «переказ успішний» не підходить.",
+        f"суму <b>{amount} грн</b>.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[

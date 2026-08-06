@@ -91,10 +91,24 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = self.evaluate(payment_time_visible_text="04.08.2026 13:00")
         self.assertFalse(result[0])
 
-    def test_success_screen_is_not_a_payment_receipt(self):
+    def test_success_screen_with_correct_data_is_approved(self):
         result = self.evaluate(
             is_payment_receipt=False,
             document_type="transfer_success_screen",
+        )
+        self.assertTrue(result[0])
+
+    def test_payment_details_screen_with_correct_data_is_approved(self):
+        result = self.evaluate(
+            is_payment_receipt=False,
+            document_type="payment_details_screen",
+        )
+        self.assertTrue(result[0])
+
+    def test_bank_notification_is_not_approved(self):
+        result = self.evaluate(
+            is_payment_receipt=False,
+            document_type="bank_notification",
         )
         self.assertFalse(result[0])
 

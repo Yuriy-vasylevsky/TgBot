@@ -35,6 +35,7 @@ class PaymentReceiptAnalysis(BaseModel):
     document_type: Literal[
         "payment_receipt",
         "transfer_success_screen",
+        "payment_details_screen",
         "bank_notification",
         "other",
     ]
@@ -149,13 +150,14 @@ async def analyze_receipt_with_openai(
 Поточний час Europe/Kyiv: {now_kyiv.isoformat()}
 
 Правила:
-- document_type="payment_receipt" став лише для окремої платіжної квитанції
-  з реквізитами операції. Екран «переказ виконано/успішно», сторінка операції
-  в застосунку, банківське push-сповіщення чи головний екран застосунку не є
-  квитанцією: для них використовуй transfer_success_screen,
-  bank_notification або other та is_payment_receipt=false;
-- не називай зображення квитанцією лише через те, що на ньому видно суму,
-  картку та напис про успішний переказ;
+- document_type="payment_receipt" став для окремої платіжної квитанції з
+  реквізитами операції;
+- для екрана банківського застосунку «переказ виконано/успішно» використовуй
+  transfer_success_screen, а для сторінки з деталями конкретної операції —
+  payment_details_screen;
+- bank_notification використовуй лише для окремого push-сповіщення без
+  відкритого екрана конкретного платежу; головний екран застосунку та сторонні
+  зображення позначай other;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
 - recipient_card_suffix бери лише з реквізитів отримувача: полів
@@ -174,8 +176,8 @@ async def analyze_receipt_with_openai(
   нерозбірливі цифри;
 - для payment_datetime спочатку використовуй дату й час самої операції;
 - payment_time_source="operation" дозволено лише коли час операції реально
-  надрукований у квитанції; у payment_time_visible_text дослівно перепиши
-  видимий фрагмент дати й часу;
+  видно у квитанції або на екрані конкретного платежу; у
+  payment_time_visible_text дослівно перепиши видимий фрагмент дати й часу;
 - якщо час операції на квитанції відсутній, але у верхній панелі телефона
   чітко видно час, використовуй час телефона, постав
   payment_time_source="phone_status_bar" і дослівно перепиши видимий час у
@@ -262,9 +264,13 @@ def evaluate_auto_approval(
     )
     checks: list[tuple[bool, str]] = [
         (
-            analysis.is_payment_receipt
-            and analysis.document_type == "payment_receipt",
-            "зображення не є платіжною квитанцією",
+            analysis.document_type
+            in {
+                "payment_receipt",
+                "transfer_success_screen",
+                "payment_details_screen",
+            },
+            "зображення не є квитанцією або екраном конкретного платежу",
         ),
         (
             analysis.payment_status == "successful",
