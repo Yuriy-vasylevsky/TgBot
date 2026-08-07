@@ -21,6 +21,7 @@ SUPPORTED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
 CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
 )
+CANCELLABLE_PAYMENT_REASON = "платіж ще можна скасувати"
 
 
 class UnsupportedReceiptFile(ValueError):
@@ -54,6 +55,8 @@ class PaymentReceiptAnalysis(BaseModel):
     payment_status: Literal[
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
+    payment_can_be_cancelled: bool
+    cancellation_visible_text: str | None
     amount_found: int | None
     card_candidates: list[CardCandidate]
     recipient_card_suffix: str | None
@@ -174,6 +177,14 @@ async def analyze_receipt_with_openai(
 - bank_notification використовуй лише для окремого push-сповіщення без
   відкритого екрана конкретного платежу; головний екран застосунку та сторонні
   зображення позначай other;
+- уважно переглянь усе зображення, особливо кнопки внизу. Якщо видно дію
+  «Скасувати платіж», «Скасувати переказ», «Відкликати платіж»,
+  «Отменить платеж/перевод», «Cancel payment», «Undo transfer» або аналогічну
+  можливість повернути чи скасувати операцію, постав
+  payment_can_be_cancelled=true і дослівно перепиши напис у
+  cancellation_visible_text;
+- якщо можливості скасування ніде не видно, постав
+  payment_can_be_cancelled=false та cancellation_visible_text=null;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
 - спочатку знайди КОЖНУ видиму картку або платіжний інструмент і додай її до
@@ -294,6 +305,18 @@ _SENDER_MARKERS = (
     "картка списання",
     "рахунок платника",
 )
+_CANCELLATION_MARKERS = (
+    "скасувати платіж",
+    "скасувати переказ",
+    "відкликати платіж",
+    "відмінити платіж",
+    "отменить платеж",
+    "отменить перевод",
+    "отозвать платеж",
+    "cancel payment",
+    "cancel transfer",
+    "undo transfer",
+)
 
 
 def _normalize_card_suffix(value: str | None) -> str | None:
@@ -395,6 +418,14 @@ def evaluate_auto_approval(
             # картку відправником. Її ще має однозначно підтвердити база.
             neutral_card_suffixes.add(candidate_suffix)
     checks: list[tuple[bool, str]] = [
+        (
+            not analysis.payment_can_be_cancelled
+            and not any(
+                marker in (analysis.cancellation_visible_text or "").casefold()
+                for marker in _CANCELLATION_MARKERS
+            ),
+            CANCELLABLE_PAYMENT_REASON,
+        ),
         (
             analysis.document_type
             in {

@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from services.receipt_analyzer import (
     CARD_MISMATCH_REASON,
+    CANCELLABLE_PAYMENT_REASON,
     PaymentReceiptAnalysis,
     analyze_receipt_with_openai,
     evaluate_auto_approval,
@@ -20,6 +21,8 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             "is_payment_receipt": True,
             "document_type": "payment_receipt",
             "payment_status": "successful",
+            "payment_can_be_cancelled": False,
+            "cancellation_visible_text": None,
             "amount_found": 200,
             "card_candidates": [
                 {
@@ -138,6 +141,22 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
 
     def test_failed_receipt_is_not_approved(self):
         self.assertFalse(self.evaluate(payment_status="failed")[0])
+
+    def test_cancellable_payment_is_always_sent_to_manual_review(self):
+        result = self.evaluate(
+            payment_can_be_cancelled=True,
+            cancellation_visible_text="Скасувати платіж",
+        )
+        self.assertFalse(result[0])
+        self.assertEqual(result[1], CANCELLABLE_PAYMENT_REASON)
+
+    def test_cancellation_text_blocks_even_if_boolean_is_wrong(self):
+        result = self.evaluate(
+            payment_can_be_cancelled=False,
+            cancellation_visible_text="Скасувати платіж",
+        )
+        self.assertFalse(result[0])
+        self.assertEqual(result[1], CANCELLABLE_PAYMENT_REASON)
 
     def test_sender_card_cannot_be_used_as_recipient(self):
         result = self.evaluate(
