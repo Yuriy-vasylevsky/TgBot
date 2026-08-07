@@ -163,7 +163,12 @@ from .admin import (
     ban_profile_user,
     unban_profile_user,
     is_profile_banned,
-    list_banned_profile
+    list_banned_profile,
+    ensure_receipt_autoapproval_ban_table,
+    ban_receipt_autoapproval_user,
+    unban_receipt_autoapproval_user,
+    is_receipt_autoapproval_banned,
+    list_banned_receipt_autoapproval,
 )
 
 

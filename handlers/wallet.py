@@ -58,6 +58,7 @@ from db import (
     register_receipt_fingerprints,
     save_manual_payment_analysis,
     mark_manual_payment_analysis_started,
+    is_receipt_autoapproval_banned,
 )
 from handlers.menu import main_menu
 from services.receipt_analyzer import (
@@ -351,6 +352,9 @@ async def process_amount(message: Message, state: FSMContext):
 
     state_data = await state.get_data()
     if state_data.get("topup_mode") == "manual":
+        receipt_autoapproval_banned = await is_receipt_autoapproval_banned(
+            message.from_user.id
+        )
         cards = await get_cards()
         cards_text = "\n\n".join(
             f"🏦 {escape(bank)}: <code>{escape(number)}</code>"
@@ -376,6 +380,14 @@ async def process_amount(message: Message, state: FSMContext):
                 ],
             ]
         )
+        restriction_notice = ""
+        if receipt_autoapproval_banned:
+            restriction_notice = (
+                "\n\n⚠️ <b>Для вас діє тільки зарахування через касира.</b>\n"
+                "Автоматичне підтвердження квитанції недоступне. "
+                "Якщо здійснюєте переказ уночі, платіж буде зараховано "
+                "тільки після перевірки касиром."
+            )
         await message.answer(
             f"💰 <b>Поповнення на {amount_grn} грн</b>\n\n"
             f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
@@ -383,7 +395,8 @@ async def process_amount(message: Message, state: FSMContext):
             f"{cards_text}\n\n"
             f"🧾 Після переказу надішліть <b>скриншот квитанції або екрана "
             f"успішної оплати як фото</b>. Файл не підходить.\n"
-            f"Заявка буде передана адміністратору на перевірку.",
+            f"Заявка буде передана адміністратору на перевірку."
+            f"{restriction_notice}",
             parse_mode="HTML",
             reply_markup=receipt_keyboard,
         )
@@ -702,6 +715,17 @@ async def _process_manual_receipt(
             payment_id,
             message.from_user.id,
         )
+
+    if await is_receipt_autoapproval_banned(message.from_user.id):
+        await _route_payment_to_manual_review(
+            message,
+            payment_id=payment_id,
+            amount=amount,
+            receipt_type=receipt_type,
+            receipt_file_id=receipt_file_id,
+            reason="для користувача діє тільки зарахування через касира",
+        )
+        return
 
     try:
         prepared = await download_and_prepare_receipt(

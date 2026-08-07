@@ -1,6 +1,7 @@
 
 
 import aiosqlite
+from html import escape
 from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -9,7 +10,15 @@ from db import ban_user, unban_user, DB_PATH, ensure_ban_table
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu, admin_menu2
 from db import ban_user, unban_user, DB_PATH, ensure_ban_table
-from db import ban_profile_user, unban_profile_user, is_profile_banned, list_banned_profile
+from db import (
+    ban_profile_user,
+    unban_profile_user,
+    is_profile_banned,
+    list_banned_profile,
+    ban_receipt_autoapproval_user,
+    unban_receipt_autoapproval_user,
+    list_banned_receipt_autoapproval,
+)
 
 router = Router(name="admin_bans")
 
@@ -51,6 +60,9 @@ class BanStates(StatesGroup):
     waiting_for_profile_ban_id = State()
     waiting_for_profile_unban_id = State()
     waiting_for_profile_ban_reason = State()
+    waiting_for_receipt_ban_id = State()
+    waiting_for_receipt_ban_reason = State()
+    waiting_for_receipt_unban_id = State()
 
 
 # def bans_inline_kb() -> InlineKeyboardMarkup:
@@ -71,6 +83,24 @@ def bans_inline_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🔒 Забанити кабінет", callback_data="pban_start_ban")],
             [InlineKeyboardButton(text="🔑 Розбанити кабінет", callback_data="pban_start_unban")],
             [InlineKeyboardButton(text="📋 Список банів кабінету", callback_data="pban_list")],
+            [
+                InlineKeyboardButton(
+                    text="🤖 Заборонити автоперевірку",
+                    callback_data="rban_start_ban",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="✅ Дозволити автоперевірку",
+                    callback_data="rban_start_unban",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📋 Бан автоперевірки",
+                    callback_data="rban_list",
+                )
+            ],
         ]
     )
 
@@ -336,3 +366,136 @@ async def view_banned_profile_list(callback: CallbackQuery):
 
     text = "📋 <b>Заблоковані кабінети:</b>\n\n" + "\n".join(lines)
     await callback.message.answer(text, parse_mode="HTML", reply_markup=admin_menu2())
+
+
+# ==========================
+# 🤖 Бан автоматичної перевірки квитанцій
+# ==========================
+@router.callback_query(F.data == "rban_start_ban")
+async def start_receipt_autoapproval_ban(
+    callback: CallbackQuery, state: FSMContext
+):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Введи ID користувача, якому треба вимкнути автоматичну "
+        "перевірку квитанцій:",
+        reply_markup=bans_cancel_kb(),
+    )
+    await state.set_state(BanStates.waiting_for_receipt_ban_id)
+    await callback.answer()
+
+
+@router.message(BanStates.waiting_for_receipt_ban_id)
+async def handle_receipt_autoapproval_ban_id(
+    message: Message, state: FSMContext
+):
+    text = (message.text or "").strip()
+    if not text.isdigit():
+        await message.answer(
+            "Введи тільки числовий ID.", reply_markup=bans_cancel_kb()
+        )
+        return
+    user_id = int(text)
+    if user_id == ADMIN_ID:
+        await message.answer("⛔ Не можна вимкнути автоперевірку для себе.")
+        await state.clear()
+        return
+    await state.update_data(receipt_ban_target=user_id)
+    await message.answer(
+        "Введи причину заборони автоперевірки:",
+        reply_markup=bans_cancel_kb(),
+    )
+    await state.set_state(BanStates.waiting_for_receipt_ban_reason)
+
+
+@router.message(BanStates.waiting_for_receipt_ban_reason)
+async def handle_receipt_autoapproval_ban_reason(
+    message: Message, state: FSMContext
+):
+    data = await state.get_data()
+    user_id = data.get("receipt_ban_target")
+    reason = (message.text or "").strip() or "Ручна перевірка касиром"
+    await ban_receipt_autoapproval_user(
+        user_id,
+        banned_by=message.from_user.id,
+        reason=reason,
+    )
+    await state.clear()
+    await message.answer(
+        f"✅ Для користувача <code>{user_id}</code> автоматичну перевірку "
+        f"квитанцій вимкнено.\nПричина: {escape(reason)}",
+        parse_mode="HTML",
+        reply_markup=admin_menu2(),
+    )
+
+
+@router.callback_query(F.data == "rban_start_unban")
+async def start_receipt_autoapproval_unban(
+    callback: CallbackQuery, state: FSMContext
+):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "Введи ID користувача, якому треба повернути автоматичну "
+        "перевірку квитанцій:",
+        reply_markup=bans_cancel_kb(),
+    )
+    await state.set_state(BanStates.waiting_for_receipt_unban_id)
+    await callback.answer()
+
+
+@router.message(BanStates.waiting_for_receipt_unban_id)
+async def handle_receipt_autoapproval_unban_id(
+    message: Message, state: FSMContext
+):
+    text = (message.text or "").strip()
+    if not text.isdigit():
+        await message.answer(
+            "Введи тільки числовий ID.", reply_markup=bans_cancel_kb()
+        )
+        return
+    user_id = int(text)
+    await unban_receipt_autoapproval_user(user_id)
+    await state.clear()
+    await message.answer(
+        f"✅ Для користувача <code>{user_id}</code> автоматичну перевірку "
+        "квитанцій знову дозволено.",
+        parse_mode="HTML",
+        reply_markup=admin_menu2(),
+    )
+
+
+@router.callback_query(F.data == "rban_list")
+async def show_receipt_autoapproval_bans(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
+        return
+    rows = await list_banned_receipt_autoapproval()
+    if not rows:
+        await callback.message.answer(
+            "📭 Немає користувачів із забороненою автоперевіркою.",
+            reply_markup=admin_menu2(),
+        )
+        await callback.answer()
+        return
+
+    lines = []
+    for user_id, full_name, reason, banned_by, created_at in rows:
+        safe_name = escape(full_name or "—")
+        safe_reason = escape(reason or "—")
+        lines.append(
+            f"👤 <b>{safe_name}</b>\n"
+            f"🆔 <code>{user_id}</code>\n"
+            f"📄 Причина: {safe_reason}\n"
+            f"🕒 {created_at}\n"
+        )
+    await callback.message.answer(
+        "🤖 <b>Автоперевірка квитанцій заборонена:</b>\n\n"
+        + "\n".join(lines),
+        parse_mode="HTML",
+        reply_markup=admin_menu2(),
+    )
+    await callback.answer()

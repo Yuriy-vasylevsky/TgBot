@@ -262,3 +262,71 @@ async def list_banned_profile() -> list[tuple]:
             """
         ) as cur:
             return await cur.fetchall()
+
+
+# ===================== БАН АВТОПЕРЕВІРКИ КВИТАНЦІЙ =====================
+async def ensure_receipt_autoapproval_ban_table():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS banned_receipt_autoapproval_users (
+                user_id INTEGER PRIMARY KEY,
+                reason TEXT,
+                banned_by INTEGER,
+                ts DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+            """
+        )
+        await db.commit()
+
+
+async def ban_receipt_autoapproval_user(
+    user_id: int,
+    banned_by: int,
+    reason: str | None = None,
+):
+    await ensure_receipt_autoapproval_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            INSERT OR REPLACE INTO banned_receipt_autoapproval_users
+            (user_id, reason, banned_by)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, reason, banned_by),
+        )
+        await db.commit()
+
+
+async def unban_receipt_autoapproval_user(user_id: int):
+    await ensure_receipt_autoapproval_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM banned_receipt_autoapproval_users WHERE user_id = ?",
+            (user_id,),
+        )
+        await db.commit()
+
+
+async def is_receipt_autoapproval_banned(user_id: int) -> bool:
+    await ensure_receipt_autoapproval_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM banned_receipt_autoapproval_users WHERE user_id = ?",
+            (user_id,),
+        )
+        return await cursor.fetchone() is not None
+
+
+async def list_banned_receipt_autoapproval() -> list[tuple]:
+    await ensure_receipt_autoapproval_ban_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT b.user_id, u.full_name, b.reason, b.banned_by, b.ts
+            FROM banned_receipt_autoapproval_users b
+            LEFT JOIN users u ON u.user_id = b.user_id
+            ORDER BY b.ts DESC
+            """
+        )
+        return await cursor.fetchall()
