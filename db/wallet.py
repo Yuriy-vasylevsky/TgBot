@@ -10,6 +10,30 @@ from datetime import datetime, timezone, timedelta
 KYIV_TZ = timezone(timedelta(hours=3))
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
+
+async def _next_manual_payment_number(
+    db: aiosqlite.Connection, payment_date: str
+) -> int:
+    """Видає наступний номер ручної заявки в межах київської дати."""
+    await db.execute(
+        """
+        INSERT INTO manual_payment_daily_sequences(payment_date, last_number)
+        VALUES (?, 0)
+        ON CONFLICT(payment_date) DO NOTHING
+        """,
+        (payment_date,),
+    )
+    await db.execute(
+        "UPDATE manual_payment_daily_sequences SET last_number = last_number + 1 "
+        "WHERE payment_date = ?",
+        (payment_date,),
+    )
+    cursor = await db.execute(
+        "SELECT last_number FROM manual_payment_daily_sequences WHERE payment_date = ?",
+        (payment_date,),
+    )
+    return int((await cursor.fetchone())[0])
+
 async def add_to_balance(user_id: int, amount_grn: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -488,25 +512,45 @@ async def create_manual_payment(
     receipt_type: str,
 ) -> int:
     created_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
+    payment_date = created_at[:10]
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            daily_number = await _next_manual_payment_number(db, payment_date)
+            cursor = await db.execute(
+                """
+                INSERT INTO manual_payments
+                (user_id, username, full_name, amount, receipt_file_id,
+                 receipt_type, created_at, payment_date, daily_number)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    username,
+                    full_name,
+                    amount,
+                    receipt_file_id,
+                    receipt_type,
+                    created_at,
+                    payment_date,
+                    daily_number,
+                ),
+            )
+            await db.commit()
+            return cursor.lastrowid
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def get_manual_payment_daily_number(payment_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
-            """
-            INSERT INTO manual_payments
-            (user_id, username, full_name, amount, receipt_file_id, receipt_type, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                user_id,
-                username,
-                full_name,
-                amount,
-                receipt_file_id,
-                receipt_type,
-                created_at,
-            ),
+            "SELECT daily_number FROM manual_payments WHERE id = ?",
+            (payment_id,),
         )
-        await db.commit()
-        return cursor.lastrowid
+        row = await cursor.fetchone()
+        return int(row[0]) if row and row[0] is not None else payment_id
 
 
 async def delete_pending_manual_payment(payment_id: int, user_id: int) -> None:
@@ -527,7 +571,7 @@ async def get_pending_manual_payment_for_retry(
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT amount
+            SELECT amount, daily_number
             FROM manual_payments
             WHERE id = ?
               AND user_id = ?
@@ -537,7 +581,7 @@ async def get_pending_manual_payment_for_retry(
             (payment_id, user_id),
         )
         row = await cursor.fetchone()
-        return {"amount": row[0]} if row else None
+        return {"amount": row[0], "daily_number": row[1]} if row else None
 
 
 async def update_pending_manual_payment_receipt(
@@ -756,7 +800,7 @@ async def review_manual_payment(
         try:
             cursor = await db.execute(
                 """
-                SELECT user_id, username, full_name, amount, status
+                SELECT user_id, username, full_name, amount, status, daily_number
                 FROM manual_payments
                 WHERE id = ?
                 """,
@@ -767,7 +811,14 @@ async def review_manual_payment(
                 await db.rollback()
                 return {"ok": False, "reason": "not_found"}
 
-            user_id, username, full_name, amount, status = row
+            (
+                user_id,
+                username,
+                full_name,
+                amount,
+                status,
+                daily_number,
+            ) = row
             if status != "pending":
                 await db.rollback()
                 return {
@@ -854,6 +905,7 @@ async def review_manual_payment(
                 "full_name": full_name,
                 "amount": amount,
                 "balance": balance,
+                "daily_number": daily_number,
             }
         except Exception:
             await db.rollback()
@@ -1058,6 +1110,120 @@ async def get_payment_logs_by_date(date_offset=0, page=1, per_page=10):
 
     total_pages = max(1, (total + per_page - 1) // per_page)
     return rows, total_pages, day_total
+
+
+def _payment_history_date(date_offset: int) -> str:
+    return (datetime.now(KYIV_ZONE).date() - timedelta(days=date_offset)).isoformat()
+
+
+async def get_payment_history_summary(date_offset: int = 0) -> dict:
+    """Зведення лише ручних заявок зі скриншотом або без нього."""
+    target_date = _payment_history_date(date_offset)
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(amount), 0)
+            FROM manual_payments
+            WHERE payment_date = ? AND status = 'approved'
+            """,
+            (target_date,),
+        )
+        approved_count, approved_total = await cursor.fetchone()
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(amount), 0)
+            FROM manual_payments
+            WHERE payment_date = ? AND status = 'rejected'
+            """,
+            (target_date,),
+        )
+        rejected_count, _ = await cursor.fetchone()
+
+        cursor = await db.execute(
+            """
+            SELECT COUNT(*), COALESCE(SUM(amount), 0)
+            FROM manual_payments
+            WHERE payment_date = ? AND status = 'pending'
+            """,
+            (target_date,),
+        )
+        active_count, active_total = await cursor.fetchone()
+
+    return {
+        "date": target_date,
+        "completed_count": int(approved_count) + int(rejected_count),
+        "approved_count": int(approved_count),
+        "approved_total": int(approved_total),
+        "rejected_count": int(rejected_count),
+        "active_count": int(active_count),
+        "active_total": int(active_total),
+    }
+
+
+async def get_payment_history_page(
+    date_offset: int,
+    status_group: str,
+    page: int = 1,
+    per_page: int = 10,
+) -> tuple[list[dict], int]:
+    """Повертає сторінку ручних заявок, не змішуючи їх із Monobank."""
+    if status_group not in {"completed", "active"}:
+        raise ValueError("Unknown payment status group")
+
+    target_date = _payment_history_date(date_offset)
+    offset = max(0, page - 1) * per_page
+
+    if status_group == "completed":
+        query = """
+            SELECT daily_number, user_id, username, full_name,
+                   amount, status, 'manual' AS source,
+                   COALESCE(reviewed_at, created_at) AS created_at
+            FROM manual_payments
+            WHERE payment_date = ? AND status IN ('approved', 'rejected')
+        """
+    else:
+        query = """
+            SELECT daily_number, user_id, username, full_name,
+                   amount, 'pending' AS status, 'manual' AS source,
+                   created_at
+            FROM manual_payments
+            WHERE payment_date = ? AND status = 'pending'
+        """
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            f"SELECT COUNT(*) FROM ({query})",
+            (target_date,),
+        )
+        total = int((await cursor.fetchone())[0])
+        cursor = await db.execute(
+            f"""
+            SELECT daily_number, user_id, username, full_name, amount,
+                   status, source, created_at
+            FROM ({query})
+            ORDER BY daily_number DESC, created_at DESC
+            LIMIT ? OFFSET ?
+            """,
+            (target_date, per_page, offset),
+        )
+        rows = await cursor.fetchall()
+
+    entries = [
+        {
+            "daily_number": row[0],
+            "user_id": row[1],
+            "username": row[2],
+            "full_name": row[3],
+            "amount": row[4],
+            "status": row[5],
+            "source": row[6],
+            "created_at": row[7],
+        }
+        for row in rows
+    ]
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    return entries, total_pages
 
 
 

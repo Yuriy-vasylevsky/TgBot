@@ -48,6 +48,7 @@ from db import (
     update_daily_net,
     get_cards,
     create_manual_payment,
+    get_manual_payment_daily_number,
     delete_pending_manual_payment,
     get_pending_manual_payment_for_retry,
     update_pending_manual_payment_receipt,
@@ -466,6 +467,10 @@ def _payment_user_block(user, payment_id: int, amount: int) -> str:
     )
 
 
+async def _payment_display_number(payment_id: int) -> int:
+    return await get_manual_payment_daily_number(payment_id)
+
+
 def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
     if analysis is None:
         return ""
@@ -548,8 +553,9 @@ async def _route_payment_to_manual_review(
     offer_retry: bool = False,
 ) -> None:
     await set_manual_payment_route(payment_id, reason)
+    display_number = await _payment_display_number(payment_id)
     caption = (
-        f"{_payment_user_block(message.from_user, payment_id, amount)}\n\n"
+        f"{_payment_user_block(message.from_user, display_number, amount)}\n\n"
         f"⚠️ <b>Передано на ручну перевірку</b>\n"
         f"Причина: {escape(reason)}"
         f"{_analysis_admin_text(analysis)}"
@@ -621,11 +627,12 @@ async def _send_auto_approval_to_admin(
     analysis: PaymentReceiptAnalysis,
     computed_time_difference: int,
 ) -> None:
+    display_number = await _payment_display_number(payment_id)
     card = escape(analysis.recipient_card_suffix or "—")
     operation_time = escape(analysis.payment_datetime or "—")
     caption = (
         f"🤖 <b>Платіж автоматично підтверджено</b>\n\n"
-        f"{_payment_user_block(message.from_user, payment_id, amount)}\n"
+        f"{_payment_user_block(message.from_user, display_number, amount)}\n"
         f"💳 Картка: **** {card}\n"
         f"🕐 Час операції: {operation_time}\n"
         f"⏱ Різниця: {computed_time_difference} хв\n"
@@ -1046,6 +1053,7 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
         return
 
     amount = payment["amount"]
+    display_number = payment.get("daily_number") or payment_id
     await state.update_data(
         manual_amount=amount,
         retry_payment_id=payment_id,
@@ -1053,7 +1061,7 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
     await state.set_state(WalletStates.upload_receipt)
     await callback.message.answer(
         f"📎 Надішліть інший скриншот квитанції або успішної оплати для заявки "
-        f"№{payment_id} саме як фото, не файлом.\n\n"
+        f"№{display_number} саме як фото, не файлом.\n\n"
         f"На ній має бути чітко видно час, картку одержувача та "
         f"суму <b>{amount} грн</b>.",
         parse_mode="HTML",
@@ -1094,6 +1102,7 @@ async def submit_manual_payment_without_receipt(
         receipt_type="none",
     )
     await set_manual_payment_route(payment_id, "квитанцію не надано")
+    display_number = await _payment_display_number(payment_id)
 
     username = (
         f"@{escape(callback.from_user.username)}"
@@ -1105,7 +1114,7 @@ async def submit_manual_payment_without_receipt(
         f"{escape(callback.from_user.full_name)}</a>"
     )
     text = (
-        f"🧾 <b>Нова заявка на поповнення №{payment_id}</b>\n\n"
+        f"🧾 <b>Нова заявка на поповнення №{display_number}</b>\n\n"
         f"👤 {user_link}\n"
         f"🔗 {username}\n"
         f"🆔 <code>{callback.from_user.id}</code>\n"

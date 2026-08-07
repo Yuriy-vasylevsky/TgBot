@@ -99,6 +99,85 @@ async def create_pending_payments_table():
         await db.commit()
 
 
+async def ensure_manual_payment_daily_numbering(db: aiosqlite.Connection) -> None:
+    """Додає щоденну нумерацію лише для ручних заявок на поповнення."""
+    cursor = await db.execute(
+        "SELECT 1 FROM sqlite_master "
+        "WHERE type = 'table' AND name = 'manual_payment_daily_sequences'"
+    )
+    sequence_already_existed = await cursor.fetchone() is not None
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS manual_payment_daily_sequences (
+            payment_date TEXT PRIMARY KEY,
+            last_number INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+
+    async with db.execute("PRAGMA table_info(manual_payments)") as cursor:
+        columns = {row[1] for row in await cursor.fetchall()}
+    if "payment_date" not in columns:
+        await db.execute("ALTER TABLE manual_payments ADD COLUMN payment_date TEXT")
+    if "daily_number" not in columns:
+        await db.execute("ALTER TABLE manual_payments ADD COLUMN daily_number INTEGER")
+
+    # Якщо раніше використовувалась спільна з Monobank послідовність,
+    # одноразово перебудовуємо номери виключно за ручними заявками.
+    if not sequence_already_existed:
+        await db.execute("DROP INDEX IF EXISTS idx_manual_payment_daily_number")
+        await db.execute(
+            "UPDATE manual_payments SET payment_date = NULL, daily_number = NULL"
+        )
+
+    # Наявні номери зберігаємо, а старі заявки без номера дозаповнюємо.
+    counters: dict[str, int] = {}
+    async with db.execute(
+        """
+        SELECT payment_date, MAX(daily_number)
+        FROM manual_payments
+        WHERE payment_date IS NOT NULL AND daily_number IS NOT NULL
+        GROUP BY payment_date
+        """
+    ) as cursor:
+        for payment_date, last_number in await cursor.fetchall():
+            counters[payment_date] = int(last_number or 0)
+
+    async with db.execute(
+        """
+        SELECT id, created_at FROM manual_payments
+        WHERE payment_date IS NULL OR daily_number IS NULL
+        ORDER BY created_at, id
+        """
+    ) as cursor:
+        unnumbered = await cursor.fetchall()
+    for row_id, created_at in unnumbered:
+        payment_date = str(created_at or "")[:10]
+        if not payment_date:
+            payment_date = datetime.now().date().isoformat()
+        counters[payment_date] = counters.get(payment_date, 0) + 1
+        await db.execute(
+            "UPDATE manual_payments SET payment_date = ?, daily_number = ? WHERE id = ?",
+            (payment_date, counters[payment_date], row_id),
+        )
+
+    for payment_date, last_number in counters.items():
+        await db.execute(
+            """
+            INSERT INTO manual_payment_daily_sequences(payment_date, last_number)
+            VALUES (?, ?)
+            ON CONFLICT(payment_date) DO UPDATE SET last_number =
+                MAX(last_number, excluded.last_number)
+            """,
+            (payment_date, last_number),
+        )
+
+    await db.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_manual_payment_daily_number "
+        "ON manual_payments(payment_date, daily_number)"
+    )
+
+
 # async def create_used_monobank_txs_table():
 #     async with aiosqlite.connect(DB_PATH) as db:
 #         await db.execute("""
@@ -149,7 +228,7 @@ async def init_db():
             tables = [
                 "promocodes (code TEXT PRIMARY KEY, active INTEGER DEFAULT 1)",
                 "payment_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, amount INTEGER, comment TEXT, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
-                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER, review_source TEXT, route_reason TEXT, file_sha256 TEXT, perceptual_hash TEXT, gpt_result_json TEXT, gpt_decision TEXT, gpt_reason TEXT, gpt_confidence REAL, analysis_started_at DATETIME, analysis_completed_at DATETIME, receipt_retry_count INTEGER NOT NULL DEFAULT 0)",
+                "manual_payments (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, username TEXT, full_name TEXT, amount INTEGER NOT NULL, receipt_file_id TEXT NOT NULL, receipt_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')), reviewed_at DATETIME, reviewed_by INTEGER, review_source TEXT, route_reason TEXT, file_sha256 TEXT, perceptual_hash TEXT, gpt_result_json TEXT, gpt_decision TEXT, gpt_reason TEXT, gpt_confidence REAL, analysis_started_at DATETIME, analysis_completed_at DATETIME, receipt_retry_count INTEGER NOT NULL DEFAULT 0, payment_date TEXT, daily_number INTEGER)",
                 "game_stats (game_name TEXT PRIMARY KEY, total_games INTEGER DEFAULT 0, wins INTEGER DEFAULT 0)",
                 "slot_sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, result TEXT, final_balance INTEGER, ts DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "casino_codes (id INTEGER PRIMARY KEY AUTOINCREMENT, casino_type TEXT, code TEXT, used INTEGER DEFAULT 0, assigned_to INTEGER, assigned_at DATETIME)",
@@ -191,6 +270,8 @@ async def init_db():
             for column, sql in manual_payment_migrations.items():
                 if column not in manual_payment_columns:
                     await db.execute(sql)
+
+            await ensure_manual_payment_daily_numbering(db)
 
             await db.execute(
                 "CREATE INDEX IF NOT EXISTS idx_manual_payments_status "
