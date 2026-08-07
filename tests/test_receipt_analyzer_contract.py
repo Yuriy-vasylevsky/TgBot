@@ -219,6 +219,78 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         )
         self.assertFalse(result[0])
 
+    def test_e_wallet_recipient_number_is_accepted_despite_payer_lines(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "amount_found": 300,
+                    "recipient_card_suffix": None,
+                    "card_candidates": [
+                        {
+                            "role": "unknown",
+                            "visible_suffix": "4323357031732296",
+                            "context_label": (
+                                "Номер рахунку/унікальний (повний) номер "
+                                "платіжного інструменту/номер електронного "
+                                "гаманця отримувача"
+                            ),
+                            "evidence_text": (
+                                "Платник: Олександр. Телефон платника: "
+                                "380994632456. Номер електронного гаманця "
+                                "отримувача: 4323357031732296"
+                            ),
+                        }
+                    ],
+                }
+            )
+        )
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=300,
+            allowed_card_last4={"2296", "8204"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_card_suffix, "2296")
+
+    def test_nearest_role_marker_wins_in_long_receipt_fragment(self):
+        result = self.evaluate(
+            recipient_card_suffix=None,
+            card_candidates=[
+                {
+                    "role": "unknown",
+                    "visible_suffix": "2296",
+                    "context_label": "Номер платіжного інструменту",
+                    "evidence_text": (
+                        "Платник: Олександр. Код платника 123. "
+                        "Номер електронного гаманця отримувача: "
+                        "4323357031732296"
+                    ),
+                }
+            ],
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_nearest_sender_marker_still_blocks_sender_card(self):
+        result = self.evaluate(
+            recipient_card_suffix="2296",
+            card_candidates=[
+                {
+                    "role": "recipient",
+                    "visible_suffix": "2296",
+                    "context_label": "Платіжний інструмент",
+                    "evidence_text": (
+                        "Картка платника: 4323357031732296. "
+                        "Отримувач переказу має іншу картку 5327"
+                    ),
+                }
+            ],
+        )
+        self.assertFalse(result[0])
+        self.assertEqual(result[1], CARD_MISMATCH_REASON)
+
     def test_phone_status_bar_time_is_allowed_on_a_receipt(self):
         result = self.evaluate(
             payment_datetime="14:30",

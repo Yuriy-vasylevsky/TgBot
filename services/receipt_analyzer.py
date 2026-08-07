@@ -193,13 +193,23 @@ async def analyze_receipt_with_openai(
   evidence_text;
 - role="recipient" використовуй тільки коли поруч явно написано
   «Отримувач», «Одержувач», «Отримувач переказу», «Картка отримувача»,
-  «На картку», recipient або beneficiary;
+  «На картку», recipient або beneficiary. Поля «номер платіжного інструмента
+  отримувача», «номер електронного гаманця отримувача», «рахунок отримувача»
+  та «повний номер ... отримувача» також завжди позначай role="recipient";
 - role="sender" використовуй для «Платник», «Відправник», «З картки»,
   «Картка списання», sender або payer. Якщо роль не підтверджена підписом,
   використовуй unknown;
 - recipient_card_suffix бери лише з реквізитів отримувача: полів
   «Отримувач», «Отримувач переказу», «Картка отримувача», «На картку» або
   аналогічних за змістом;
+- якщо 16-значний номер стоїть після підпису «номер рахунку/унікальний
+  (повний) номер платіжного інструменту/номер електронного гаманця
+  отримувача», це платіжний інструмент ОТРИМУВАЧА: обов'язково додай його до
+  card_candidates та поверни його видимі останні цифри у
+  recipient_card_suffix;
+- у context_label повертай тільки найближчий підпис конкретного номера. Не
+  додавай до нього поля «Платник», «Телефон платника» чи інші сусідні рядки,
+  якщо вони описують інші реквізити;
 - не використовуй для recipient_card_suffix картку платника, відправника,
   картку списання, «З картки» чи номер рахунку платника;
 - якщо видно кілька карток, обов'язково розрізни відправника й отримувача та
@@ -293,6 +303,11 @@ _RECIPIENT_MARKERS = (
     "на карту",
     "картка отримувача",
     "рахунок отримувача",
+    "гаманця отримувача",
+    "гаманець отримувача",
+    "платіжного інструменту отримувача",
+    "платіжного інструмента отримувача",
+    "номер електронного гаманця",
 )
 _SENDER_MARKERS = (
     "платник",
@@ -326,6 +341,81 @@ def _normalize_card_suffix(value: str | None) -> str | None:
     if len(digits) >= 2:
         return digits
     return None
+
+
+def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
+    return any(marker in text for marker in markers)
+
+
+def _marker_distance_to_suffix(
+    text: str,
+    markers: tuple[str, ...],
+    suffix: str,
+) -> int | None:
+    """Відстань від найближчого рольового підпису до цифр кандидата."""
+    suffix_pattern = re.compile(r"\D*".join(re.escape(digit) for digit in suffix))
+    suffix_spans = [match.span() for match in suffix_pattern.finditer(text)]
+    if not suffix_spans:
+        return None
+
+    distances: list[int] = []
+    for marker in markers:
+        start = 0
+        while True:
+            marker_start = text.find(marker, start)
+            if marker_start < 0:
+                break
+            marker_end = marker_start + len(marker)
+            for suffix_start, suffix_end in suffix_spans:
+                if marker_end <= suffix_start:
+                    distances.append(suffix_start - marker_end)
+                elif suffix_end <= marker_start:
+                    # Підпис після номера часто вже належить наступному полю.
+                    # Тому віддаємо перевагу підпису, що стоїть перед цифрами.
+                    distances.append(marker_start - suffix_end + 40)
+                else:
+                    distances.append(0)
+            start = marker_start + 1
+    return min(distances) if distances else None
+
+
+def _candidate_role_from_context(candidate: CardCandidate, suffix: str) -> str:
+    """Визначає роль за найближчим підписом, а не за всім блоком квитанції."""
+    label = candidate.context_label.casefold()
+    label_has_recipient = _contains_marker(label, _RECIPIENT_MARKERS)
+    label_has_sender = _contains_marker(label, _SENDER_MARKERS)
+    if label_has_recipient and not label_has_sender:
+        return "recipient"
+    if label_has_sender and not label_has_recipient:
+        return "sender"
+
+    evidence = candidate.evidence_text.casefold()
+    visible_digits = "".join(
+        character for character in candidate.visible_suffix if character.isdigit()
+    )
+    distance_suffix = visible_digits if len(visible_digits) >= 2 else suffix
+    evidence_has_recipient = _contains_marker(evidence, _RECIPIENT_MARKERS)
+    evidence_has_sender = _contains_marker(evidence, _SENDER_MARKERS)
+    if evidence_has_recipient and not evidence_has_sender:
+        return "recipient"
+    if evidence_has_sender and not evidence_has_recipient:
+        return "sender"
+    if evidence_has_recipient and evidence_has_sender:
+        recipient_distance = _marker_distance_to_suffix(
+            evidence, _RECIPIENT_MARKERS, distance_suffix
+        )
+        sender_distance = _marker_distance_to_suffix(
+            evidence, _SENDER_MARKERS, distance_suffix
+        )
+        if recipient_distance is not None and (
+            sender_distance is None or recipient_distance < sender_distance
+        ):
+            return "recipient"
+        if sender_distance is not None and (
+            recipient_distance is None or sender_distance <= recipient_distance
+        ):
+            return "sender"
+    return "unknown"
 
 
 def _parse_payment_datetime(value: str, now_kyiv: datetime) -> datetime | None:
@@ -408,12 +498,10 @@ def evaluate_auto_approval(
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
         if not candidate_suffix:
             continue
-        context = f"{candidate.context_label} {candidate.evidence_text}".casefold()
-        has_recipient_marker = any(marker in context for marker in _RECIPIENT_MARKERS)
-        has_sender_marker = any(marker in context for marker in _SENDER_MARKERS)
-        if has_recipient_marker and not has_sender_marker:
+        context_role = _candidate_role_from_context(candidate, candidate_suffix)
+        if context_role == "recipient":
             explicit_recipient_suffixes.add(candidate_suffix)
-        elif not has_sender_marker:
+        elif context_role != "sender":
             # Не довіряємо лише ролі від GPT: нейтральний підпис не робить
             # картку відправником. Її ще має однозначно підтвердити база.
             neutral_card_suffixes.add(candidate_suffix)
