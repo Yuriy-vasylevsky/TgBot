@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 from handlers.config import ADMIN_ID
 from db import add_promocode, DB_PATH
+from group_games.promo_eligibility import reject_without_deposit
 import aiosqlite
 
 router = Router(name="group_football")
@@ -138,6 +139,11 @@ async def handle_football_dice(message: Message):
             await message.delete()
         except:
             pass
+        return
+
+    if await reject_without_deposit(
+        message, football_messages.setdefault(chat_id, [])
+    ):
         return
 
     football_messages.setdefault(chat_id, []).append(message.message_id)

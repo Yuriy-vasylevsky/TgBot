@@ -8,6 +8,7 @@ import string
 
 from handlers.config import ADMIN_ID
 from db import DB_PATH, add_promocode
+from group_games.promo_eligibility import reject_without_deposit
 import aiosqlite
 
 router = Router(name="group_bowling")
@@ -138,6 +139,11 @@ async def handle_bowling_dice(message: Message):
             await message.delete()
         except:
             pass
+        return
+
+    if await reject_without_deposit(
+        message, bowling_messages.setdefault(chat_id, [])
+    ):
         return
 
     # Зберігаємо повідомлення для можливого видалення
