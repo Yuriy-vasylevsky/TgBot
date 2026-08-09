@@ -2,8 +2,10 @@ from aiogram import Router, F, types
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from html import escape
 
 from group_games.group_safe import load_state, save_state, get_win_cell, TOTAL_CELLS
+from db import close_safe_round_and_credit
 from handlers.config import ADMIN_ID
 
 router = Router(name="admin_safe")
@@ -69,12 +71,31 @@ async def safe_clear_do(cb: CallbackQuery):
     if cb.from_user.id != ADMIN_ID:
         return
     win_cell = await get_win_cell()
-    await save_state([], win_cell=win_cell)
+    awards = await close_safe_round_and_credit(win_cell)
+    awards_text = ""
+    if awards:
+        lines = [
+            f"{place}. {escape(award['display_name'])} — {award['amount']} грн"
+            for place, award in enumerate(awards, 1)
+        ]
+        awards_text = "\n\n💰 <b>Автоматично нараховано як депозит:</b>\n" + "\n".join(lines)
+
     await cb.message.edit_text(
-        f"✅ <b>Сейф очищено!</b>\nНовий раунд розпочато.\nВиграшна клітинка залишається: <b>{win_cell}</b>",
+        f"✅ <b>Сейф очищено!</b>\nНовий раунд розпочато.\n"
+        f"Виграшна клітинка залишається: <b>{win_cell}</b>{awards_text}",
         parse_mode="HTML",
         reply_markup=safe_admin_keyboard(),
     )
+
+    for award in awards:
+        try:
+            await cb.bot.send_message(
+                award["user_id"],
+                f"🏆 Ви увійшли до топ-5 сейфа!\n"
+                f"💰 На депозит автоматично нараховано {award['amount']} грн.",
+            )
+        except Exception:
+            pass
     await cb.answer("✅ Сейф очищено!")
 
 

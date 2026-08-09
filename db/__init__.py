@@ -120,7 +120,7 @@ from .promo import (
 )
 
 # ==================== SAFE ====================
-from .safe import get_safe_state, save_safe_state
+from .safe import get_safe_state, save_safe_state, close_safe_round_and_credit
 
 # ==================== GAMES ====================
 from .games import (
