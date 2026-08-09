@@ -17,8 +17,7 @@ from db import (
     save_notification,
     add_game_win,
 )
-from db.wallet import get_daily_net, get_yesterday_net, add_to_balance, add_daily_game_win
-from db import can_receive_prize   # ← новий імпорт
+from db.wallet import add_to_balance, add_daily_game_win, has_recent_deposit
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
 import aiosqlite
@@ -255,7 +254,7 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
 
         if balance >= 30:
             # Нова система перевірки
-            allowed, _ = await can_receive_prize(message.from_user.id, prize_amount=30)
+            allowed = await has_recent_deposit(message.from_user.id)
 
             if allowed:
                 await add_to_balance(message.from_user.id, 30)

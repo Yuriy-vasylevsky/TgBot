@@ -457,6 +457,13 @@ async def get_yesterday_net(user_id: int) -> int:
         return row[0] if row else 0
 
 
+async def has_recent_deposit(user_id: int) -> bool:
+    """Whether the user has a positive deposit today or yesterday."""
+    today_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+    return today_net > 0 or yesterday_net > 0
+
+
 
 async def get_balance(user_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:

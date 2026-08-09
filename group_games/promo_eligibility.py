@@ -1,11 +1,4 @@
-from db.wallet import get_daily_net, get_yesterday_net
-
-
-async def has_recent_deposit(user_id: int) -> bool:
-    """Return whether the user deposited today or yesterday."""
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    return today_net > 0 or yesterday_net > 0
+from db.wallet import has_recent_deposit
 
 
 async def reject_without_deposit(message, tracked_messages: list[int]) -> bool:

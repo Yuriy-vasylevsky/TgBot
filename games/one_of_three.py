@@ -4,8 +4,7 @@ from aiogram import F, types, Router
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 from db import add_game_result, get_winrate, has_claimed_gift, add_game_win
-from db.wallet import get_daily_net, get_yesterday_net, add_to_balance, add_daily_game_win
-from db import can_receive_prize
+from db.wallet import add_to_balance, add_daily_game_win, has_recent_deposit
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
 
@@ -99,7 +98,7 @@ async def open_boxes(cb: CallbackQuery):
     admin_status = ""
 
     if is_win:
-        allowed, _ = await can_receive_prize(user_id, prize_amount=30)
+        allowed = await has_recent_deposit(user_id)
 
         if allowed:
             await add_to_balance(user_id, 30)
