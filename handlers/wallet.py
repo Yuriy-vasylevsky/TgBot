@@ -498,6 +498,7 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
     payment_time = escape(analysis.payment_datetime or "не визначено")
     visible_time = escape(analysis.payment_time_visible_text or "не видно")
     document_type = escape(analysis.document_type)
+    visible_status = escape(analysis.payment_status_visible_text or "не видно")
     time_source = escape(analysis.payment_time_source)
     cancellation = escape(analysis.cancellation_visible_text or "не видно")
     role_names = {
@@ -522,6 +523,7 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"Картка: {card}\n"
         f"Знайдені картки: {card_candidates}\n"
         f"Тип: {document_type}\n"
+        f"Статус: {escape(analysis.payment_status)} ({visible_status})\n"
         f"Скасування: {cancellation}\n"
         f"Час: {payment_time}\n"
         f"Джерело часу: {time_source} ({visible_time})"

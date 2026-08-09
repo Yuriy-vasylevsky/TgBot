@@ -21,6 +21,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             "is_payment_receipt": True,
             "document_type": "payment_receipt",
             "payment_status": "successful",
+            "payment_status_visible_text": "Виконано успішно",
             "payment_can_be_cancelled": False,
             "cancellation_visible_text": None,
             "amount_found": 200,
@@ -140,7 +141,26 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         self.assertFalse(result[0])
 
     def test_failed_receipt_is_not_approved(self):
-        self.assertFalse(self.evaluate(payment_status="failed")[0])
+        self.assertFalse(
+            self.evaluate(
+                payment_status="failed",
+                payment_status_visible_text="Помилка операції",
+            )[0]
+        )
+
+    def test_visible_success_status_overrides_incorrect_unknown_status(self):
+        result = self.evaluate(
+            payment_status="unknown",
+            payment_status_visible_text="Статус операції: Виконано успішно",
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_negative_status_cannot_pass_by_containing_success_words(self):
+        result = self.evaluate(
+            payment_status="successful",
+            payment_status_visible_text="Операцію не виконано успішно",
+        )
+        self.assertFalse(result[0])
 
     def test_cancellable_payment_is_always_sent_to_manual_review(self):
         result = self.evaluate(

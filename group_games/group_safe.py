@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 import random
+import re
 import string
 from handlers.config import ADMIN_ID
 from db import get_safe_state, save_safe_state
@@ -12,6 +13,24 @@ router = Router(name="group_safe")
 
 WIN_CELL = 198
 TOTAL_CELLS = 250
+
+
+def parse_cells(text: str) -> list[int]:
+    """Extract cells from text, including dot-separated numbers and ranges."""
+    cells = []
+    pattern = r"(?<!\d)(\d+)\s*-\s*(\d+)(?!\d)|(?<!\d)(\d+)(?!\d)"
+
+    for match in re.finditer(pattern, text):
+        if match.group(3) is not None:
+            cells.append(int(match.group(3)))
+            continue
+
+        start, end = int(match.group(1)), int(match.group(2))
+        if start > end:
+            start, end = end, start
+        cells.extend(range(start, end + 1))
+
+    return sorted(set(cells))
 
 
 async def load_state() -> dict:
@@ -215,7 +234,7 @@ async def admin_open_cell(message: Message):
             "Приклад:\n"
             "1. Гравець пише: <code>15 25 37</code>\n"
             "2. Адмін робить Reply на це повідомлення\n"
-            "3. Пише: <code>/open 15 25 37</code>",
+            "3. Пише: <code>/open</code>",
             parse_mode="HTML"
         )
         return
@@ -246,69 +265,23 @@ async def admin_open_cell(message: Message):
     # ==========================
     # ПАРСИНГ + ВСІ ПЕРЕВІРКИ
     # ==========================
-    if len(message.text.split()) < 2:
-        await message.answer(
-            f"{mention}❌ Формат:\n<code>/open 123</code>",
-            parse_mode="HTML"
-        )
-        return
-
-    raw_arg = message.text.split(maxsplit=1)[1].strip()
-    cleaned = raw_arg.replace(", ", ",").replace(" ,", ",")
-    parts = cleaned.replace(",", " ").split()
-
-    cells_to_open = []
-
-    for part in parts:
-        part = part.strip()
-
-        if not part:
-            continue
-
-        if "-" in part:
-            try:
-                start, end = map(int, part.split("-"))
-
-                if start > end:
-                    start, end = end, start
-
-                cells_to_open.extend(range(start, end + 1))
-
-            except Exception:
-                await message.answer(
-                    f"{mention}❌ Некоректний діапазон: {part}",
-                    parse_mode="HTML"
-                )
-                return
-        else:
-            try:
-                cells_to_open.append(int(part))
-            except Exception:
-                await message.answer(
-                    f"{mention}❌ Не число: {part}",
-                    parse_mode="HTML"
-                )
-                return
+    replied_text = (
+        message.reply_to_message.text
+        or message.reply_to_message.caption
+        or ""
+    )
+    cells_to_open = parse_cells(replied_text)
 
     if not cells_to_open:
         await message.answer(
-            f"{mention}❌ Не вдалося розпізнати жодного числа",
+            f"{mention}❌ У повідомленні гравця не вдалося розпізнати жодного числа",
             parse_mode="HTML"
         )
         return
-
-    cells_to_open = sorted(set(cells_to_open))
 
     if any(c < 1 or c > TOTAL_CELLS for c in cells_to_open):
         await message.answer(
             f"{mention}❌ Клітинки повинні бути від 1 до {TOTAL_CELLS}",
-            parse_mode="HTML"
-        )
-        return
-
-    if len(cells_to_open) > 50:
-        await message.answer(
-            f"{mention}❌ Максимум 50 клітинок за раз",
             parse_mode="HTML"
         )
         return

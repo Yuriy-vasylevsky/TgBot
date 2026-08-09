@@ -55,6 +55,7 @@ class PaymentReceiptAnalysis(BaseModel):
     payment_status: Literal[
         "successful", "processing", "rejected", "cancelled", "failed", "unknown"
     ]
+    payment_status_visible_text: str | None
     payment_can_be_cancelled: bool
     cancellation_visible_text: str | None
     amount_found: int | None
@@ -177,6 +178,14 @@ async def analyze_receipt_with_openai(
 - bank_notification використовуй лише для окремого push-сповіщення без
   відкритого екрана конкретного платежу; головний екран застосунку та сторонні
   зображення позначай other;
+- дослівно перепиши видимий статус операції у payment_status_visible_text;
+  якщо окремого статусу не видно, поверни null;
+- написи «Виконано успішно», «Операцію виконано успішно», «Платіж успішний»,
+  «Переказ успішний» та рівнозначні однозначно означають
+  payment_status="successful". Не став unknown лише через те, що це
+  сформована банком квитанція без окремої зеленої позначки;
+- «В обробці»/«Очікує» означає processing, «Відхилено» — rejected,
+  «Скасовано» — cancelled, а «Помилка»/«Не виконано» — failed;
 - уважно переглянь усе зображення, особливо кнопки внизу. Якщо видно дію
   «Скасувати платіж», «Скасувати переказ», «Відкликати платіж»,
   «Отменить платеж/перевод», «Cancel payment», «Undo transfer» або аналогічну
@@ -331,6 +340,39 @@ _CANCELLATION_MARKERS = (
     "cancel payment",
     "cancel transfer",
     "undo transfer",
+)
+_SUCCESS_STATUS_MARKERS = (
+    "виконано успішно",
+    "успішно виконано",
+    "операцію виконано",
+    "операція успішна",
+    "платіж успішний",
+    "платіж виконано",
+    "переказ успішний",
+    "переказ виконано",
+    "успешно выполнено",
+    "платеж выполнен",
+    "перевод выполнен",
+    "successful",
+    "completed successfully",
+)
+_NON_SUCCESS_STATUS_MARKERS = (
+    "не виконано",
+    "неуспіш",
+    "помилка",
+    "відхилено",
+    "скасовано",
+    "в обробці",
+    "очікує",
+    "не выполнено",
+    "ошибка",
+    "отклонено",
+    "отменено",
+    "processing",
+    "pending",
+    "failed",
+    "rejected",
+    "cancelled",
 )
 
 
@@ -491,6 +533,21 @@ def evaluate_auto_approval(
     max_time_difference_minutes: int,
 ) -> tuple[bool, str, int | None]:
     """Перевіряє тип документа, видимий час, суму та картку."""
+    visible_status = (analysis.payment_status_visible_text or "").casefold()
+    visible_status_is_not_successful = bool(visible_status) and any(
+        marker in visible_status for marker in _NON_SUCCESS_STATUS_MARKERS
+    )
+    visible_status_is_successful = bool(visible_status) and any(
+        marker in visible_status for marker in _SUCCESS_STATUS_MARKERS
+    ) and not visible_status_is_not_successful
+    if visible_status_is_successful:
+        # Дослівний статус із квитанції надійніший за помилкову категорію GPT.
+        analysis.payment_status = "successful"
+    status_is_successful = (
+        analysis.payment_status == "successful"
+        and not visible_status_is_not_successful
+    )
+
     reported_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
     explicit_recipient_suffixes: set[str] = set()
     neutral_card_suffixes: set[str] = set()
@@ -524,7 +581,7 @@ def evaluate_auto_approval(
             "зображення не є квитанцією або екраном конкретного платежу",
         ),
         (
-            analysis.payment_status == "successful",
+            status_is_successful,
             "платіж у квитанції не має успішного завершеного статусу",
         ),
         (
