@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from db.safe import calculate_safe_prizes, close_safe_round_and_credit
+from group_games.group_safe import break_safe_button, get_safe_top_five
 
 
 class SafePrizeCalculationTests(unittest.TestCase):
@@ -28,6 +29,20 @@ class SafePrizeCalculationTests(unittest.TestCase):
 
     def test_empty_round_has_no_awards(self):
         self.assertEqual(calculate_safe_prizes({}), [])
+
+    def test_break_button_unlocks_at_125_cells(self):
+        self.assertIsNone(break_safe_button({"opened": list(range(124))}))
+        self.assertIsNotNone(break_safe_button({"opened": list(range(125))}))
+
+    def test_only_five_highest_players_can_vote(self):
+        users = {
+            str(user_id): {"display_name": str(user_id), "count": user_id}
+            for user_id in range(1, 8)
+        }
+        self.assertEqual(
+            [user["user_id"] for user in get_safe_top_five(users)],
+            [7, 6, 5, 4, 3],
+        )
 
     def test_closing_round_credits_deposit_log_once(self):
         # aiosqlite's worker can briefly retain the file handle on Windows.
@@ -68,7 +83,15 @@ class SafePrizeCalculationTests(unittest.TestCase):
 
             with patch("db.safe.DB_PATH", str(db_path)):
                 first_awards = asyncio.run(close_safe_round_and_credit(198))
-                second_awards = asyncio.run(close_safe_round_and_credit(198))
+                second_awards = asyncio.run(
+                    close_safe_round_and_credit(
+                        198,
+                        prize_users={
+                            "10": {"display_name": "@first", "count": 2},
+                            "20": {"display_name": "Second", "count": 1},
+                        },
+                    )
+                )
 
             self.assertEqual([award["amount"] for award in first_awards], [667, 333])
             self.assertEqual(second_awards, [])

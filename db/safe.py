@@ -61,7 +61,9 @@ async def save_safe_state(data: dict):
         await db.commit()
 
 
-async def close_safe_round_and_credit(win_cell: int) -> list[dict]:
+async def close_safe_round_and_credit(
+    win_cell: int, prize_users: dict | None = None
+) -> list[dict]:
     """Credit the current top five as deposits and atomically clear the round."""
     today = datetime.now(KYIV_ZONE).date()
     today_str = today.isoformat()
@@ -76,7 +78,10 @@ async def close_safe_round_and_credit(win_cell: int) -> list[dict]:
             row = await cursor.fetchone()
             await cursor.close()
             state = json.loads(row[0]) if row else {}
-            awards = calculate_safe_prizes(state.get("users", {}))
+            current_users = state.get("users", {})
+            awards = calculate_safe_prizes(
+                current_users if prize_users is None else prize_users
+            ) if current_users else []
 
             for award in awards:
                 user_id = award["user_id"]
