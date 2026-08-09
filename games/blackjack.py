@@ -17,7 +17,7 @@ from db import (
     save_notification,
     add_game_win,
 )
-from db.wallet import add_to_balance, add_daily_game_win, has_recent_deposit
+from db.wallet import add_to_balance, add_daily_game_win, get_available_game_win
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
 import aiosqlite
@@ -254,26 +254,29 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
 
         if balance >= 30:
             # Нова система перевірки
-            allowed = await has_recent_deposit(message.from_user.id)
+            payout = min(30, await get_available_game_win(message.from_user.id))
 
-            if allowed:
-                await add_to_balance(message.from_user.id, 30)
+            if payout > 0:
+                await add_to_balance(message.from_user.id, payout)
                 await add_game_win(message.from_user.id)
-                await add_daily_game_win(message.from_user.id, 30)
+                await add_daily_game_win(message.from_user.id, payout)
 
 
 
                 from db.winlog import log_win
                 await log_win(
                     message.from_user.id, message.from_user.username, message.from_user.full_name,
-                    "game", "🃏 Blackjack", 30
+                    "game", "🃏 Blackjack", payout
                 )
 
 
 
 
-                final_text = "🎉 Вітаю! +30 грн нараховано на баланс!"
-                admin_status = " | +30 грн на баланс"
+                final_text = f"🎉 Вітаю! +{payout} грн нараховано на баланс!"
+                admin_status = f" | +{payout} грн на баланс"
+                if payout < 30:
+                    final_text += f"\n💸 Решта {30 - payout} грн буде зарахована до депозиту"
+                    admin_status += f" | +{30 - payout} грн до депозиту"
             else:
                 final_text = "💸 Виграш 30 грн буде зарахований до депозиту"
                 admin_status = " | +30 грн до депозиту"

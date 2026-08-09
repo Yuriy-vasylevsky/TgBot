@@ -1410,6 +1410,20 @@ async def get_yesterday_game_win(user_id: int) -> int:
         return row[0] if row else 0
 
 
+async def get_available_game_win(user_id: int) -> int:
+    """Return the remaining cash payout limit based on recent deposits."""
+    today_net = await get_daily_net(user_id)
+    yesterday_net = await get_yesterday_net(user_id)
+    total_net = max(today_net, 0) + max(yesterday_net, 0)
+
+    daily_win = await get_daily_game_win(user_id)
+    yesterday_win = await get_yesterday_game_win(user_id)
+    already_won = max(daily_win, 0) + max(yesterday_win, 0)
+
+    max_allowed_win = int(total_net * 80 / 200)
+    return max(max_allowed_win - already_won, 0)
+
+
 
 
 async def get_all_daily_game_wins() -> list[dict]:

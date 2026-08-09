@@ -11,7 +11,7 @@ from db import (
     has_claimed_gift,
     add_game_win,
 )
-from db.wallet import add_to_balance, add_daily_game_win, has_recent_deposit
+from db.wallet import add_to_balance, add_daily_game_win, get_available_game_win
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
 
@@ -207,23 +207,26 @@ async def slot_spin(message: types.Message, state: FSMContext):
 
         if coupons >= 30:
             # === НОВА СИСТЕМА ПЕРЕВІРКИ ВИГРАШУ ===
-            allowed = await has_recent_deposit(user_id)
+            payout = min(30, await get_available_game_win(user_id))
 
-            if allowed:
-                await add_to_balance(user_id, 30)
+            if payout > 0:
+                await add_to_balance(user_id, payout)
                 await add_game_win(user_id)
-                await add_daily_game_win(user_id, 30)
+                await add_daily_game_win(user_id, payout)
                 from db.winlog import log_win
 
                 await log_win(
                     message.from_user.id, message.from_user.username, message.from_user.full_name,
-                    "game", "🎰 Слоти", 30
+                    "game", "🎰 Слоти", payout
                 )
 
 
                 
-                result_text = "🎉 Вітаю! +30 грн нараховано на баланс!"
-                admin_status = " | +30 грн на баланс"
+                result_text = f"🎉 Вітаю! +{payout} грн нараховано на баланс!"
+                admin_status = f" | +{payout} грн на баланс"
+                if payout < 30:
+                    result_text += f"\n💸 Решта {30 - payout} грн буде зарахована до депозиту"
+                    admin_status += f" | +{30 - payout} грн до депозиту"
             else:
                 result_text = "💸 Виграш 30 грн буде зарахований до депозиту"
                 admin_status = " | +30 грн до депозиту"
