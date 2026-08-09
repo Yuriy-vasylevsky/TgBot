@@ -286,6 +286,20 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
     is_admin = user_id == ADMIN_ID
     gift_claimed = await has_claimed_gift(user_id)
     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
+
+    if is_new_user:
+        await message.answer(
+            "🎊 <b>ЛАСКАВО ПРОСИМО ДО ГРИ!</b> 🎊\n\n"
+            "╭─────────────────╮\n"
+            "│  🎁 <b>ВІТАЛЬНИЙ БОНУС</b>\n"
+            "│\n"
+            "│  На твій баланс зараховано\n"
+            "│       💸 <b>50 ГРН</b> 💸\n"
+            "╰─────────────────╯\n\n"
+            "Баланс уже поповнено — обирай гру, випробовуй удачу "
+            "та забирай свої виграші! 🍀🔥"
+        )
+
     photo = types.FSInputFile("images/4444.jpg")
     await message.answer_photo(
         photo=photo,

@@ -5,6 +5,9 @@ from typing import List, Optional
 from .core import DB_PATH
 
 
+NEW_USER_STARTING_BALANCE = 50
+
+
 async def save_user(
     user_id: int,
     username: str,
@@ -34,15 +37,24 @@ async def save_user(
 
         await db.execute(
             """
-            INSERT INTO users (user_id, username, full_name, last_active, last_actions)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (
+                user_id, username, full_name, last_active, last_actions, balance
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 username = excluded.username,
                 full_name = excluded.full_name,
                 last_active = excluded.last_active,
                 last_actions = excluded.last_actions
             """,
-            (user_id, username, full_name, now_str, new_actions)
+            (
+                user_id,
+                username,
+                full_name,
+                now_str,
+                new_actions,
+                NEW_USER_STARTING_BALANCE,
+            )
         )
         await db.commit()
 
