@@ -55,9 +55,10 @@ def piggy_admin_text(state: dict, notice: str | None = None) -> str:
         f"💰 Баланс: <b>{state['balance']} грн</b>\n"
         f"🎯 Ліміт: <b>{state['limit']} грн</b>\n"
         f"🏆 Гравцю: <b>{state['player_prize']} грн</b>\n"
-        f"👑 Адміну: <b>{state['admin_prize']} грн</b>\n"
+        f"👑 Фіксований виграш адміну: <b>{state['admin_prize']} грн</b>\n"
         f"🔁 Раунд: <b>№{state['round_number']}</b>\n"
-        f"🐽 Залишається у фонді після виплати: <b>{reserve} грн</b>"
+        f"🐽 Залишок при точному заповненні: <b>{reserve} грн</b> "
+        "(також адміну)"
     )
     return f"{notice}\n\n{text}" if notice else text
 

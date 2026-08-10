@@ -98,14 +98,6 @@ async def contribute_to_piggy_bank(
             )
             state = _state_dict(await cursor.fetchone())
 
-            if amount > state["limit"] - state["balance"]:
-                await db.rollback()
-                return {
-                    "success": False,
-                    "reason": "over_limit",
-                    "state": state,
-                }
-
             cursor = await db.execute(
                 "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?",
                 (user_id,),
@@ -129,10 +121,13 @@ async def contribute_to_piggy_bank(
             collected = pot_before + amount
             triggered = collected >= state["limit"]
             pot_after = collected
+            admin_payout = 0
 
             if triggered:
                 total_prize = state["player_prize"] + state["admin_prize"]
-                pot_after = collected - total_prize
+                remainder = collected - total_prize
+                admin_payout = state["admin_prize"] + remainder
+                pot_after = 0
                 await db.execute(
                     "UPDATE users SET balance = COALESCE(balance, 0) + ? "
                     "WHERE user_id = ?",
@@ -145,7 +140,7 @@ async def contribute_to_piggy_bank(
                     ON CONFLICT(user_id) DO UPDATE
                     SET balance = COALESCE(balance, 0) + excluded.balance
                     """,
-                    (admin_id, state["admin_prize"]),
+                    (admin_id, admin_payout),
                 )
                 await db.execute(
                     """
@@ -176,7 +171,7 @@ async def contribute_to_piggy_bank(
                     pot_after,
                     int(triggered),
                     state["player_prize"] if triggered else 0,
-                    state["admin_prize"] if triggered else 0,
+                    admin_payout,
                 ),
             )
             cursor = await db.execute(
@@ -197,6 +192,7 @@ async def contribute_to_piggy_bank(
         "triggered": triggered,
         "amount": amount,
         "balance": new_user_balance,
+        "admin_payout": admin_payout,
         "state": state,
     }
 

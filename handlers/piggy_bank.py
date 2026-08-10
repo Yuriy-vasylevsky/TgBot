@@ -15,16 +15,14 @@ from handlers.config import ADMIN_ID
 router = Router(name="piggy_bank")
 
 
-def piggy_bank_keyboard(state: dict) -> InlineKeyboardMarkup:
-    remaining = state["limit"] - state["balance"]
+def piggy_bank_keyboard(_state: dict) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(
             text=f"➕ {amount} грн", callback_data=f"piggy:add:{amount}"
         )
         for amount in ALLOWED_CONTRIBUTIONS
-        if amount <= remaining
     ]
-    rows = [buttons] if buttons else []
+    rows = [buttons]
     rows.append(
         [InlineKeyboardButton(text="🔄 Оновити", callback_data="piggy:refresh")]
     )
@@ -36,7 +34,7 @@ def piggy_bank_text(state: dict, notice: str | None = None) -> str:
     text = (
         "🐷 <b>Скарбничка</b>\n\n"
         # f"💰 Зібрано: <b>{state['balance']} / {state['limit']} грн</b>\n"
-        f"🏆 Виграш: <b>{state['player_prize']} грн</b>\n"
+        f"🏆 Виграш: <b>{state['player_prize']} грн</b>\n\n"
         # f"🎯 До заповнення: <b>{remaining} грн</b>\n\n"
         "Обери суму внеску. Якщо твій внесок заповнить скарбничку, "
         "виграш одразу надійде на твій баланс."
@@ -95,8 +93,6 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
                 "❌ <b>Недостатньо коштів.</b> "
                 f"Ваш баланс: {result.get('balance', 0)} грн."
             )
-        elif result["reason"] == "over_limit":
-            notice = "⚠️ Цей внесок уже не вміщується. Оберіть меншу суму."
         else:
             notice = "❌ Не вдалося зробити внесок."
         await edit_piggy_bank_message(callback, state, notice)
@@ -131,7 +127,8 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
                 "🐷 <b>Скарбничку заповнено</b>\n\n"
                 f"Переможець: {username} (<code>{callback.from_user.id}</code>)\n"
                 f"Гравцю: <b>{state['player_prize']} грн</b>\n"
-                f"Адміну: <b>{state['admin_prize']} грн</b>",
+                f"Адміну разом із залишком: "
+                f"<b>{result['admin_payout']} грн</b>",
                 parse_mode="HTML",
             )
         except Exception:
