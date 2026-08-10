@@ -249,9 +249,19 @@ async def init_db():
                 "settings (key TEXT PRIMARY KEY, value REAL)",
                 "issued_checks (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, check_type TEXT NOT NULL, code TEXT NOT NULL, price INTEGER NOT NULL, issued_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "referrals (id INTEGER PRIMARY KEY AUTOINCREMENT, referrer_id INTEGER NOT NULL, referred_id INTEGER NOT NULL UNIQUE, was_existing_user INTEGER DEFAULT 0, paid INTEGER DEFAULT 0, bonus_given INTEGER DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
+                "piggy_bank_state (id INTEGER PRIMARY KEY CHECK (id = 1), balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0), limit_amount INTEGER NOT NULL DEFAULT 60 CHECK (limit_amount > 0), player_prize INTEGER NOT NULL DEFAULT 50 CHECK (player_prize >= 0), admin_prize INTEGER NOT NULL DEFAULT 10 CHECK (admin_prize >= 0), round_number INTEGER NOT NULL DEFAULT 1 CHECK (round_number > 0))",
+                "piggy_bank_events (id INTEGER PRIMARY KEY AUTOINCREMENT, round_number INTEGER NOT NULL, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, pot_before INTEGER NOT NULL, pot_after INTEGER NOT NULL, triggered INTEGER NOT NULL DEFAULT 0, player_prize INTEGER NOT NULL DEFAULT 0, admin_prize INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
+
+            await db.execute(
+                """
+                INSERT OR IGNORE INTO piggy_bank_state
+                    (id, balance, limit_amount, player_prize, admin_prize, round_number)
+                VALUES (1, 0, 60, 50, 10, 1)
+                """
+            )
 
             async with db.execute("PRAGMA table_info(manual_payments)") as cur:
                 manual_payment_columns = {row[1] for row in await cur.fetchall()}

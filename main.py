@@ -67,6 +67,7 @@ from handlers.general import router as general_router
 from admin.router import router as admin_router
 from handlers.profile import router as profile_router
 from handlers.referral import router as referral_router
+from handlers.piggy_bank import router as piggy_bank_router
 # from handlers.ma import router as matic_gis_router
 from handlers.admin_winlog import router as winlog_router
 
@@ -130,6 +131,7 @@ dp.include_router(night_mode_router)
 dp.include_router(stats_router)
 dp.include_router(general_router)
 dp.include_router(admin_router)
+dp.include_router(piggy_bank_router)
 dp.include_router(profile_router)
 dp.include_router(fortune_router)
 dp.include_router(slot_router)
