@@ -35,9 +35,9 @@ def piggy_bank_text(state: dict, notice: str | None = None) -> str:
     remaining = state["limit"] - state["balance"]
     text = (
         "🐷 <b>Скарбничка</b>\n\n"
-        f"💰 Зібрано: <b>{state['balance']} / {state['limit']} грн</b>\n"
-        f"🏆 Виграш гравця: <b>{state['player_prize']} грн</b>\n"
-        f"🎯 До заповнення: <b>{remaining} грн</b>\n\n"
+        # f"💰 Зібрано: <b>{state['balance']} / {state['limit']} грн</b>\n"
+        f"🏆 Виграш: <b>{state['player_prize']} грн</b>\n"
+        # f"🎯 До заповнення: <b>{remaining} грн</b>\n\n"
         "Обери суму внеску. Якщо твій внесок заповнить скарбничку, "
         "виграш одразу надійде на твій баланс."
     )
