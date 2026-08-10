@@ -1,3 +1,4 @@
+import asyncio
 from html import escape
 
 from aiogram import F, Router, types
@@ -40,8 +41,32 @@ def piggy_bank_text(state: dict, notice: str | None = None) -> str:
         "виграш одразу надійде на твій баланс."
     )
     if notice:
-        text = f"{notice}\n\n{text}"
+        text = f"{text}\n\n━━━━━━━━━━━━\n{notice}"
     return text
+
+
+async def play_piggy_bank_animation(
+    callback: types.CallbackQuery, amount: int
+) -> None:
+    frames = (
+        ("▰▱▱▱", "Монетка летить до скарбнички… 🪙"),
+        ("▰▰▱▱", "Скарбничка приймає внесок… 🐷"),
+        ("▰▰▰▱", "Перераховуємо монетки… ✨"),
+        ("▰▰▰▰", "Перевіряємо результат… 🎯"),
+    )
+    for progress, caption in frames:
+        try:
+            await callback.message.edit_text(
+                "🐷 <b>Скарбничка</b>\n\n"
+                f"Внесок: <b>{amount} грн</b>\n\n"
+                f"<code>{progress}</code>\n"
+                f"{caption}",
+                parse_mode="HTML",
+            )
+        except TelegramBadRequest:
+            # Результат однаково буде показано після завершення анімації.
+            pass
+        await asyncio.sleep(1)
 
 
 async def edit_piggy_bank_message(
@@ -100,6 +125,9 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
         return
 
     state = result["state"]
+    await callback.answer("Внесок прийнято")
+    await play_piggy_bank_animation(callback, amount)
+
     if result["triggered"]:
         notice = (
             "🎉 <b>Скарбничку заповнено!</b>\n"
@@ -113,7 +141,6 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
         )
 
     await edit_piggy_bank_message(callback, state, notice)
-    await callback.answer("Готово")
 
     if result["triggered"] and ADMIN_ID != callback.from_user.id:
         username = (
