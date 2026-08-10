@@ -23,7 +23,7 @@ class PiggyBankTests(unittest.TestCase):
             )
             db.executemany(
                 "INSERT INTO users (user_id, balance) VALUES (?, ?)",
-                [(101, 100), (202, 100), (999, 0)],
+                [(101, 100), (202, 100), (303, 100), (404, 100), (999, 0)],
             )
 
         self.db_path_patch = patch.object(piggy_bank, "DB_PATH", self.db_path)
@@ -78,7 +78,7 @@ class PiggyBankTests(unittest.TestCase):
 
     def test_insufficient_contribution_does_not_change_balances(self):
         asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 30, 999))
-        asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 20, 999))
+        asyncio.run(piggy_bank.contribute_to_piggy_bank(202, 20, 999))
 
         insufficient = asyncio.run(
             piggy_bank.contribute_to_piggy_bank(999, 10, 999)
@@ -89,21 +89,22 @@ class PiggyBankTests(unittest.TestCase):
 
         with sqlite3.connect(self.db_path) as db:
             balances = dict(db.execute("SELECT user_id, balance FROM users"))
-        self.assertEqual(balances[101], 50)
+        self.assertEqual(balances[101], 70)
+        self.assertEqual(balances[202], 80)
         self.assertEqual(balances[999], 0)
 
     def test_over_limit_remainder_is_paid_to_admin(self):
         asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 30, 999))
-        asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 20, 999))
+        asyncio.run(piggy_bank.contribute_to_piggy_bank(202, 20, 999))
 
-        result = asyncio.run(piggy_bank.contribute_to_piggy_bank(202, 20, 999))
+        result = asyncio.run(piggy_bank.contribute_to_piggy_bank(303, 20, 999))
 
         self.assertTrue(result["triggered"])
         self.assertEqual(result["admin_payout"], 20)
         self.assertEqual(result["state"]["balance"], 0)
         with sqlite3.connect(self.db_path) as db:
             balances = dict(db.execute("SELECT user_id, balance FROM users"))
-        self.assertEqual(balances[202], 130)
+        self.assertEqual(balances[303], 130)
         self.assertEqual(balances[999], 20)
 
     def test_admin_settings_are_validated(self):
@@ -132,12 +133,12 @@ class PiggyBankTests(unittest.TestCase):
 
     def test_simultaneous_final_contributions_pay_only_one_winner(self):
         asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 30, 999))
-        asyncio.run(piggy_bank.contribute_to_piggy_bank(101, 20, 999))
+        asyncio.run(piggy_bank.contribute_to_piggy_bank(202, 20, 999))
 
         async def contribute_together():
             return await asyncio.gather(
-                piggy_bank.contribute_to_piggy_bank(101, 10, 999),
-                piggy_bank.contribute_to_piggy_bank(202, 10, 999),
+                piggy_bank.contribute_to_piggy_bank(303, 10, 999),
+                piggy_bank.contribute_to_piggy_bank(404, 10, 999),
             )
 
         results = asyncio.run(contribute_together())
@@ -149,6 +150,26 @@ class PiggyBankTests(unittest.TestCase):
                 "SELECT balance FROM users WHERE user_id = 999"
             ).fetchone()[0]
         self.assertEqual(admin_balance, 10)
+
+    def test_player_can_contribute_only_once_per_thirty_minutes(self):
+        with patch.object(piggy_bank, "current_timestamp", return_value=1_000.0):
+            first = asyncio.run(
+                piggy_bank.contribute_to_piggy_bank(101, 10, 999)
+            )
+            second = asyncio.run(
+                piggy_bank.contribute_to_piggy_bank(101, 20, 999)
+            )
+
+        self.assertTrue(first["success"])
+        self.assertFalse(second["success"])
+        self.assertEqual(second["reason"], "cooldown")
+        self.assertEqual(second["remaining_seconds"], 1800)
+        self.assertEqual(asyncio.run(piggy_bank.get_piggy_bank_state())["balance"], 10)
+        with sqlite3.connect(self.db_path) as db:
+            player_balance = db.execute(
+                "SELECT balance FROM users WHERE user_id = 101"
+            ).fetchone()[0]
+        self.assertEqual(player_balance, 90)
 
 
 if __name__ == "__main__":

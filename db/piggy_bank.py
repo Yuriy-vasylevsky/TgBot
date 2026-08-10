@@ -1,4 +1,5 @@
 import aiosqlite
+from time import time as current_timestamp
 
 from .core import DB_PATH
 
@@ -7,6 +8,7 @@ ALLOWED_CONTRIBUTIONS = (10, 20, 30)
 DEFAULT_LIMIT = 60
 DEFAULT_PLAYER_PRIZE = 50
 DEFAULT_ADMIN_PRIZE = 10
+CONTRIBUTION_COOLDOWN_SECONDS = 30 * 60
 
 
 async def _ensure_schema(db: aiosqlite.Connection) -> None:
@@ -35,6 +37,14 @@ async def _ensure_schema(db: aiosqlite.Connection) -> None:
             player_prize INTEGER NOT NULL DEFAULT 0,
             admin_prize INTEGER NOT NULL DEFAULT 0,
             created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+        )
+        """
+    )
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS piggy_bank_cooldowns (
+            user_id INTEGER PRIMARY KEY,
+            last_contribution_at REAL NOT NULL
         )
         """
     )
@@ -97,6 +107,28 @@ async def contribute_to_piggy_bank(
                 """
             )
             state = _state_dict(await cursor.fetchone())
+
+            now = current_timestamp()
+            cursor = await db.execute(
+                """
+                SELECT last_contribution_at
+                FROM piggy_bank_cooldowns
+                WHERE user_id = ?
+                """,
+                (user_id,),
+            )
+            cooldown_row = await cursor.fetchone()
+            if cooldown_row:
+                elapsed = now - float(cooldown_row[0])
+                if elapsed < CONTRIBUTION_COOLDOWN_SECONDS:
+                    remaining = int(CONTRIBUTION_COOLDOWN_SECONDS - elapsed + 0.999)
+                    await db.rollback()
+                    return {
+                        "success": False,
+                        "reason": "cooldown",
+                        "remaining_seconds": remaining,
+                        "state": state,
+                    }
 
             cursor = await db.execute(
                 "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?",
@@ -173,6 +205,15 @@ async def contribute_to_piggy_bank(
                     state["player_prize"] if triggered else 0,
                     admin_payout,
                 ),
+            )
+            await db.execute(
+                """
+                INSERT INTO piggy_bank_cooldowns (user_id, last_contribution_at)
+                VALUES (?, ?)
+                ON CONFLICT(user_id) DO UPDATE
+                SET last_contribution_at = excluded.last_contribution_at
+                """,
+                (user_id, now),
             )
             cursor = await db.execute(
                 "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?",

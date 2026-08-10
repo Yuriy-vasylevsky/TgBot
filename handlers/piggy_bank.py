@@ -45,6 +45,11 @@ def piggy_bank_text(state: dict, notice: str | None = None) -> str:
     return text
 
 
+def format_cooldown(seconds: int) -> str:
+    minutes, seconds = divmod(max(0, seconds), 60)
+    return f"{minutes} хв {seconds:02d} с"
+
+
 async def play_piggy_bank_animation(
     callback: types.CallbackQuery, amount: int
 ) -> None:
@@ -117,6 +122,12 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
             notice = (
                 "❌ <b>Недостатньо коштів.</b> "
                 f"Ваш баланс: {result.get('balance', 0)} грн."
+            )
+        elif result["reason"] == "cooldown":
+            notice = (
+                "⏳ <b>Скарбничку можна поповнювати раз на 30 хвилин.</b>\n"
+                "Наступний внесок буде доступний через "
+                f"<b>{format_cooldown(result['remaining_seconds'])}</b>."
             )
         else:
             notice = "❌ Не вдалося зробити внесок."
