@@ -34,6 +34,7 @@ from handlers.config import (
     OPENAI_TIMEOUT_SECONDS,
 )
 from db import (
+    REFERRAL_BONUS,
     get_balance,
     get_freeze_info,
     freeze_balance,
@@ -44,7 +45,7 @@ from db import (
     mark_tx_used,
     is_tx_used,
     add_payment_log,
-    mark_referral_paid,
+    award_referral_bonus,
     update_daily_net,
     get_cards,
     create_manual_payment,
@@ -84,14 +85,68 @@ _manual_receipt_locks: dict[int, asyncio.Lock] = {}
 router = Router(name="wallet")
 
 MIN_SUM = 200
-REFERRAL_BONUS = 50
-
 KYIV_OFFSET = timedelta(hours=3)
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
 # Розклад автооплати: з 22:00 до 09:00 (Київ)
 AUTO_TOPUP_START_HOUR = 22
 AUTO_TOPUP_END_HOUR = 9
+
+
+def _referral_user_link(
+    user_id: int,
+    username: str | None = None,
+    full_name: str | None = None,
+) -> str:
+    if username:
+        return f"@{escape(username)}"
+    label = escape(full_name or str(user_id))
+    return f'<a href="tg://user?id={user_id}">{label}</a>'
+
+
+async def _notify_referral_bonus(
+    bot,
+    referrer_id: int | None,
+    referred_id: int,
+    referred_username: str | None = None,
+    referred_name: str | None = None,
+) -> None:
+    if not referrer_id or referrer_id == referred_id:
+        return
+
+    referred_link = _referral_user_link(
+        referred_id,
+        referred_username,
+        referred_name,
+    )
+    referrer_link = _referral_user_link(referrer_id)
+    try:
+        await bot.send_message(
+            referrer_id,
+            f"🎉 Ваш реферал поповнив баланс!\n\n"
+            f"👤 Користувач: {referred_link}\n"
+            f"💰 Вам нараховано <b>+{REFERRAL_BONUS} грн</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logging.exception(
+            "Не вдалося повідомити реферера %s про бонус",
+            referrer_id,
+        )
+
+    try:
+        await bot.send_message(
+            ADMIN_ID,
+            f"🎁 Реферальний бонус виданий!\n\n"
+            f"👤 Реферер: {referrer_link}\n"
+            f"👤 Реферал: {referred_link}\n"
+            f"💰 Бонус: <b>+{REFERRAL_BONUS} грн</b>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logging.exception(
+            "Не вдалося повідомити адміністратора про реферальний бонус"
+        )
 
 # ==================== РЕЖИМ АВТООПЛАТИ (керування адміном) ====================
 
@@ -963,6 +1018,13 @@ async def _process_manual_receipt(
         )
         return
 
+    await _notify_referral_bonus(
+        message.bot,
+        result.get("referrer_id"),
+        result["user_id"],
+        result.get("username"),
+        result.get("full_name"),
+    )
     await message.answer(
         f"✅ Ваш платіж автоматично підтверджено!\n\n"
         f"💰 Зараховано: <b>{amount} грн</b>\n"
@@ -1242,6 +1304,14 @@ async def review_manual_topup(callback: CallbackQuery):
 
     user_id = result["user_id"]
     amount = result["amount"]
+    if decision == "approved":
+        await _notify_referral_bonus(
+            callback.bot,
+            result.get("referrer_id"),
+            user_id,
+            result.get("username"),
+            result.get("full_name"),
+        )
     try:
         if decision == "approved":
             await callback.bot.send_message(
@@ -1392,40 +1462,18 @@ async def check_payment(event: Message | CallbackQuery):
             )
 
             # ====================== РЕФЕРАЛЬНИЙ БЛОК ======================
-            referrer_id = await mark_referral_paid(user_id)
-            logging.info(f"🔗 mark_referral_paid повернув referrer_id = {referrer_id}")
-
-            if referrer_id and referrer_id != user_id:
-                await add_to_balance(referrer_id, REFERRAL_BONUS)
-                await update_daily_net(referrer_id, REFERRAL_BONUS)
-
-                # Посилання на реферера
-                referrer_link = f'<a href="tg://user?id={referrer_id}">{referrer_id}</a>'
-
-                # Сповіщення рефереру
-                try:
-                    await message.bot.send_message(
-                        referrer_id,
-                        f"🎉 Ваш реферал поповнив баланс!\n\n"
-                        f"👤 Користувач: {referral_link}\n"
-                        f"💰 Вам нараховано <b>+{REFERRAL_BONUS} грн</b>",
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logging.error(f"❌ Не вдалося відправити рефереру {referrer_id}: {e}")
-
-                # Сповіщення адміністратору про видачу бонусу
-                try:
-                    await message.bot.send_message(
-                        ADMIN_ID,
-                        f"🎁 Реферальний бонус виданий!\n\n"
-                        f"👤 Реферер: {referrer_link}\n"
-                        f"👤 Реферал: {referral_link}\n"
-                        f"💰 Бонус: <b>+{REFERRAL_BONUS} грн</b>",
-                        parse_mode="HTML"
-                    )
-                except Exception as e:
-                    logging.error(f"❌ Не вдалося відправити адміну про бонус: {e}")
+            referrer_id = await award_referral_bonus(user_id)
+            logging.info(
+                "award_referral_bonus повернув referrer_id = %s",
+                referrer_id,
+            )
+            await _notify_referral_bonus(
+                message.bot,
+                referrer_id,
+                user_id,
+                event.from_user.username,
+                event.from_user.full_name,
+            )
 
             logging.info(f"✅ Поповнення успішно завершено для user {user_id}")
 

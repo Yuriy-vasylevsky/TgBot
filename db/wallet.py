@@ -5,6 +5,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from .core import DB_PATH
+from .referral import REFERRAL_BONUS, award_referral_bonus_in_transaction
 from datetime import datetime, timezone, timedelta
 
 KYIV_TZ = timezone(timedelta(hours=3))
@@ -884,6 +885,14 @@ async def review_manual_payment(
                     ),
                 )
 
+                referrer_id = await award_referral_bonus_in_transaction(
+                    db,
+                    user_id,
+                    REFERRAL_BONUS,
+                )
+            else:
+                referrer_id = None
+
             await db.commit()
 
             balance = None
@@ -913,6 +922,8 @@ async def review_manual_payment(
                 "amount": amount,
                 "balance": balance,
                 "daily_number": daily_number,
+                "referrer_id": referrer_id,
+                "referral_bonus": REFERRAL_BONUS if referrer_id else 0,
             }
         except Exception:
             await db.rollback()

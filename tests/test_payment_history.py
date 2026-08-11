@@ -9,6 +9,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 import db.wallet as wallet
+import db.referral as referral
 from db.core import ensure_manual_payment_daily_numbering
 
 
@@ -16,7 +17,9 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.old_db_path = wallet.DB_PATH
+        self.old_referral_db_path = referral.DB_PATH
         wallet.DB_PATH = Path(self.temp_dir.name) / "payments.db"
+        referral.DB_PATH = wallet.DB_PATH
         async with aiosqlite.connect(wallet.DB_PATH) as db:
             await db.executescript(
                 """
@@ -67,13 +70,115 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                     comment TEXT,
                     created_at TEXT
                 );
+                CREATE TABLE referrals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    referrer_id INTEGER NOT NULL,
+                    referred_id INTEGER NOT NULL UNIQUE,
+                    was_existing_user INTEGER DEFAULT 0,
+                    paid INTEGER DEFAULT 0,
+                    bonus_given INTEGER DEFAULT 0,
+                    created_at TEXT
+                );
                 """
             )
             await db.commit()
 
     async def asyncTearDown(self):
         wallet.DB_PATH = self.old_db_path
+        referral.DB_PATH = self.old_referral_db_path
         self.temp_dir.cleanup()
+
+    async def test_manual_and_gpt_approvals_award_referral_bonus_once(self):
+        for offset, review_source in enumerate(("manual", "gpt")):
+            with self.subTest(review_source=review_source):
+                referrer_id = 1000 + offset
+                referred_id = 2000 + offset
+                async with aiosqlite.connect(wallet.DB_PATH) as db:
+                    await db.execute(
+                        "INSERT INTO users (user_id, balance) VALUES (?, 0)",
+                        (referrer_id,),
+                    )
+                    await db.execute(
+                        """
+                        INSERT INTO referrals (referrer_id, referred_id)
+                        VALUES (?, ?)
+                        """,
+                        (referrer_id, referred_id),
+                    )
+                    await db.commit()
+
+                payment_id = await wallet.create_manual_payment(
+                    referred_id,
+                    f"referred_{offset}",
+                    f"Referred {offset}",
+                    200,
+                    "file",
+                    "photo",
+                )
+                result = await wallet.review_manual_payment(
+                    payment_id,
+                    admin_id=0 if review_source == "gpt" else 999,
+                    decision="approved",
+                    review_source=review_source,
+                )
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["referrer_id"], referrer_id)
+                self.assertEqual(result["referral_bonus"], referral.REFERRAL_BONUS)
+
+                repeated = await wallet.review_manual_payment(
+                    payment_id,
+                    admin_id=999,
+                    decision="approved",
+                    review_source="manual",
+                )
+                self.assertFalse(repeated["ok"])
+                self.assertEqual(repeated["reason"], "already_reviewed")
+
+                async with aiosqlite.connect(wallet.DB_PATH) as db:
+                    cursor = await db.execute(
+                        "SELECT balance, daily_net FROM users WHERE user_id = ?",
+                        (referrer_id,),
+                    )
+                    self.assertEqual(
+                        await cursor.fetchone(),
+                        (referral.REFERRAL_BONUS, referral.REFERRAL_BONUS),
+                    )
+                    cursor = await db.execute(
+                        "SELECT paid, bonus_given FROM referrals "
+                        "WHERE referred_id = ?",
+                        (referred_id,),
+                    )
+                    self.assertEqual(await cursor.fetchone(), (1, 1))
+
+    async def test_monobank_bonus_award_is_atomic_and_idempotent(self):
+        referrer_id = 3000
+        referred_id = 4000
+        async with aiosqlite.connect(wallet.DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO users (user_id, balance) VALUES (?, 0)",
+                (referrer_id,),
+            )
+            await db.execute(
+                "INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)",
+                (referrer_id, referred_id),
+            )
+            await db.commit()
+
+        self.assertEqual(
+            await referral.award_referral_bonus(referred_id),
+            referrer_id,
+        )
+        self.assertIsNone(await referral.award_referral_bonus(referred_id))
+
+        async with aiosqlite.connect(wallet.DB_PATH) as db:
+            cursor = await db.execute(
+                "SELECT balance, daily_net FROM users WHERE user_id = ?",
+                (referrer_id,),
+            )
+            self.assertEqual(
+                await cursor.fetchone(),
+                (referral.REFERRAL_BONUS, referral.REFERRAL_BONUS),
+            )
 
     async def test_manual_daily_numbers_and_history_groups(self):
         first_id = await wallet.create_manual_payment(

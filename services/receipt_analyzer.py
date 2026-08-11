@@ -200,6 +200,9 @@ async def analyze_receipt_with_openai(
   card_candidates. Для кожної вкажи role, лише фактично видиме закінчення,
   точний найближчий підпис у context_label та короткий дослівний фрагмент у
   evidence_text;
+- не пропускай загальні поля «Картка», «Номер картки», «Карта», masked card
+  або 16-значний номер лише тому, що біля них не вказана роль. Додай такий
+  номер до card_candidates з role="unknown";
 - role="recipient" використовуй тільки коли поруч явно написано
   «Отримувач», «Одержувач», «Отримувач переказу», «Картка отримувача»,
   «На картку», recipient або beneficiary. Поля «номер платіжного інструмента
@@ -302,33 +305,6 @@ _YEAR_FIRST_DATE_PATTERN = re.compile(
     r"(?<!\d)(?P<year>\d{4})[./-](?P<month>0?[1-9]|1[0-2])[./-]"
     r"(?P<day>0?[1-9]|[12]\d|3[01])(?!\d)"
 )
-_RECIPIENT_MARKERS = (
-    "отримувач",
-    "одержувач",
-    "получатель",
-    "recipient",
-    "beneficiary",
-    "на картку",
-    "на карту",
-    "картка отримувача",
-    "рахунок отримувача",
-    "гаманця отримувача",
-    "гаманець отримувача",
-    "платіжного інструменту отримувача",
-    "платіжного інструмента отримувача",
-    "номер електронного гаманця",
-)
-_SENDER_MARKERS = (
-    "платник",
-    "відправник",
-    "отправитель",
-    "sender",
-    "payer",
-    "з картки",
-    "с карты",
-    "картка списання",
-    "рахунок платника",
-)
 _CANCELLATION_MARKERS = (
     "скасувати платіж",
     "скасувати переказ",
@@ -383,81 +359,6 @@ def _normalize_card_suffix(value: str | None) -> str | None:
     if len(digits) >= 2:
         return digits
     return None
-
-
-def _contains_marker(text: str, markers: tuple[str, ...]) -> bool:
-    return any(marker in text for marker in markers)
-
-
-def _marker_distance_to_suffix(
-    text: str,
-    markers: tuple[str, ...],
-    suffix: str,
-) -> int | None:
-    """Відстань від найближчого рольового підпису до цифр кандидата."""
-    suffix_pattern = re.compile(r"\D*".join(re.escape(digit) for digit in suffix))
-    suffix_spans = [match.span() for match in suffix_pattern.finditer(text)]
-    if not suffix_spans:
-        return None
-
-    distances: list[int] = []
-    for marker in markers:
-        start = 0
-        while True:
-            marker_start = text.find(marker, start)
-            if marker_start < 0:
-                break
-            marker_end = marker_start + len(marker)
-            for suffix_start, suffix_end in suffix_spans:
-                if marker_end <= suffix_start:
-                    distances.append(suffix_start - marker_end)
-                elif suffix_end <= marker_start:
-                    # Підпис після номера часто вже належить наступному полю.
-                    # Тому віддаємо перевагу підпису, що стоїть перед цифрами.
-                    distances.append(marker_start - suffix_end + 40)
-                else:
-                    distances.append(0)
-            start = marker_start + 1
-    return min(distances) if distances else None
-
-
-def _candidate_role_from_context(candidate: CardCandidate, suffix: str) -> str:
-    """Визначає роль за найближчим підписом, а не за всім блоком квитанції."""
-    label = candidate.context_label.casefold()
-    label_has_recipient = _contains_marker(label, _RECIPIENT_MARKERS)
-    label_has_sender = _contains_marker(label, _SENDER_MARKERS)
-    if label_has_recipient and not label_has_sender:
-        return "recipient"
-    if label_has_sender and not label_has_recipient:
-        return "sender"
-
-    evidence = candidate.evidence_text.casefold()
-    visible_digits = "".join(
-        character for character in candidate.visible_suffix if character.isdigit()
-    )
-    distance_suffix = visible_digits if len(visible_digits) >= 2 else suffix
-    evidence_has_recipient = _contains_marker(evidence, _RECIPIENT_MARKERS)
-    evidence_has_sender = _contains_marker(evidence, _SENDER_MARKERS)
-    if evidence_has_recipient and not evidence_has_sender:
-        return "recipient"
-    if evidence_has_sender and not evidence_has_recipient:
-        return "sender"
-    if evidence_has_recipient and evidence_has_sender:
-        recipient_distance = _marker_distance_to_suffix(
-            evidence, _RECIPIENT_MARKERS, distance_suffix
-        )
-        sender_distance = _marker_distance_to_suffix(
-            evidence, _SENDER_MARKERS, distance_suffix
-        )
-        if recipient_distance is not None and (
-            sender_distance is None or recipient_distance < sender_distance
-        ):
-            return "recipient"
-        if sender_distance is not None and (
-            recipient_distance is None or sender_distance <= recipient_distance
-        ):
-            return "sender"
-    return "unknown"
 
 
 def _parse_payment_datetime(value: str, now_kyiv: datetime) -> datetime | None:
@@ -548,20 +449,16 @@ def evaluate_auto_approval(
         and not visible_status_is_not_successful
     )
 
+    # За вимогою проєкту активна картка в будь-якому видимому полі проходить
+    # критерій картки незалежно від визначеної GPT ролі sender/recipient.
+    visible_card_suffixes: set[str] = set()
     reported_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
-    explicit_recipient_suffixes: set[str] = set()
-    neutral_card_suffixes: set[str] = set()
+    if reported_card_suffix:
+        visible_card_suffixes.add(reported_card_suffix)
     for candidate in analysis.card_candidates:
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
-        if not candidate_suffix:
-            continue
-        context_role = _candidate_role_from_context(candidate, candidate_suffix)
-        if context_role == "recipient":
-            explicit_recipient_suffixes.add(candidate_suffix)
-        elif context_role != "sender":
-            # Не довіряємо лише ролі від GPT: нейтральний підпис не робить
-            # картку відправником. Її ще має однозначно підтвердити база.
-            neutral_card_suffixes.add(candidate_suffix)
+        if candidate_suffix:
+            visible_card_suffixes.add(candidate_suffix)
     checks: list[tuple[bool, str]] = [
         (
             not analysis.payment_can_be_cancelled
@@ -594,37 +491,27 @@ def evaluate_auto_approval(
         if not passed:
             return False, reason, None
 
-    if len(explicit_recipient_suffixes) > 1:
-        return False, CARD_MISMATCH_REASON, None
-
-    if explicit_recipient_suffixes:
-        selected_card_suffix = next(iter(explicit_recipient_suffixes))
-    else:
-        neutral_matching_suffixes = {
-            suffix
-            for suffix in neutral_card_suffixes
-            if any(card_last4.endswith(suffix) for card_last4 in allowed_card_last4)
+    unambiguous_matches: list[tuple[str, str]] = []
+    for suffix in visible_card_suffixes:
+        matching_cards = {
+            card_last4
+            for card_last4 in allowed_card_last4
+            if card_last4.endswith(suffix)
         }
-        if len(neutral_matching_suffixes) != 1:
-            return False, CARD_MISMATCH_REASON, None
-        selected_card_suffix = next(iter(neutral_matching_suffixes))
+        if len(matching_cards) == 1:
+            unambiguous_matches.append((suffix, next(iter(matching_cards))))
 
-    if reported_card_suffix and reported_card_suffix != selected_card_suffix:
+    if not unambiguous_matches:
         return False, CARD_MISMATCH_REASON, None
 
-    matching_cards = {
-        card_last4
-        for card_last4 in allowed_card_last4
-        if card_last4.endswith(selected_card_suffix)
-    }
-    if not matching_cards:
-        return False, CARD_MISMATCH_REASON, None
-    if len(matching_cards) > 1:
-        return False, CARD_MISMATCH_REASON, None
+    # Повніші видимі закінчення мають пріоритет над короткими масками.
+    _, selected_card = max(
+        unambiguous_matches,
+        key=lambda item: (len(item[0]), item[0]),
+    )
 
-    # Показуємо користувачу й адміну фактично вибране кодом закінчення,
-    # навіть якщо GPT залишив підсумкове поле порожнім через помилкову роль.
-    analysis.recipient_card_suffix = selected_card_suffix
+    # В адмінському результаті показуємо повні останні 4 цифри активної картки.
+    analysis.recipient_card_suffix = selected_card
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None

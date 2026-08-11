@@ -197,10 +197,12 @@ from .check import (
 )
 
 from .referral import (
+    REFERRAL_BONUS,
     create_referral_tables,
     add_referral,
     get_referrals,
     is_referred,
+    award_referral_bonus,
     mark_referral_paid,
     user_exists, 
     get_all_referrals,

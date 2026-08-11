@@ -3,6 +3,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from collections import defaultdict
 
 from db import (
+    REFERRAL_BONUS,
     get_referrals,
     get_all_referrals,
     get_balance,
@@ -11,8 +12,6 @@ from db import (
 from handlers.config import ADMIN_ID
 
 router = Router(name="referral")
-
-REFERRAL_BONUS = 50
 
 
 def user_link(user_id: int, username: str | None, full_name: str | None):

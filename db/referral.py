@@ -1,5 +1,12 @@
 import aiosqlite
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from db.core import DB_PATH
+
+
+REFERRAL_BONUS = 50
+KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
 
 async def create_referral_tables():
@@ -123,34 +130,121 @@ async def is_referred(referred_id: int) -> bool:
         return await cur.fetchone() is not None
 
 
-async def mark_referral_paid(referred_id: int) -> int | None:
-    """Позначає реферала як оплаченого, повертає referrer_id якщо бонус ще не давали"""
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE referrals SET paid = 1 WHERE referred_id = ? AND was_existing_user = 0",
-            (referred_id,)
-        )
-        await db.commit()
+async def award_referral_bonus_in_transaction(
+    db: aiosqlite.Connection,
+    referred_id: int,
+    bonus_amount: int = REFERRAL_BONUS,
+) -> int | None:
+    """Нараховує одноразовий бонус у вже відкритій транзакції."""
+    await db.execute(
+        "UPDATE referrals SET paid = 1 "
+        "WHERE referred_id = ? AND was_existing_user = 0",
+        (referred_id,),
+    )
+    cursor = await db.execute(
+        """
+        SELECT referrer_id
+        FROM referrals
+        WHERE referred_id = ?
+          AND paid = 1
+          AND bonus_given = 0
+          AND was_existing_user = 0
+          AND referrer_id != referred_id
+        """,
+        (referred_id,),
+    )
+    row = await cursor.fetchone()
+    if not row:
+        return None
 
-        cur = await db.execute(
+    referrer_id = row[0]
+    await db.execute(
+        "INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0)",
+        (referrer_id,),
+    )
+
+    cursor = await db.execute(
+        """
+        SELECT COALESCE(daily_net, 0), last_net_date
+        FROM users
+        WHERE user_id = ?
+        """,
+        (referrer_id,),
+    )
+    daily_net, last_net_date = await cursor.fetchone()
+    today = datetime.now(KYIV_ZONE).date()
+    today_str = today.isoformat()
+    yesterday_str = (today - timedelta(days=1)).isoformat()
+
+    if last_net_date == today_str:
+        await db.execute(
             """
-            SELECT referrer_id FROM referrals
-            WHERE referred_id = ? AND paid = 1 AND bonus_given = 0
-              AND was_existing_user = 0
+            UPDATE users
+            SET balance = COALESCE(balance, 0) + ?,
+                daily_net = COALESCE(daily_net, 0) + ?
+            WHERE user_id = ?
             """,
-            (referred_id,)
+            (bonus_amount, bonus_amount, referrer_id),
         )
-        row = await cur.fetchone()
-        if not row:
-            return None
-
-        referrer_id = row[0]
+    else:
+        yesterday_net = daily_net if last_net_date == yesterday_str else 0
         await db.execute(
-            "UPDATE referrals SET bonus_given = 1 WHERE referred_id = ?",
-            (referred_id,)
+            """
+            UPDATE users
+            SET balance = COALESCE(balance, 0) + ?,
+                daily_net = ?,
+                yesterday_net = ?,
+                cashback_claimed_base = 0,
+                promo_claimed_base = 0,
+                last_net_date = ?,
+                total_losses_all_time =
+                    COALESCE(total_losses_all_time, 0) + ?
+            WHERE user_id = ?
+            """,
+            (
+                bonus_amount,
+                bonus_amount,
+                yesterday_net,
+                today_str,
+                daily_net,
+                referrer_id,
+            ),
         )
-        await db.commit()
-        return referrer_id
+
+    await db.execute(
+        """
+        UPDATE referrals
+        SET bonus_given = 1
+        WHERE referred_id = ? AND bonus_given = 0
+        """,
+        (referred_id,),
+    )
+    return referrer_id
+
+
+async def award_referral_bonus(
+    referred_id: int,
+    bonus_amount: int = REFERRAL_BONUS,
+) -> int | None:
+    """Атомарно позначає першу оплату й зараховує бонус рефереру."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            referrer_id = await award_referral_bonus_in_transaction(
+                db,
+                referred_id,
+                bonus_amount,
+            )
+            await db.commit()
+            return referrer_id
+        except Exception:
+            await db.rollback()
+            raise
+
+
+async def mark_referral_paid(referred_id: int) -> int | None:
+    """Застаріла назва; атомарно видає реферальний бонус."""
+    return await award_referral_bonus(referred_id)
     
 
 # from db import is_referred, add_referral, get_user  # або окрема функція

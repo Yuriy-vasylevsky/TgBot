@@ -178,7 +178,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         self.assertFalse(result[0])
         self.assertEqual(result[1], CANCELLABLE_PAYMENT_REASON)
 
-    def test_sender_card_cannot_be_used_as_recipient(self):
+    def test_active_card_in_sender_field_is_accepted_by_project_policy(self):
         result = self.evaluate(
             recipient_card_suffix="2296",
             card_candidates=[
@@ -196,8 +196,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
                 },
             ],
         )
-        self.assertFalse(result[0])
-        self.assertEqual(result[1], CARD_MISMATCH_REASON)
+        self.assertTrue(result[0], result[1])
 
     def test_neutral_label_can_override_incorrect_sender_role(self):
         analysis = PaymentReceiptAnalysis(
@@ -226,7 +225,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         self.assertTrue(result[0], result[1])
         self.assertEqual(analysis.recipient_card_suffix, "2296")
 
-    def test_recipient_role_requires_recipient_label_evidence(self):
+    def test_active_card_passes_even_when_label_says_payer(self):
         result = self.evaluate(
             card_candidates=[
                 {
@@ -237,7 +236,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
                 }
             ]
         )
-        self.assertFalse(result[0])
+        self.assertTrue(result[0], result[1])
 
     def test_e_wallet_recipient_number_is_accepted_despite_payer_lines(self):
         analysis = PaymentReceiptAnalysis(
@@ -293,7 +292,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         )
         self.assertTrue(result[0], result[1])
 
-    def test_nearest_sender_marker_still_blocks_sender_card(self):
+    def test_sender_marker_does_not_block_an_active_card(self):
         result = self.evaluate(
             recipient_card_suffix="2296",
             card_candidates=[
@@ -308,8 +307,35 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
                 }
             ],
         )
-        self.assertFalse(result[0])
-        self.assertEqual(result[1], CARD_MISMATCH_REASON)
+        self.assertTrue(result[0], result[1])
+
+    def test_generic_masked_card_field_from_abank_receipt_is_accepted(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "amount_found": 400,
+                    "recipient_card_suffix": None,
+                    "card_candidates": [
+                        {
+                            "role": "unknown",
+                            "visible_suffix": "432335******2296",
+                            "context_label": "Картка",
+                            "evidence_text": "Картка: 432335******2296",
+                        }
+                    ],
+                }
+            )
+        )
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=400,
+            allowed_card_last4={"2296", "8204"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_card_suffix, "2296")
 
     def test_phone_status_bar_time_is_allowed_on_a_receipt(self):
         result = self.evaluate(
