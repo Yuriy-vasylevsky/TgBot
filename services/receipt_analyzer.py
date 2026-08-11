@@ -60,6 +60,7 @@ class PaymentReceiptAnalysis(BaseModel):
     cancellation_visible_text: str | None
     amount_found: int | None
     card_candidates: list[CardCandidate]
+    visible_card_number_suffixes: list[str]
     recipient_card_suffix: str | None
     payment_datetime: str | None
     payment_time_source: Literal["operation", "phone_status_bar", "not_visible"]
@@ -203,6 +204,16 @@ async def analyze_receipt_with_openai(
 - не пропускай загальні поля «Картка», «Номер картки», «Карта», masked card
   або 16-значний номер лише тому, що біля них не вказана роль. Додай такий
   номер до card_candidates з role="unknown";
+- у visible_card_number_suffixes окремо поверни закінчення КОЖНОГО видимого
+  карткового номера незалежно від його ролі. Обов'язково перевір текст після
+  «Призначення платежу», «Поповнення картки», «Пополнение карты»: 16-значний
+  номер у цьому або наступному рядку є номером картки й не може бути
+  пропущений;
+- не додавай у visible_card_number_suffixes телефон, IBAN із префіксом UA,
+  номер квитанції, код операції, ЄДРПОУ чи інші службові ідентифікатори;
+- у visible_card_number_suffixes повертай лише реально видимі останні 2–4
+  цифри кожної картки; якщо видно повний або маскований номер — поверни його
+  останні 4 цифри;
 - role="recipient" використовуй тільки коли поруч явно написано
   «Отримувач», «Одержувач», «Отримувач переказу», «Картка отримувача»,
   «На картку», recipient або beneficiary. Поля «номер платіжного інструмента
@@ -455,6 +466,10 @@ def evaluate_auto_approval(
     reported_card_suffix = _normalize_card_suffix(analysis.recipient_card_suffix)
     if reported_card_suffix:
         visible_card_suffixes.add(reported_card_suffix)
+    for visible_suffix in analysis.visible_card_number_suffixes:
+        normalized_suffix = _normalize_card_suffix(visible_suffix)
+        if normalized_suffix:
+            visible_card_suffixes.add(normalized_suffix)
     for candidate in analysis.card_candidates:
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
         if candidate_suffix:

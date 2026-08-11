@@ -570,6 +570,10 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         role = role_names.get(candidate.role, candidate.role)
         candidate_parts.append(f"{role}: ****{suffix} ({label})")
     card_candidates = "; ".join(candidate_parts) or "не знайдено"
+    visible_card_numbers = ", ".join(
+        f"****{escape(''.join(character for character in suffix if character.isdigit())[-4:] or '—')}"
+        for suffix in analysis.visible_card_number_suffixes[:8]
+    ) or "не знайдено"
     return (
         f"\n\n🤖 <b>Результат автоматичної перевірки</b>\n"
         f"Рішення: ручна перевірка\n"
@@ -577,6 +581,7 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"Знайдена сума: {found_amount}\n"
         f"Картка: {card}\n"
         f"Знайдені картки: {card_candidates}\n"
+        f"Усі видимі номери карток: {visible_card_numbers}\n"
         f"Тип: {document_type}\n"
         f"Статус: {escape(analysis.payment_status)} ({visible_status})\n"
         f"Скасування: {cancellation}\n"

@@ -33,6 +33,7 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
                     "evidence_text": "Отримувач **** 2296",
                 }
             ],
+            "visible_card_number_suffixes": [],
             "recipient_card_suffix": "2296",
             "payment_datetime": "2026-08-04T14:30:00+03:00",
             "payment_time_source": "operation",
@@ -330,6 +331,41 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         result = evaluate_auto_approval(
             analysis,
             expected_amount=400,
+            allowed_card_last4={"2296", "8204"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_card_suffix, "2296")
+
+    def test_card_number_in_payment_purpose_is_accepted_when_gpt_mislabels_iban(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "amount_found": 300,
+                    "recipient_card_suffix": "5098",
+                    "visible_card_number_suffixes": ["2296"],
+                    "card_candidates": [
+                        {
+                            "role": "sender",
+                            "visible_suffix": "3296",
+                            "context_label": "Картка платника",
+                            "evidence_text": "Картка платника: ****3296",
+                        },
+                        {
+                            "role": "recipient",
+                            "visible_suffix": "5098",
+                            "context_label": "IBAN отримувача",
+                            "evidence_text": "IBAN: UA...5098",
+                        },
+                    ],
+                }
+            )
+        )
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=300,
             allowed_card_last4={"2296", "8204"},
             now_kyiv=self.now,
             max_time_difference_minutes=10,
