@@ -48,7 +48,8 @@ async def ensure_users_table_and_columns():
             games_won INTEGER DEFAULT 0,
             money_won INTEGER DEFAULT 0,
             has_claimed_gift INTEGER DEFAULT 0,
-            balance INTEGER DEFAULT 0
+            balance INTEGER DEFAULT 0,
+            first_deposit_bonus_pending INTEGER DEFAULT 0
             
         )""")
 
@@ -59,6 +60,7 @@ async def ensure_users_table_and_columns():
             # ("last_daily_bonus_date", "ALTER TABLE users ADD COLUMN last_daily_bonus_date TEXT"),
             # ("last_fortune_date", "ALTER TABLE users ADD COLUMN last_fortune_date TEXT"),
             ("balance", "ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0"),
+            ("first_deposit_bonus_pending", "ALTER TABLE users ADD COLUMN first_deposit_bonus_pending INTEGER DEFAULT 0"),
             ("frozen_balance", "ALTER TABLE users ADD COLUMN frozen_balance INTEGER DEFAULT 0"),
             ("freeze_until", "ALTER TABLE users ADD COLUMN freeze_until TEXT"),
       

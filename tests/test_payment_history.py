@@ -28,6 +28,7 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                     username TEXT,
                     full_name TEXT,
                     balance INTEGER DEFAULT 0,
+                    first_deposit_bonus_pending INTEGER DEFAULT 0,
                     daily_net INTEGER DEFAULT 0,
                     yesterday_net INTEGER DEFAULT 0,
                     last_net_date TEXT,

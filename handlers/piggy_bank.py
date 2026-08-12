@@ -14,6 +14,7 @@ from handlers.config import ADMIN_ID
 
 
 router = Router(name="piggy_bank")
+PIGGY_BANK_GROUP_ID = -1001964846494
 
 
 def piggy_bank_keyboard(_state: dict) -> InlineKeyboardMarkup:
@@ -167,6 +168,24 @@ async def add_to_piggy_bank(callback: types.CallbackQuery):
                 f"Гравцю: <b>{state['player_prize']} грн</b>\n"
                 f"Адміну разом із залишком: "
                 f"<b>{result['admin_payout']} грн</b>",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
+
+    if result["triggered"]:
+        winner = (
+            f"@{escape(callback.from_user.username)}"
+            if callback.from_user.username
+            else escape(callback.from_user.full_name)
+        )
+        try:
+            await callback.bot.send_message(
+                PIGGY_BANK_GROUP_ID,
+                "💥🐷 <b>Скарбничку розбито!</b>\n\n"
+                f"🏆 Переможець: {winner}\n"
+                f"💰 Виграш: <b>{state['player_prize']} грн</b>\n\n"
+                "Вітаємо переможця! 🎉",
                 parse_mode="HTML",
             )
         except Exception:

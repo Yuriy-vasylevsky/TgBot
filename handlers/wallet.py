@@ -43,6 +43,7 @@ from db import (
     remove_pending_payment,
     add_to_balance,
     mark_tx_used,
+    credit_deposit_with_bonus,
     is_tx_used,
     add_payment_log,
     award_referral_bonus,
@@ -1033,7 +1034,8 @@ async def _process_manual_receipt(
     await message.answer(
         f"✅ Ваш платіж автоматично підтверджено!\n\n"
         f"💰 Зараховано: <b>{amount} грн</b>\n"
-        f"💳 Баланс: <b>{result['balance']} грн</b>",
+        + ("🎁 Вітальний бонус: <b>+50 грн</b>\n" if result.get("first_deposit_bonus") else "")
+        + f"💳 Баланс: <b>{result['balance']} грн</b>",
         parse_mode="HTML",
         reply_markup=main_menu(),
     )
@@ -1323,7 +1325,8 @@ async def review_manual_topup(callback: CallbackQuery):
                 user_id,
                 f"✅ Ваш платіж підтверджено!\n\n"
                 f"💰 Зараховано: <b>{amount} грн</b>\n"
-                f"💳 Баланс: <b>{result['balance']} грн</b>",
+                + ("🎁 Вітальний бонус: <b>+50 грн</b>\n" if result.get("first_deposit_bonus") else "")
+                + f"💳 Баланс: <b>{result['balance']} грн</b>",
                 parse_mode="HTML",
                 reply_markup=main_menu(),
             )
@@ -1426,7 +1429,7 @@ async def check_payment(event: Message | CallbackQuery):
                 await message.answer("⚠️ Ця транзакція вже була зарахована.")
                 return
 
-            await add_to_balance(user_id, target_amount_grn)
+            deposit_credit = await credit_deposit_with_bonus(user_id, target_amount_grn)
             await update_daily_net(user_id, target_amount_grn)
             await remove_pending_payment(user_id)
             await add_payment_log(
@@ -1458,9 +1461,15 @@ async def check_payment(event: Message | CallbackQuery):
                 keyboard=[[KeyboardButton(text="🎮 Грати")]],
                 resize_keyboard=True,
             )
+            bonus_text = (
+                "🎁 Вітальний бонус: <b>+50 грн</b>\n"
+                if deposit_credit["bonus"]
+                else ""
+            )
             await message.answer(
                 f"✅ Платіж зараховано!\n\n"
                 f"💰 {target_amount_grn} грн\n"
+                f"{bonus_text}"
                 f"💳 Баланс: {await get_balance(user_id)} грн",
                 reply_markup=play_kb,
                 parse_mode="HTML"

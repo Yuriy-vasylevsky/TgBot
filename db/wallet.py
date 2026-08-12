@@ -10,6 +10,7 @@ from datetime import datetime, timezone, timedelta
 
 KYIV_TZ = timezone(timedelta(hours=3))
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
+FIRST_DEPOSIT_BONUS = 50
 
 
 async def _next_manual_payment_number(
@@ -488,6 +489,30 @@ async def add_pending_payment(
         await db.commit()
 
 
+async def credit_deposit_with_bonus(user_id: int, amount_grn: int) -> dict:
+    """Зараховує депозит і одноразовий бонус нового гравця атомарно."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cursor = await db.execute(
+            "SELECT COALESCE(first_deposit_bonus_pending, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        bonus = FIRST_DEPOSIT_BONUS if row and row[0] else 0
+        await db.execute(
+            """
+            INSERT INTO users (user_id, balance, first_deposit_bonus_pending)
+            VALUES (?, ?, 0)
+            ON CONFLICT(user_id) DO UPDATE SET
+                balance = COALESCE(balance, 0) + excluded.balance,
+                first_deposit_bonus_pending = 0
+            """,
+            (user_id, amount_grn + bonus),
+        )
+        await db.commit()
+        return {"bonus": bonus, "credited": amount_grn + bonus}
+
+
 async def get_pending_payments() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
@@ -862,15 +887,21 @@ async def review_manual_payment(
                     """,
                     (user_id, username, full_name),
                 )
+                cursor = await db.execute(
+                    "SELECT COALESCE(first_deposit_bonus_pending, 0) FROM users WHERE user_id = ?",
+                    (user_id,),
+                )
+                bonus = FIRST_DEPOSIT_BONUS if (await cursor.fetchone())[0] else 0
                 await db.execute(
                     """
                     UPDATE users
                     SET balance = COALESCE(balance, 0) + ?,
+                        first_deposit_bonus_pending = 0,
                         daily_net = COALESCE(daily_net, 0) + ?,
                         last_net_date = ?
                     WHERE user_id = ?
                     """,
-                    (amount, amount, today_str, user_id),
+                    (amount + bonus, amount, today_str, user_id),
                 )
                 await db.execute(
                     """
@@ -892,6 +923,7 @@ async def review_manual_payment(
                 )
             else:
                 referrer_id = None
+                bonus = 0
 
             await db.commit()
 
@@ -924,6 +956,7 @@ async def review_manual_payment(
                 "daily_number": daily_number,
                 "referrer_id": referrer_id,
                 "referral_bonus": REFERRAL_BONUS if referrer_id else 0,
+                "first_deposit_bonus": bonus,
             }
         except Exception:
             await db.rollback()
