@@ -343,20 +343,16 @@ _SUCCESS_STATUS_MARKERS = (
     "successful",
     "completed successfully",
 )
-_NON_SUCCESS_STATUS_MARKERS = (
+_BLOCKING_STATUS_MARKERS = (
     "не виконано",
     "неуспіш",
     "помилка",
     "відхилено",
     "скасовано",
-    "в обробці",
-    "очікує",
     "не выполнено",
     "ошибка",
     "отклонено",
     "отменено",
-    "processing",
-    "pending",
     "failed",
     "rejected",
     "cancelled",
@@ -446,18 +442,18 @@ def evaluate_auto_approval(
 ) -> tuple[bool, str, int | None]:
     """Перевіряє тип документа, видимий час, суму та картку."""
     visible_status = (analysis.payment_status_visible_text or "").casefold()
-    visible_status_is_not_successful = bool(visible_status) and any(
-        marker in visible_status for marker in _NON_SUCCESS_STATUS_MARKERS
+    visible_status_is_blocking = bool(visible_status) and any(
+        marker in visible_status for marker in _BLOCKING_STATUS_MARKERS
     )
     visible_status_is_successful = bool(visible_status) and any(
         marker in visible_status for marker in _SUCCESS_STATUS_MARKERS
-    ) and not visible_status_is_not_successful
+    ) and not visible_status_is_blocking
     if visible_status_is_successful:
         # Дослівний статус із квитанції надійніший за помилкову категорію GPT.
         analysis.payment_status = "successful"
-    status_is_successful = (
-        analysis.payment_status == "successful"
-        and not visible_status_is_not_successful
+    status_is_allowed = (
+        analysis.payment_status not in {"failed", "rejected", "cancelled"}
+        and not visible_status_is_blocking
     )
 
     # За вимогою проєкту активна картка в будь-якому видимому полі проходить
@@ -493,8 +489,8 @@ def evaluate_auto_approval(
             "зображення не є квитанцією або екраном конкретного платежу",
         ),
         (
-            status_is_successful,
-            "платіж у квитанції не має успішного завершеного статусу",
+            status_is_allowed,
+            "у квитанції вказано негативний статус платежу",
         ),
         (
             analysis.amount_found is not None

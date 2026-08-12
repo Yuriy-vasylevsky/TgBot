@@ -163,6 +163,27 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         )
         self.assertFalse(result[0])
 
+    def test_processing_status_is_allowed_when_other_checks_match(self):
+        result = self.evaluate(
+            payment_status="processing",
+            payment_status_visible_text="Статус операції: Очікує обробки",
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_unknown_status_without_negative_text_is_allowed(self):
+        result = self.evaluate(
+            payment_status="unknown",
+            payment_status_visible_text=None,
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_explicit_rejected_status_remains_blocked(self):
+        result = self.evaluate(
+            payment_status="rejected",
+            payment_status_visible_text="Статус операції: Відхилено",
+        )
+        self.assertFalse(result[0])
+
     def test_cancellable_payment_is_always_sent_to_manual_review(self):
         result = self.evaluate(
             payment_can_be_cancelled=True,
