@@ -10,6 +10,7 @@ from db import (
     get_winrate,
     has_claimed_gift,
     add_game_win,
+    add_slot_session,
 )
 from db.wallet import add_to_balance, add_daily_game_win, get_available_game_win
 from handlers.menu import main_menu
@@ -178,6 +179,8 @@ async def slot_spin(message: types.Message, state: FSMContext):
 
         # === Перевірка закінчення гри ===
         if coupons <= 0:
+            await add_slot_session(user_id, "loss", coupons)
+
             try:
                 username = (
                     f"@{message.from_user.username}"
@@ -206,6 +209,8 @@ async def slot_spin(message: types.Message, state: FSMContext):
             return
 
         if coupons >= 30:
+            await add_slot_session(user_id, "win", coupons)
+
             # === НОВА СИСТЕМА ПЕРЕВІРКИ ВИГРАШУ ===
             payout = min(30, await get_available_game_win(user_id))
 

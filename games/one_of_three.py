@@ -70,6 +70,7 @@ async def open_boxes(cb: CallbackQuery):
 
     is_win = random.random() < winrate
     winning_box = user_choice if is_win else random.choice([i for i in range(3) if i != user_choice])
+    await add_game_result("Один з трьох", is_win)
 
     # Анімація
     header = "<b>🎯 Один із трьох</b>\n\n"
@@ -145,7 +146,6 @@ async def open_boxes(cb: CallbackQuery):
 
     # === Сповіщення адміністратору ===
     try:
-        await add_game_result("Один з трьох", is_win)
         username = f"@{cb.from_user.username}" if cb.from_user.username else f"<a href='tg://user?id={cb.from_user.id}'>{cb.from_user.full_name}</a>"
 
         admin_msg = (

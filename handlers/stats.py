@@ -15,6 +15,24 @@ from db import get_total_money_won  # зверху
 router = Router()
 ADMIN_ID = config.ADMIN_ID
 
+ONE_OF_THREE_NAMES = {
+    "один з трьох",
+    "один із трьох",
+    "one of three",
+    "1 of 3",
+    "1 з 3",
+}
+
+
+def _game_stats_text(icon: str, name: str, total: int, wins: int) -> str:
+    win_rate = wins / total * 100 if total else 0
+    return (
+        f"{icon} <b>{name}</b>\n"
+        f"🔹 Усього ігор: {total}\n"
+        f"🔹 Виграшних: {wins}\n"
+        f"🔹 Відсоток перемог: {win_rate:.1f}%\n\n"
+    )
+
 
 @router.message(F.text == "📊 Статистика")
 async def show_stats(message: types.Message):
@@ -23,7 +41,7 @@ async def show_stats(message: types.Message):
     total_slots, wins_slots = await get_slot_session_stats()
     total_blackjack, wins_blackjack = await get_blackjack_session_stats()
 
-    text = "<b>📊 Загальна статистика ігор</b>\n\n"
+    text = "<b>📊 Статистика ігор</b>\n\n"
 
     # --- Глобальні підрахунки ---
     total_sessions = 0
@@ -33,50 +51,28 @@ async def show_stats(message: types.Message):
     total_guess = 0
     wins_guess = 0
     for game_name, total_games, wins in stats:
-        if game_name.lower() in ["один з трьох", "one of three", "1 of 3"]:
+        if game_name.strip().lower() in ONE_OF_THREE_NAMES:
             total_guess += total_games
             wins_guess += wins
 
     total_sessions += total_guess + total_slots + total_blackjack
     total_wins += wins_guess + wins_slots + wins_blackjack
 
-    # --- Виводимо детально кожну гру ---
-    if total_guess > 0:
-        rate_guess = wins_guess / total_guess * 100
-        text += (
-            f"🎯 <b>Один з трьох</b>\n"
-            f"🔹 Сесій: {total_guess}\n"
-            f"🔹 Виграно: {wins_guess}\n"
-            f"🔹 Відсоток перемог: {rate_guess:.1f}%\n\n"
-        )
-
-    if total_slots > 0:
-        slot_rate = wins_slots / total_slots * 100
-        text += (
-            f"🎰 <b>Слоти</b>\n"
-            f"🔹 Сесій: {total_slots}\n"
-            f"🔹 Виграно: {wins_slots}\n"
-            f"🔹 Відсоток перемог: {slot_rate:.1f}%\n\n"
-        )
-
-    if total_blackjack > 0:
-        blackjack_rate = wins_blackjack / total_blackjack * 100
-        text += (
-            f"🃏 <b>Blackjack</b>\n"
-            f"🔹 Сесій: {total_blackjack}\n"
-            f"🔹 Виграно: {wins_blackjack}\n"
-            f"🔹 Відсоток перемог: {blackjack_rate:.1f}%\n\n"
-        )
+    # --- Виводимо кожну гру, навіть якщо для неї ще немає результатів ---
+    text += _game_stats_text("🎰", "Слоти", total_slots, wins_slots)
+    text += _game_stats_text("🃏", "Blackjack", total_blackjack, wins_blackjack)
+    text += _game_stats_text("🎯", "Один з трьох", total_guess, wins_guess)
 
     # 🌍 --- Глобальна статистика по сесіях ---
+    global_rate = total_wins / total_sessions * 100 if total_sessions else 0
+    text += (
+        "🌍 <b>Загальна статистика всіх ігор</b>\n"
+        f"🔹 Усього ігор: <b>{total_sessions}</b>\n"
+        f"🔹 Виграшних: <b>{total_wins}</b>\n"
+        f"🔹 Відсоток перемог: <b>{global_rate:.1f}%</b>\n\n"
+    )
+
     if total_sessions > 0:
-        global_rate = total_wins / total_sessions * 100
-        text += (
-            "🌍 <b>Глобальна статистика</b>\n"
-            f"🔹 Усього сесій: <b>{total_sessions}</b>\n"
-            f"🔹 Виграно: <b>{total_wins}</b>\n"
-            f"🔹 Середній відсоток перемог: <b>{global_rate:.1f}%</b>\n\n"
-        )
 
         # 💰 --- ФІНАНСОВА СТАТИСТИКА ---
         total_paid = total_wins * 30
@@ -92,9 +88,6 @@ async def show_stats(message: types.Message):
             f"🔹 Ціна за 1 PROMO: <b>{price_per_coupon:.2f}</b>\n\n"
             f"🔹 Зароблено грошей: <b>{earned_money:,}</b>\n"
         )
-
-    else:
-        text += "Немає даних для відображення."
 
     # --- Кнопка очищення тільки для адміна ---
     kb = InlineKeyboardBuilder()

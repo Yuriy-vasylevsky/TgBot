@@ -11,7 +11,6 @@ from aiogram.types import (
 )
 
 from db import (
-    add_game_result,
     has_claimed_gift,
     add_blackjack_session,
     save_notification,
@@ -234,8 +233,6 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     else:
         is_win = False
 
-    await add_game_result("Blackjack", is_win is True)
-
     if is_win is True:
         balance += bet
         result = f"🎉 Ви виграли! +{bet} купонів\nБаланс: <b>{balance}</b>"
@@ -250,6 +247,8 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
 
     # === Перевірка завершення гри ===
     if balance >= 30 or balance <= 0:
+        await add_blackjack_session(is_win=balance >= 30)
+
         admin_status = ""
 
         if balance >= 30:
