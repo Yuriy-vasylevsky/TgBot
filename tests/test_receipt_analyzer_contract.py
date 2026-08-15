@@ -1,14 +1,19 @@
 import ast
+import io
 import inspect
 import unittest
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from PIL import Image
+
 from services.receipt_analyzer import (
     CARD_MISMATCH_REASON,
     CANCELLABLE_PAYMENT_REASON,
     PaymentReceiptAnalysis,
+    _build_receipt_detail_crops,
+    _detail_crop_boxes,
     analyze_receipt_with_openai,
     evaluate_auto_approval,
 )
@@ -89,6 +94,33 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
 
         self.assertEqual(passed_keywords, required_keywords)
         self.assertLessEqual(passed_keywords, accepted_keywords)
+
+    def test_portrait_receipt_is_split_into_overlapping_detail_bands(self):
+        boxes = _detail_crop_boxes(600, 1200)
+
+        self.assertEqual(len(boxes), 4)
+        self.assertEqual(boxes[0][1], 0)
+        self.assertEqual(boxes[-1][3], 1200)
+        self.assertLess(boxes[1][1], boxes[0][3])
+
+    def test_landscape_receipt_is_split_into_overlapping_detail_columns(self):
+        boxes = _detail_crop_boxes(1200, 600)
+
+        self.assertEqual(len(boxes), 3)
+        self.assertEqual(boxes[0][0], 0)
+        self.assertEqual(boxes[-1][2], 1200)
+        self.assertLess(boxes[1][0], boxes[0][2])
+
+    def test_detail_crops_are_enlarged_jpeg_images(self):
+        source = io.BytesIO()
+        Image.new("RGB", (300, 600), "white").save(source, format="JPEG")
+
+        crops = _build_receipt_detail_crops(source.getvalue())
+
+        self.assertEqual(len(crops), 4)
+        with Image.open(io.BytesIO(crops[0])) as first_crop:
+            self.assertEqual(first_crop.format, "JPEG")
+            self.assertGreater(first_crop.width, 300)
 
     def test_valid_payment_receipt_is_approved(self):
         self.assertTrue(self.evaluate()[0])

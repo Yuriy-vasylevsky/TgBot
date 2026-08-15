@@ -18,6 +18,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 SUPPORTED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
+DETAIL_IMAGE_TARGET_LONG_SIDE = 2400
+DETAIL_IMAGE_MAX_SCALE = 3.0
 CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
 )
@@ -123,6 +125,73 @@ def _normalize_image(original_bytes: bytes) -> PreparedReceipt:
     )
 
 
+def _detail_crop_boxes(width: int, height: int) -> list[tuple[int, int, int, int]]:
+    """Build overlapping crops so small receipt digits reach the vision model."""
+
+    def axis_ranges(length: int, count: int) -> list[tuple[int, int]]:
+        segment = length / count
+        overlap = max(1, round(segment * 0.18))
+        return [
+            (
+                max(0, round(index * segment) - overlap),
+                min(length, round((index + 1) * segment) + overlap),
+            )
+            for index in range(count)
+        ]
+
+    aspect_ratio = width / height
+    if aspect_ratio <= 0.87:
+        row_count = 4 if height / width >= 1.6 else 3
+        return [
+            (0, top, width, bottom)
+            for top, bottom in axis_ranges(height, row_count)
+        ]
+    if aspect_ratio >= 1.15:
+        column_count = 3 if width / height >= 1.6 else 2
+        return [
+            (left, 0, right, height)
+            for left, right in axis_ranges(width, column_count)
+        ]
+
+    horizontal_ranges = axis_ranges(width, 2)
+    vertical_ranges = axis_ranges(height, 2)
+    return [
+        (left, top, right, bottom)
+        for top, bottom in vertical_ranges
+        for left, right in horizontal_ranges
+    ]
+
+
+def _build_receipt_detail_crops(image_bytes: bytes) -> list[bytes]:
+    """Return enlarged overlapping fragments of the already-normalized receipt."""
+
+    with Image.open(io.BytesIO(image_bytes)) as source:
+        image = source.convert("RGB")
+
+    crops: list[bytes] = []
+    for box in _detail_crop_boxes(image.width, image.height):
+        crop = image.crop(box)
+        longest_side = max(crop.size)
+        if longest_side < DETAIL_IMAGE_TARGET_LONG_SIDE:
+            scale = min(
+                DETAIL_IMAGE_MAX_SCALE,
+                DETAIL_IMAGE_TARGET_LONG_SIDE / longest_side,
+            )
+            crop = crop.resize(
+                (round(crop.width * scale), round(crop.height * scale)),
+                Image.Resampling.LANCZOS,
+            )
+        crop = ImageOps.autocontrast(crop, cutoff=1)
+        crop = ImageEnhance.Contrast(crop).enhance(1.1)
+        crop = crop.filter(
+            ImageFilter.UnsharpMask(radius=1.0, percent=135, threshold=2)
+        )
+        output = io.BytesIO()
+        crop.save(output, format="JPEG", quality=94, optimize=True)
+        crops.append(output.getvalue())
+    return crops
+
+
 async def download_and_prepare_receipt(
     bot: Bot,
     file_id: str,
@@ -167,6 +236,10 @@ async def analyze_receipt_with_openai(
 Прочитай фактичні дані з банківської квитанції або екрана переказу.
 Ти не знаєш очікуваної суми чи дозволених карток. Нічого не порівнюй і не
 підставляй: повертай лише те, що справді видно на зображенні.
+
+Перше зображення — повна квитанція. Наступні зображення — збільшені фрагменти
+ЦІЄЇ Ж квитанції з перекриттям. Це не окремі платежі: використовуй фрагменти,
+щоб повторно звірити дрібний текст і цифри з повним зображенням.
 
 Поточний час Europe/Kyiv: {now_kyiv.isoformat()}
 
@@ -214,6 +287,14 @@ async def analyze_receipt_with_openai(
 - у visible_card_number_suffixes повертай лише реально видимі останні 2–4
   цифри кожної картки; якщо видно повний або маскований номер — поверни його
   останні 4 цифри;
+- кожне закінчення картки прочитай щонайменше двічі: спочатку на повному
+  зображенні, потім на найчіткішому збільшеному фрагменті. Звіряй останні
+  цифри справа наліво, не плутай 0/6/8/9, 1/7 та 3/8 і надавай перевагу
+  чіткішому збільшеному фрагменту;
+- якщо повне зображення і фрагмент начебто дають різні цифри, не вибирай
+  варіант за контекстом і не підставляй типовий номер. Поверни лише ті останні
+  2–3 цифри, які справді читаються однаково; якщо навіть вони не певні — не
+  додавай цей номер;
 - role="recipient" використовуй тільки коли поруч явно написано
   «Отримувач», «Одержувач», «Отримувач переказу», «Картка отримувача»,
   «На картку», recipient або beneficiary. Поля «номер платіжного інструмента
@@ -265,8 +346,22 @@ async def analyze_receipt_with_openai(
 - у reason коротко українською опиши, які фактичні дані вдалося прочитати.
 """.strip()
 
-    image_base64 = base64.b64encode(image.image_bytes).decode("ascii")
-    data_url = f"data:{image.mime_type};base64,{image_base64}"
+    detail_crops = await asyncio.to_thread(
+        _build_receipt_detail_crops,
+        image.image_bytes,
+    )
+    receipt_images = [image.image_bytes, *detail_crops]
+    image_content = [
+        {
+            "type": "input_image",
+            "image_url": (
+                "data:image/jpeg;base64,"
+                + base64.b64encode(receipt_image).decode("ascii")
+            ),
+            "detail": "high",
+        }
+        for receipt_image in receipt_images
+    ]
     client = AsyncOpenAI(api_key=api_key, timeout=timeout_seconds)
     try:
         async with asyncio.timeout(timeout_seconds):
@@ -285,11 +380,7 @@ async def analyze_receipt_with_openai(
                         "role": "user",
                         "content": [
                             {"type": "input_text", "text": prompt},
-                            {
-                                "type": "input_image",
-                                "image_url": data_url,
-                                "detail": "high",
-                            },
+                            *image_content,
                         ],
                     },
                 ],
