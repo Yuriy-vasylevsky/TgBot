@@ -20,6 +20,7 @@ KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 SUPPORTED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
 DETAIL_IMAGE_TARGET_LONG_SIDE = 2400
 DETAIL_IMAGE_MAX_SCALE = 3.0
+PHONE_STATUS_BAR_HEIGHT_RATIO = 0.14
 CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
 )
@@ -168,8 +169,16 @@ def _build_receipt_detail_crops(image_bytes: bytes) -> list[bytes]:
     with Image.open(io.BytesIO(image_bytes)) as source:
         image = source.convert("RGB")
 
+    # Першим фрагментом окремо даємо верхню смугу. На екранах успішного
+    # переказу час часто є тільки в status bar і губиться серед усієї сторінки.
+    status_bar_bottom = max(1, round(image.height * PHONE_STATUS_BAR_HEIGHT_RATIO))
+    crop_boxes = [
+        (0, 0, image.width, status_bar_bottom),
+        *_detail_crop_boxes(image.width, image.height),
+    ]
+
     crops: list[bytes] = []
-    for box in _detail_crop_boxes(image.width, image.height):
+    for box in crop_boxes:
         crop = image.crop(box)
         longest_side = max(crop.size)
         if longest_side < DETAIL_IMAGE_TARGET_LONG_SIDE:
@@ -237,9 +246,11 @@ async def analyze_receipt_with_openai(
 Ти не знаєш очікуваної суми чи дозволених карток. Нічого не порівнюй і не
 підставляй: повертай лише те, що справді видно на зображенні.
 
-Перше зображення — повна квитанція. Наступні зображення — збільшені фрагменти
-ЦІЄЇ Ж квитанції з перекриттям. Це не окремі платежі: використовуй фрагменти,
-щоб повторно звірити дрібний текст і цифри з повним зображенням.
+Перше зображення — повна квитанція. Друге зображення — спеціально збільшена
+верхня смуга цього самого зображення для читання системного часу телефона.
+Решта зображень — збільшені фрагменти ЦІЄЇ Ж квитанції з перекриттям. Це не
+окремі платежі: використовуй фрагменти, щоб повторно звірити дрібний текст і
+цифри з повним зображенням.
 
 Поточний час Europe/Kyiv: {now_kyiv.isoformat()}
 
@@ -335,6 +346,15 @@ async def analyze_receipt_with_openai(
   чітко видно час, використовуй час телефона, постав
   payment_time_source="phone_status_bar" і дослівно перепиши видимий час у
   payment_time_visible_text;
+- перед тим як ставити payment_time_source="not_visible", ОБОВ'ЯЗКОВО окремо
+  переглянь друге зображення. Якщо там видно час формату HH:MM поруч з ознаками
+  системної панелі телефона — індикаторами мережі, Wi-Fi, батареї чи іншими
+  системними значками — це валідний видимий час телефона. Наприклад, «21:27»
+  у верхньому лівому куті такого екрана треба повернути як
+  payment_time_visible_text="21:27" і payment_time_source="phone_status_bar";
+- не вважай часом телефона довільне HH:MM із верхньої частини паперової або
+  PDF-квитанції: для phone_status_bar разом із часом мають бути видимі ознаки
+  саме системної панелі телефона;
 - якщо використано лише час із панелі телефона без дати, підстав поточну дату
   Europe/Kyiv із цього запиту та часовий пояс +03:00 або актуальне зміщення
   Europe/Kyiv;

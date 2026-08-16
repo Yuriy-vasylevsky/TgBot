@@ -117,10 +117,11 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
 
         crops = _build_receipt_detail_crops(source.getvalue())
 
-        self.assertEqual(len(crops), 4)
+        self.assertEqual(len(crops), 5)
         with Image.open(io.BytesIO(crops[0])) as first_crop:
             self.assertEqual(first_crop.format, "JPEG")
             self.assertGreater(first_crop.width, 300)
+            self.assertGreater(first_crop.width, first_crop.height * 3)
 
     def test_valid_payment_receipt_is_approved(self):
         self.assertTrue(self.evaluate()[0])
