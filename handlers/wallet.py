@@ -50,6 +50,8 @@ from db import (
     update_daily_net,
     get_cards,
     create_manual_payment,
+    get_pending_manual_payment_for_user,
+    get_recent_manual_payment_remaining_minutes,
     get_manual_payment_daily_number,
     delete_pending_manual_payment,
     get_pending_manual_payment_for_retry,
@@ -366,6 +368,29 @@ async def choose_freeze_duration(callback: CallbackQuery, state: FSMContext):
 # ==================== ПОПОВНЕННЯ ====================
 @router.callback_query(F.data == "wallet_topup")
 async def start_topup(callback: CallbackQuery, state: FSMContext):
+    topup_mode = "auto" if is_auto_topup_time() else "manual"
+    recent_payment_minutes: int | None = None
+    if topup_mode == "manual":
+        active_payment = await get_pending_manual_payment_for_user(
+            callback.from_user.id
+        )
+        if active_payment:
+            display_number = (
+                active_payment.get("daily_number") or active_payment["id"]
+            )
+            await callback.answer(
+                f"⏳ Заявка №{display_number} вже очікує перевірки. "
+                "Нову оплату можна створити лише після рішення адміністратора.",
+                show_alert=True,
+            )
+            return
+        recent_payment_minutes = (
+            await get_recent_manual_payment_remaining_minutes(
+                callback.from_user.id,
+                MINUTES_BETWEEN_PAYMENT_REQUESTS,
+            )
+        )
+
     cancel_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -376,10 +401,18 @@ async def start_topup(callback: CallbackQuery, state: FSMContext):
         reply_markup=cancel_kb,
     )
     await state.update_data(
-        topup_mode="auto" if is_auto_topup_time() else "manual"
+        topup_mode=topup_mode
     )
     await state.set_state(WalletStates.enter_amount)
-    await callback.answer()
+    if recent_payment_minutes is not None:
+        await callback.answer(
+            f"⚠️ Ще не минуло {MINUTES_BETWEEN_PAYMENT_REQUESTS} хв після "
+            "попередньої оплати. Нова квитанція перевірятиметься "
+            f"адміністратором. Залишилось приблизно {recent_payment_minutes} хв.",
+            show_alert=True,
+        )
+    else:
+        await callback.answer()
 
 
 @router.callback_query(F.data == "wallet_cancel")
@@ -408,8 +441,30 @@ async def process_amount(message: Message, state: FSMContext):
 
     state_data = await state.get_data()
     if state_data.get("topup_mode") == "manual":
+        active_payment = await get_pending_manual_payment_for_user(
+            message.from_user.id
+        )
+        if active_payment:
+            display_number = (
+                active_payment.get("daily_number") or active_payment["id"]
+            )
+            await state.clear()
+            await message.answer(
+                f"⏳ Заявка №{display_number} вже очікує перевірки.\n\n"
+                "Нову оплату можна створити лише після того, як адміністратор "
+                "підтвердить або відхилить поточну заявку.",
+                reply_markup=main_menu(),
+            )
+            return
+
         receipt_autoapproval_banned = await is_receipt_autoapproval_banned(
             message.from_user.id
+        )
+        recent_payment_minutes = (
+            await get_recent_manual_payment_remaining_minutes(
+                message.from_user.id,
+                MINUTES_BETWEEN_PAYMENT_REQUESTS,
+            )
         )
         cards = await get_cards()
         cards_text = "\n\n".join(
@@ -444,6 +499,15 @@ async def process_amount(message: Message, state: FSMContext):
                 "Якщо здійснюєте переказ уночі, платіж буде зараховано "
                 "тільки після перевірки касиром."
             )
+        recent_payment_notice = ""
+        if recent_payment_minutes is not None:
+            recent_payment_notice = (
+                f"\n\n⚠️ <b>Ще не минуло "
+                f"{MINUTES_BETWEEN_PAYMENT_REQUESTS} хв після попередньої "
+                "оплати.</b> Якщо зробите переказ зараз, квитанцію перевірятиме "
+                f"адміністратор. Залишилось приблизно "
+                f"{recent_payment_minutes} хв."
+            )
         await message.answer(
             f"💰 <b>Поповнення на {amount_grn} грн</b>\n\n"
             f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
@@ -452,6 +516,7 @@ async def process_amount(message: Message, state: FSMContext):
             f"🧾 Після переказу надішліть <b>скриншот квитанції або екрана "
             f"успішної оплати як фото</b>. Файл не підходить.\n"
             f"Заявка буде передана адміністратору на перевірку."
+            f"{recent_payment_notice}"
             f"{restriction_notice}",
             parse_mode="HTML",
             reply_markup=receipt_keyboard,
@@ -509,12 +574,20 @@ def _manual_payment_keyboard(payment_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def _retry_receipt_keyboard(payment_id: int) -> InlineKeyboardMarkup:
+def _retry_receipt_keyboard(
+    payment_id: int,
+    *,
+    last_attempt: bool = False,
+) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🔄 Надіслати іншу квитанцію",
+                    text=(
+                        "⚠️ Надіслати останню квитанцію"
+                        if last_attempt
+                        else "🔄 Надіслати іншу квитанцію"
+                    ),
                     callback_data=f"wallet_retry_receipt:{payment_id}",
                 )
             ]
@@ -662,14 +735,15 @@ async def _route_payment_to_manual_review(
         amount,
         reason,
     )
-    retry_available = False
+    retry_payment: dict | None = None
     if offer_retry:
-        retry_available = bool(
-            await get_pending_manual_payment_for_retry(
-                payment_id, message.from_user.id
-            )
+        retry_payment = await get_pending_manual_payment_for_retry(
+            payment_id, message.from_user.id
         )
-    if retry_available:
+    if retry_payment:
+        retry_count = retry_payment["receipt_retry_count"]
+        last_attempt = retry_count == 1
+        remaining_attempts = 2 - retry_count
         await message.answer(
             f"⚠️ Автоматична перевірка не змогла підтвердити квитанцію.\n\n"
             f"❗ <b>Причина:</b> {escape(reason)}\n\n"
@@ -679,9 +753,19 @@ async def _route_payment_to_manual_review(
             f"• <b>суму переказу — {amount} грн</b>.\n\n"
             f"Можна надіслати квитанцію або екран успішної оплати.\n\n"
             f"Ви можете надіслати іншу квитанцію або нічого не робити й "
-            f"зачекати на підтвердження адміністратора.",
+            f"зачекати на підтвердження адміністратора.\n\n"
+            f"📎 Залишилося спроб завантаження: "
+            f"<b>{remaining_attempts}</b>."
+            + (
+                " Наступна спроба буде останньою."
+                if last_attempt
+                else ""
+            ),
             parse_mode="HTML",
-            reply_markup=_retry_receipt_keyboard(payment_id),
+            reply_markup=_retry_receipt_keyboard(
+                payment_id,
+                last_attempt=last_attempt,
+            ),
         )
     else:
         await message.answer(
@@ -752,6 +836,22 @@ async def _process_manual_receipt(
             receipt_file_id=receipt_file_id,
             receipt_type=receipt_type,
         )
+        if payment_id is None:
+            active_payment = await get_pending_manual_payment_for_user(
+                message.from_user.id
+            )
+            display_number = (
+                (active_payment or {}).get("daily_number")
+                or (active_payment or {}).get("id")
+                or "—"
+            )
+            await message.answer(
+                f"⏳ Заявка №{display_number} вже очікує перевірки.\n\n"
+                "Нову оплату можна створити тільки після рішення "
+                "адміністратора.",
+                reply_markup=main_menu(),
+            )
+            return
         logging.info(
             "Manual payment created | payment_id=%s user_id=%s amount=%s",
             payment_id,
@@ -768,7 +868,7 @@ async def _process_manual_receipt(
         )
         if not updated:
             await message.answer(
-                "ℹ️ Іншу квитанцію для цієї заявки вже було надіслано або "
+                "ℹ️ Усі три спроби надсилання квитанції вже використано або "
                 "заявку вже розглянув адміністратор.",
                 reply_markup=main_menu(),
             )
@@ -1140,15 +1240,31 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
         payment_id, callback.from_user.id
     )
     if not payment:
-        await state.clear()
-        await callback.answer(
-            "Цю заявку вже підтверджено або відхилено",
-            show_alert=True,
+        active_payment = await get_pending_manual_payment_for_user(
+            callback.from_user.id
         )
+        await state.clear()
+        if (
+            active_payment
+            and active_payment["id"] == payment_id
+            and active_payment["receipt_retry_count"] >= 2
+        ):
+            await callback.answer(
+                "⚠️ Усі три спроби вже використано. Заявка очікує рішення "
+                "адміністратора.",
+                show_alert=True,
+            )
+        else:
+            await callback.answer(
+                "Цю заявку вже підтверджено або відхилено",
+                show_alert=True,
+            )
         return
 
     amount = payment["amount"]
     display_number = payment.get("daily_number") or payment_id
+    retry_count = payment["receipt_retry_count"]
+    is_last_attempt = retry_count == 1
     await state.update_data(
         manual_amount=amount,
         retry_payment_id=payment_id,
@@ -1158,7 +1274,13 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
         f"📎 Надішліть інший скриншот квитанції або успішної оплати для заявки "
         f"№{display_number} саме як фото, не файлом.\n\n"
         f"На ній має бути чітко видно час, картку одержувача та "
-        f"суму <b>{amount} грн</b>.",
+        f"суму <b>{amount} грн</b>."
+        + (
+            "\n\n⚠️ <b>Це остання, третя спроба.</b> Надішліть максимально "
+            "якісну квитанцію."
+            if is_last_attempt
+            else ""
+        ),
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -1171,7 +1293,17 @@ async def retry_manual_receipt(callback: CallbackQuery, state: FSMContext):
             ]
         ),
     )
-    await callback.answer("Надішліть нову квитанцію")
+    if is_last_attempt:
+        await callback.answer(
+            "⚠️ Це остання, третя спроба. Надішліть максимально якісне фото: "
+            "мають бути чітко видні час, сума та картка.",
+            show_alert=True,
+        )
+    else:
+        await callback.answer(
+            "Надішліть якіснішу квитанцію. Після цього залишиться одна спроба.",
+            show_alert=True,
+        )
 
 
 @router.callback_query(
@@ -1196,6 +1328,22 @@ async def submit_manual_payment_without_receipt(
         receipt_file_id="",
         receipt_type="none",
     )
+    if payment_id is None:
+        active_payment = await get_pending_manual_payment_for_user(
+            callback.from_user.id
+        )
+        display_number = (
+            (active_payment or {}).get("daily_number")
+            or (active_payment or {}).get("id")
+            or "—"
+        )
+        await state.clear()
+        await callback.answer(
+            f"⏳ Заявка №{display_number} вже очікує перевірки. "
+            "Дочекайтеся рішення адміністратора.",
+            show_alert=True,
+        )
+        return
     await set_manual_payment_route(payment_id, "квитанцію не надано")
     display_number = await _payment_display_number(payment_id)
 

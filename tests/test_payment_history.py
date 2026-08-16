@@ -60,6 +60,14 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                     reviewed_at TEXT,
                     reviewed_by INTEGER,
                     review_source TEXT,
+                    route_reason TEXT,
+                    gpt_result_json TEXT,
+                    gpt_decision TEXT,
+                    gpt_reason TEXT,
+                    gpt_confidence REAL,
+                    analysis_started_at TEXT,
+                    analysis_completed_at TEXT,
+                    receipt_retry_count INTEGER NOT NULL DEFAULT 0,
                     payment_date TEXT,
                     daily_number INTEGER
                 );
@@ -235,6 +243,87 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
             )
             await db.commit()
         self.assertEqual(next_day_number, 1)
+
+    async def test_only_one_pending_manual_payment_is_created_per_user(self):
+        first_id = await wallet.create_manual_payment(
+            505, "player", "Player", 200, "first", "photo"
+        )
+        duplicate_id = await wallet.create_manual_payment(
+            505, "player", "Player", 300, "second", "photo"
+        )
+
+        self.assertIsInstance(first_id, int)
+        self.assertIsNone(duplicate_id)
+        active = await wallet.get_pending_manual_payment_for_user(505)
+        self.assertEqual(active["id"], first_id)
+        self.assertEqual(active["amount"], 200)
+
+        reviewed = await wallet.review_manual_payment(first_id, 999, "rejected")
+        self.assertTrue(reviewed["ok"])
+        next_id = await wallet.create_manual_payment(
+            505, "player", "Player", 300, "third", "photo"
+        )
+        self.assertIsInstance(next_id, int)
+        self.assertEqual(await wallet.get_manual_payment_daily_number(next_id), 2)
+
+    async def test_manual_receipt_allows_two_retries_for_three_total_attempts(self):
+        payment_id = await wallet.create_manual_payment(
+            606, "player", "Player", 200, "first", "photo"
+        )
+
+        first_retry = await wallet.get_pending_manual_payment_for_retry(
+            payment_id, 606
+        )
+        self.assertEqual(first_retry["receipt_retry_count"], 0)
+        self.assertTrue(
+            await wallet.update_pending_manual_payment_receipt(
+                payment_id, 606, "second", "photo"
+            )
+        )
+
+        last_retry = await wallet.get_pending_manual_payment_for_retry(
+            payment_id, 606
+        )
+        self.assertEqual(last_retry["receipt_retry_count"], 1)
+        self.assertTrue(
+            await wallet.update_pending_manual_payment_receipt(
+                payment_id, 606, "third", "photo"
+            )
+        )
+
+        self.assertIsNone(
+            await wallet.get_pending_manual_payment_for_retry(payment_id, 606)
+        )
+        self.assertFalse(
+            await wallet.update_pending_manual_payment_receipt(
+                payment_id, 606, "fourth", "photo"
+            )
+        )
+
+    async def test_recent_payment_returns_remaining_manual_review_window(self):
+        payment_id = await wallet.create_manual_payment(
+            707, "player", "Player", 200, "first", "photo"
+        )
+
+        remaining = await wallet.get_recent_manual_payment_remaining_minutes(
+            707, 12
+        )
+        self.assertIsNotNone(remaining)
+        self.assertGreaterEqual(remaining, 1)
+        self.assertLessEqual(remaining, 12)
+
+        old_created_at = (
+            wallet.datetime.now(wallet.KYIV_ZONE) - wallet.timedelta(minutes=13)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        async with aiosqlite.connect(wallet.DB_PATH) as db:
+            await db.execute(
+                "UPDATE manual_payments SET created_at = ? WHERE id = ?",
+                (old_created_at, payment_id),
+            )
+            await db.commit()
+        self.assertIsNone(
+            await wallet.get_recent_manual_payment_remaining_minutes(707, 12)
+        )
 
     async def test_legacy_rows_are_numbered_without_manual_log_duplicate(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.db"

@@ -543,12 +543,26 @@ async def create_manual_payment(
     amount: int,
     receipt_file_id: str,
     receipt_type: str,
-) -> int:
+) -> int | None:
+    """Створює заявку, лише якщо користувач не має іншої активної заявки."""
     created_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
     payment_date = created_at[:10]
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
+            cursor = await db.execute(
+                """
+                SELECT id
+                FROM manual_payments
+                WHERE user_id = ? AND status = 'pending'
+                LIMIT 1
+                """,
+                (user_id,),
+            )
+            if await cursor.fetchone():
+                await db.rollback()
+                return None
+
             daily_number = await _next_manual_payment_number(db, payment_date)
             cursor = await db.execute(
                 """
@@ -574,6 +588,68 @@ async def create_manual_payment(
         except Exception:
             await db.rollback()
             raise
+
+
+async def get_pending_manual_payment_for_user(user_id: int) -> dict | None:
+    """Повертає поточну заявку користувача, яка ще очікує рішення."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT id, amount, daily_number, created_at,
+                   COALESCE(receipt_retry_count, 0)
+            FROM manual_payments
+            WHERE user_id = ? AND status = 'pending'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return {
+            "id": row[0],
+            "amount": row[1],
+            "daily_number": row[2],
+            "created_at": row[3],
+            "receipt_retry_count": int(row[4] or 0),
+        }
+
+
+async def get_recent_manual_payment_remaining_minutes(
+    user_id: int,
+    window_minutes: int,
+) -> int | None:
+    """Повертає орієнтовний залишок 12-хвилинного вікна перевірки."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            """
+            SELECT created_at
+            FROM manual_payments
+            WHERE user_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+    if not row or not row[0]:
+        return None
+
+    try:
+        created_at = datetime.fromisoformat(str(row[0]))
+    except (TypeError, ValueError):
+        return None
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=KYIV_ZONE)
+
+    remaining_seconds = (
+        created_at + timedelta(minutes=window_minutes) - datetime.now(KYIV_ZONE)
+    ).total_seconds()
+    if remaining_seconds <= 0:
+        return None
+    remaining_minutes = max(1, int((remaining_seconds + 59) // 60))
+    return min(window_minutes, remaining_minutes)
 
 
 async def get_manual_payment_daily_number(payment_id: int) -> int:
@@ -604,17 +680,25 @@ async def get_pending_manual_payment_for_retry(
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT amount, daily_number
+            SELECT amount, daily_number, COALESCE(receipt_retry_count, 0)
             FROM manual_payments
             WHERE id = ?
               AND user_id = ?
               AND status = 'pending'
-              AND COALESCE(receipt_retry_count, 0) < 1
+              AND COALESCE(receipt_retry_count, 0) < 2
             """,
             (payment_id, user_id),
         )
         row = await cursor.fetchone()
-        return {"amount": row[0], "daily_number": row[1]} if row else None
+        return (
+            {
+                "amount": row[0],
+                "daily_number": row[1],
+                "receipt_retry_count": int(row[2] or 0),
+            }
+            if row
+            else None
+        )
 
 
 async def update_pending_manual_payment_receipt(
@@ -641,7 +725,7 @@ async def update_pending_manual_payment_receipt(
             WHERE id = ?
               AND user_id = ?
               AND status = 'pending'
-              AND COALESCE(receipt_retry_count, 0) < 1
+              AND COALESCE(receipt_retry_count, 0) < 2
             """,
             (receipt_file_id, receipt_type, payment_id, user_id),
         )

@@ -80,6 +80,8 @@ from .wallet import (
     freeze_balance,
     unfreeze_balance,
     create_manual_payment,
+    get_pending_manual_payment_for_user,
+    get_recent_manual_payment_remaining_minutes,
     get_manual_payment_daily_number,
     delete_pending_manual_payment,
     get_pending_manual_payment_for_retry,
