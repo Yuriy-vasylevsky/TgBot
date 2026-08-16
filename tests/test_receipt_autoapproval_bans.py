@@ -84,6 +84,35 @@ class ReceiptAutoapprovalBanTests(unittest.IsolatedAsyncioTestCase):
             first_line["analyze_receipt_with_openai"],
         )
 
+    def test_large_manual_payment_requires_confirmation_before_card_details(self):
+        wallet_path = Path(__file__).resolve().parents[1] / "handlers" / "wallet.py"
+        source = wallet_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        process_function = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef)
+            and node.name == "process_amount"
+        )
+        large_amount_checks = [
+            node
+            for node in ast.walk(process_function)
+            if isinstance(node, ast.Compare)
+            and isinstance(node.left, ast.Name)
+            and node.left.id == "amount_grn"
+            and any(isinstance(operator, ast.Gt) for operator in node.ops)
+            and any(
+                isinstance(comparator, ast.Name)
+                and comparator.id == "MAX_AMOUNT_FOR_GPT_CHECK"
+                for comparator in node.comparators
+            )
+        ]
+
+        self.assertEqual(len(large_amount_checks), 1)
+        self.assertIn('callback_data="wallet_large_topup_continue"', source)
+        self.assertIn('text="❌ Скасувати платіж"', source)
+        self.assertIn("async def continue_large_manual_topup", source)
+
 
 if __name__ == "__main__":
     unittest.main()

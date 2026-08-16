@@ -210,6 +210,7 @@ def is_auto_topup_time() -> bool:
 
 class WalletStates(StatesGroup):
     enter_amount = State()
+    confirm_large_manual_payment = State()
     upload_receipt = State()
 
 
@@ -422,6 +423,82 @@ async def cancel_topup(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
+async def _show_manual_payment_details(
+    message: Message,
+    state: FSMContext,
+    *,
+    user_id: int,
+    amount_grn: int,
+) -> None:
+    receipt_autoapproval_banned = await is_receipt_autoapproval_banned(user_id)
+    recent_payment_minutes = await get_recent_manual_payment_remaining_minutes(
+        user_id,
+        MINUTES_BETWEEN_PAYMENT_REQUESTS,
+    )
+    cards = await get_cards()
+    cards_text = "\n\n".join(
+        f"🏦 {escape(bank)}: <code>{escape(number)}</code>"
+        for bank, number in cards
+        if number
+    ) or "Реквізити тимчасово недоступні."
+
+    await state.update_data(manual_amount=amount_grn)
+    await state.set_state(WalletStates.upload_receipt)
+    receipt_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="⚠️ Не можу надіслати квитанцію",
+                    callback_data="wallet_no_receipt",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Скасувати",
+                    callback_data="wallet_cancel",
+                )
+            ],
+        ]
+    )
+    restriction_notice = ""
+    if receipt_autoapproval_banned:
+        restriction_notice = (
+            "\n\n⚠️ <b>Для вас діє тільки зарахування через касира.</b>\n"
+            "Автоматичне підтвердження квитанції недоступне. "
+            "Якщо здійснюєте переказ уночі, платіж буде зараховано "
+            "тільки після перевірки касиром."
+        )
+    recent_payment_notice = ""
+    if recent_payment_minutes is not None:
+        recent_payment_notice = (
+            f"\n\n⚠️ <b>Ще не минуло "
+            f"{MINUTES_BETWEEN_PAYMENT_REQUESTS} хв після попередньої "
+            "оплати.</b> Якщо зробите переказ зараз, квитанцію перевірятиме "
+            f"адміністратор. Залишилось приблизно "
+            f"{recent_payment_minutes} хв."
+        )
+    large_amount_notice = ""
+    if amount_grn > MAX_AMOUNT_FOR_GPT_CHECK:
+        large_amount_notice = (
+            f"\n\n⚠️ <b>Сума перевищує {MAX_AMOUNT_FOR_GPT_CHECK} грн.</b> "
+            "Цей платіж буде перевіряти та підтверджувати тільки адміністратор."
+        )
+    await message.answer(
+        f"💰 <b>Поповнення на {amount_grn} грн</b>\n\n"
+        f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
+        f"на одну з карток:\n\n"
+        f"{cards_text}\n\n"
+        f"🧾 Після переказу надішліть <b>скриншот квитанції або екрана "
+        f"успішної оплати як фото</b>. Файл не підходить.\n"
+        f"Заявка буде передана адміністратору на перевірку."
+        f"{large_amount_notice}"
+        f"{recent_payment_notice}"
+        f"{restriction_notice}",
+        parse_mode="HTML",
+        reply_markup=receipt_keyboard,
+    )
+
+
 
 @router.message(WalletStates.enter_amount)
 async def process_amount(message: Message, state: FSMContext):
@@ -457,69 +534,41 @@ async def process_amount(message: Message, state: FSMContext):
             )
             return
 
-        receipt_autoapproval_banned = await is_receipt_autoapproval_banned(
-            message.from_user.id
-        )
-        recent_payment_minutes = (
-            await get_recent_manual_payment_remaining_minutes(
-                message.from_user.id,
-                MINUTES_BETWEEN_PAYMENT_REQUESTS,
+        if amount_grn > MAX_AMOUNT_FOR_GPT_CHECK:
+            await state.update_data(manual_amount=amount_grn)
+            await state.set_state(WalletStates.confirm_large_manual_payment)
+            await message.answer(
+                f"⚠️ <b>Увага: сума {amount_grn} грн перевищує "
+                f"{MAX_AMOUNT_FOR_GPT_CHECK} грн.</b>\n\n"
+                "Автоматична перевірка для такого платежу недоступна. "
+                "Квитанцію перевірятиме та підтверджуватиме тільки "
+                "адміністратор.\n\n"
+                "Бажаєте продовжити оплату?",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[
+                        [
+                            InlineKeyboardButton(
+                                text="✅ Продовжити оплату",
+                                callback_data="wallet_large_topup_continue",
+                            )
+                        ],
+                        [
+                            InlineKeyboardButton(
+                                text="❌ Скасувати платіж",
+                                callback_data="wallet_cancel",
+                            )
+                        ],
+                    ]
+                ),
             )
-        )
-        cards = await get_cards()
-        cards_text = "\n\n".join(
-            f"🏦 {escape(bank)}: <code>{escape(number)}</code>"
-            for bank, number in cards
-            if number
-        ) or "Реквізити тимчасово недоступні."
+            return
 
-        await state.update_data(manual_amount=amount_grn)
-        await state.set_state(WalletStates.upload_receipt)
-        receipt_keyboard = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text="⚠️ Не можу надіслати квитанцію",
-                        callback_data="wallet_no_receipt",
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="❌ Скасувати",
-                        callback_data="wallet_cancel",
-                    )
-                ],
-            ]
-        )
-        restriction_notice = ""
-        if receipt_autoapproval_banned:
-            restriction_notice = (
-                "\n\n⚠️ <b>Для вас діє тільки зарахування через касира.</b>\n"
-                "Автоматичне підтвердження квитанції недоступне. "
-                "Якщо здійснюєте переказ уночі, платіж буде зараховано "
-                "тільки після перевірки касиром."
-            )
-        recent_payment_notice = ""
-        if recent_payment_minutes is not None:
-            recent_payment_notice = (
-                f"\n\n⚠️ <b>Ще не минуло "
-                f"{MINUTES_BETWEEN_PAYMENT_REQUESTS} хв після попередньої "
-                "оплати.</b> Якщо зробите переказ зараз, квитанцію перевірятиме "
-                f"адміністратор. Залишилось приблизно "
-                f"{recent_payment_minutes} хв."
-            )
-        await message.answer(
-            f"💰 <b>Поповнення на {amount_grn} грн</b>\n\n"
-            f"Зробіть переказ <b>точно на {amount_grn} грн</b> "
-            f"на одну з карток:\n\n"
-            f"{cards_text}\n\n"
-            f"🧾 Після переказу надішліть <b>скриншот квитанції або екрана "
-            f"успішної оплати як фото</b>. Файл не підходить.\n"
-            f"Заявка буде передана адміністратору на перевірку."
-            f"{recent_payment_notice}"
-            f"{restriction_notice}",
-            parse_mode="HTML",
-            reply_markup=receipt_keyboard,
+        await _show_manual_payment_details(
+            message,
+            state,
+            user_id=message.from_user.id,
+            amount_grn=amount_grn,
         )
         return
 
@@ -555,6 +604,50 @@ async def process_amount(message: Message, state: FSMContext):
 
     await message.answer(text, reply_markup=kb, parse_mode="HTML")
     await state.clear()
+
+
+@router.callback_query(
+    WalletStates.confirm_large_manual_payment,
+    F.data == "wallet_large_topup_continue",
+)
+async def continue_large_manual_topup(
+    callback: CallbackQuery,
+    state: FSMContext,
+):
+    data = await state.get_data()
+    amount_grn = data.get("manual_amount")
+    if not isinstance(amount_grn, int) or amount_grn <= MAX_AMOUNT_FOR_GPT_CHECK:
+        await state.clear()
+        await callback.answer(
+            "Заявка застаріла. Почніть поповнення ще раз.",
+            show_alert=True,
+        )
+        return
+
+    active_payment = await get_pending_manual_payment_for_user(
+        callback.from_user.id
+    )
+    if active_payment:
+        display_number = active_payment.get("daily_number") or active_payment["id"]
+        await state.clear()
+        await callback.answer(
+            f"⏳ Заявка №{display_number} вже очікує перевірки. "
+            "Спочатку дочекайтеся рішення адміністратора.",
+            show_alert=True,
+        )
+        return
+
+    await _show_manual_payment_details(
+        callback.message,
+        state,
+        user_id=callback.from_user.id,
+        amount_grn=amount_grn,
+    )
+    await callback.answer(
+        f"⚠️ Платіж понад {MAX_AMOUNT_FOR_GPT_CHECK} грн підтверджуватиме "
+        "тільки адміністратор.",
+        show_alert=True,
+    )
 
 
 def _manual_payment_keyboard(payment_id: int) -> InlineKeyboardMarkup:
