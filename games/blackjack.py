@@ -1,5 +1,7 @@
 import asyncio
 import random
+import weakref
+
 from aiogram import F, types, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -13,14 +15,11 @@ from aiogram.types import (
 from db import (
     has_claimed_gift,
     add_blackjack_session,
-    save_notification,
     add_game_win,
 )
 from db.wallet import add_to_balance, add_daily_game_win, get_available_game_win
 from handlers.menu import main_menu
 from handlers.config import ADMIN_ID
-import aiosqlite
-from db import DB_PATH
 
 router = Router()
 
@@ -28,6 +27,32 @@ router = Router()
 class BlackjackFSM(StatesGroup):
     choosing_bet = State()
     in_round = State()
+    resolving = State()
+
+
+# Aiogram's in-memory FSM storage does not serialize updates for one user.  Keep
+# a per-player lock as well as an explicit intermediate state so that two
+# updates received in the same event-loop tick cannot both settle one round.
+_player_locks: weakref.WeakValueDictionary[
+    tuple[int, int], asyncio.Lock
+] = weakref.WeakValueDictionary()
+
+
+def _player_lock(message: types.Message) -> asyncio.Lock:
+    key = (message.chat.id, message.from_user.id)
+    lock = _player_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _player_locks[key] = lock
+    return lock
+
+
+def _blackjack_states() -> set[str]:
+    return {
+        BlackjackFSM.choosing_bet.state,
+        BlackjackFSM.in_round.state,
+        BlackjackFSM.resolving.state,
+    }
 
 
 SUITS = ["♠️", "♥️", "♦️", "♣️"]
@@ -73,86 +98,128 @@ def in_game_keyboard():
 
 @router.message(F.text == "🃏 Blackjack")
 async def cmd_blackjack(message: types.Message, state: FSMContext):
-    deck = create_deck(num_decks=2)
-    await state.clear()
-    await state.update_data(balance=10, deck=deck)
-    await message.answer(
-        f"🃏 <b>Blackjack (21)</b>\n\n"
-        f"Стартовий баланс: <b>10 купонів</b>\n\n"
-        f"Оберіть ставку:",
-        parse_mode="HTML",
-        reply_markup=bet_keyboard(10),
-    )
-    await state.set_state(BlackjackFSM.choosing_bet)
+    lock = _player_lock(message)
+    if lock.locked():
+        return
+
+    async with lock:
+        if await state.get_state() in _blackjack_states():
+            await message.answer("⚠️ Поточна гра в Blackjack ще не завершена.")
+            return
+
+        deck = create_deck(num_decks=2)
+        await state.clear()
+        await state.update_data(balance=10, deck=deck)
+        await state.set_state(BlackjackFSM.choosing_bet)
+        await message.answer(
+            f"🃏 <b>Blackjack (21)</b>\n\n"
+            f"Стартовий баланс: <b>10 купонів</b>\n\n"
+            f"Оберіть ставку:",
+            parse_mode="HTML",
+            reply_markup=bet_keyboard(10),
+        )
 
 
 @router.message(BlackjackFSM.choosing_bet)
 async def handle_bet_choice(message: types.Message, state: FSMContext):
-    text = message.text.strip()
+    text = (message.text or "").strip()
     if text not in ("💵 5 купонів", "💰 10 купонів"):
         return
 
-    bet = 5 if "5" in text else 10
-    data = await state.get_data()
-    balance = data.get("balance", 10)
-    deck = data.get("deck")
+    lock = _player_lock(message)
+    if lock.locked():
+        return
 
-    if bet > balance:
-        return await message.answer("⚠️ Недостатньо купонів.")
+    async with lock:
+        if await state.get_state() != BlackjackFSM.choosing_bet.state:
+            return
 
-    user_cards = [deck.pop(), deck.pop()]
-    dealer_cards = [deck.pop(), deck.pop()]
+        # Claim the bet before the first yielding operation below. This also
+        # prevents another Telegram update from being routed as a bet choice.
+        await state.set_state(BlackjackFSM.resolving)
 
-    await state.update_data(
-        deck=deck,
-        user_cards=user_cards,
-        dealer_cards=dealer_cards,
-        bet=bet,
-        balance=balance,
-    )
+        bet = 5 if "5" in text else 10
+        data = await state.get_data()
+        balance = data.get("balance", 10)
+        deck = data.get("deck") or create_deck(num_decks=2)
 
-    user_total = calc_total(user_cards)
+        if bet > balance:
+            await state.set_state(BlackjackFSM.choosing_bet)
+            await message.answer("⚠️ Недостатньо купонів.")
+            return
 
-    if user_total == 21:
-        await message.answer("🖤 Blackjack!")
-        return await finish_round(message, state, busted=False)
+        user_cards = [deck.pop(), deck.pop()]
+        dealer_cards = [deck.pop(), deck.pop()]
 
-    await message.answer(
-        f"💵 Ставка: <b>{bet} купонів</b>\n\n"
-        f"🧑‍🎓 Твої карти: {show_cards(user_cards)} = <b>{user_total}</b>\n"
-        f"🤵‍♂️ Карта дилера: {dealer_cards[0]} ❓",
-        parse_mode="HTML",
-        reply_markup=in_game_keyboard(),
-    )
-    await state.set_state(BlackjackFSM.in_round)
+        await state.update_data(
+            deck=deck,
+            user_cards=user_cards,
+            dealer_cards=dealer_cards,
+            bet=bet,
+            balance=balance,
+        )
+
+        user_total = calc_total(user_cards)
+
+        if user_total == 21:
+            await message.answer("🖤 Blackjack!")
+            await finish_round(message, state, busted=False)
+            return
+
+        await state.set_state(BlackjackFSM.in_round)
+        await message.answer(
+            f"💵 Ставка: <b>{bet} купонів</b>\n\n"
+            f"🧑‍🎓 Твої карти: {show_cards(user_cards)} = <b>{user_total}</b>\n"
+            f"🤵‍♂️ Карта дилера: {dealer_cards[0]} ❓",
+            parse_mode="HTML",
+            reply_markup=in_game_keyboard(),
+        )
 
 
 @router.message(BlackjackFSM.in_round)
 async def in_round_handler(message: types.Message, state: FSMContext):
-    text = message.text.strip()
-    data = await state.get_data()
-    deck = data["deck"]
-    user_cards = data["user_cards"]
-
-    if text == "➕ Взяти ще":
-        if not deck:
-            deck = create_deck(num_decks=2)
-        card = deck.pop()
-        user_cards.append(card)
-        await state.update_data(deck=deck, user_cards=user_cards)
-
-        user_total = calc_total(user_cards)
-        await message.answer(
-            f"🃏 Ти взяв: {card}\n"
-            f"Твої карти: {show_cards(user_cards)} = <b>{user_total}</b>",
-            parse_mode="HTML",
-        )
-
-        if user_total > 21:
-            await finish_round(message, state, busted=True)
+    text = (message.text or "").strip()
+    if text not in ("➕ Взяти ще", "🛑 Досить"):
         return
 
-    if text == "🛑 Досить":
+    lock = _player_lock(message)
+    if lock.locked():
+        return
+
+    async with lock:
+        if await state.get_state() != BlackjackFSM.in_round.state:
+            return
+
+        # Switch state before reading or changing cards. Repeated button presses
+        # are ignored while this action (including the dealer animation) runs.
+        await state.set_state(BlackjackFSM.resolving)
+
+        if text == "➕ Взяти ще":
+            data = await state.get_data()
+            deck = data["deck"]
+            user_cards = data["user_cards"]
+
+            if not deck:
+                deck = create_deck(num_decks=2)
+            card = deck.pop()
+            user_cards.append(card)
+            await state.update_data(deck=deck, user_cards=user_cards)
+
+            user_total = calc_total(user_cards)
+            if user_total <= 21:
+                # Restore the playable state before sending the informational
+                # message. The lock still suppresses presses until it is sent.
+                await state.set_state(BlackjackFSM.in_round)
+            await message.answer(
+                f"🃏 Ти взяв: {card}\n"
+                f"Твої карти: {show_cards(user_cards)} = <b>{user_total}</b>",
+                parse_mode="HTML",
+            )
+
+            if user_total > 21:
+                await finish_round(message, state, busted=True)
+            return
+
         await finish_round(message, state, busted=False)
 
 

@@ -13,6 +13,7 @@ from group_games.promo_eligibility import reject_without_deposit
 import aiosqlite
 
 router = Router(name="group_football")
+FOOTBALL_GOALS_TO_WIN = 3
 
 # Працюємо тільки в групах
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
@@ -161,7 +162,7 @@ async def handle_football_dice(message: Message):
     game[user_id] += 1
     goals = game[user_id]
 
-    if goals >= 5:
+    if goals >= FOOTBALL_GOALS_TO_WIN:
         # Перевірка кулдауну
         if await is_promo_on_cooldown(user_id):
             remaining = await get_promo_cooldown_remaining(user_id)
@@ -204,13 +205,13 @@ async def handle_football_dice(message: Message):
         if sent_to_private:
             win_text = (
                 f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
-                f"{user.mention_html()} забив <b>5 голів</b>!\n\n"
-                f"⚽ ⚽ ⚽ ⚽ ⚽"
+                f"{user.mention_html()} забив <b>{FOOTBALL_GOALS_TO_WIN} голи</b>!\n\n"
+                f"⚽ ⚽ ⚽"
             )
         else:
             win_text = (
                 f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
-                f"{user.mention_html()} забив <b>5 голів</b>!\n\n"
+                f"{user.mention_html()} забив <b>{FOOTBALL_GOALS_TO_WIN} голи</b>!\n\n"
                 f"Вам потрібно активувати бота\n\n"
      
             )
@@ -244,7 +245,7 @@ async def handle_football_dice(message: Message):
 
     # Прогрес
     progress_msg = await message.answer(
-        f"⚽ {user.mention_html()} — <b>{goals}/5 голів</b>",
+        f"⚽ {user.mention_html()} — <b>{goals}/{FOOTBALL_GOALS_TO_WIN} голів</b>",
         parse_mode="HTML"
     )
     football_messages[chat_id].append(progress_msg.message_id)
