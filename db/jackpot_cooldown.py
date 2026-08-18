@@ -13,12 +13,24 @@ def _now_kyiv() -> datetime:
     return datetime.now(KYIV_TZ)
 
 
+async def _ensure_table(db) -> None:
+    await db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS jackpot_cooldowns (
+            user_id INTEGER PRIMARY KEY,
+            cooldown_until TEXT NOT NULL
+        )
+        """
+    )
+
+
 async def is_jackpot_on_cooldown(user_id: int) -> bool:
     return await get_jackpot_cooldown_remaining(user_id) is not None
 
 
 async def get_jackpot_cooldown_remaining(user_id: int) -> tuple[int, int] | None:
     async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_table(db)
         async with db.execute(
             "SELECT cooldown_until FROM jackpot_cooldowns WHERE user_id = ?",
             (user_id,),
@@ -50,6 +62,7 @@ async def set_jackpot_cooldown(
         timespec="seconds"
     )
     async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_table(db)
         await db.execute(
             """
             INSERT INTO jackpot_cooldowns(user_id, cooldown_until)
