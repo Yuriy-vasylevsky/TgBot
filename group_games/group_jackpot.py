@@ -301,9 +301,13 @@ from db.game_cooldown import (
     is_game_on_cooldown,
     get_game_cooldown_remaining,
     set_game_cooldown_for_win,
-    GAME_COOLDOWN_HOURS,
-    GAME_COOLDOWN_MIN_WIN,
     format_cooldown as format_game_cooldown,
+)
+from db.jackpot_cooldown import (
+    JACKPOT_COOLDOWN_HOURS,
+    get_jackpot_cooldown_remaining,
+    is_jackpot_on_cooldown,
+    set_jackpot_cooldown,
 )
 from db.wallet import (
     add_to_balance,
@@ -322,7 +326,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 REQUIRED_PRESSES = 3      # для звичайного /jackpot
 MIN_MAX_AMOUNT = 100
 MAX_MAX_AMOUNT = 100
-COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
+COOLDOWN_HOURS = JACKPOT_COOLDOWN_HOURS
 # ==========================
 
 active_jackpots = {}
@@ -534,6 +538,20 @@ async def jackpot_press(callback: CallbackQuery):
         )
         return
 
+    # Окремий постійний кулдаун Jackpot після будь-якої перемоги.
+    if await is_jackpot_on_cooldown(user_id):
+        jackpot_remaining = await get_jackpot_cooldown_remaining(user_id)
+        jackpot_cd_text = (
+            format_game_cooldown(*jackpot_remaining)
+            if jackpot_remaining
+            else "невідомо"
+        )
+        await callback.answer(
+            f"⏳ Ти вже вигравав у Jackpot! Зачекай ще {jackpot_cd_text}",
+            show_alert=True,
+        )
+        return
+
     # --- Загальний ігровий кулдаун (спільний для всіх ігор) ---
     if await is_game_on_cooldown(user_id):
         remaining_parts = await get_game_cooldown_remaining(user_id)
@@ -696,6 +714,8 @@ async def jackpot_take(callback: CallbackQuery):
         task = game.get("task")
 
     await callback.answer("Виграш зафіксовано!")
+    winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
+    await set_jackpot_cooldown(user_id, hours=COOLDOWN_HOURS)
 
     try:
         if task and not task.done():
@@ -721,12 +741,10 @@ async def jackpot_take(callback: CallbackQuery):
             chat_id, callback.bot, user_id, name, amount
         )
 
-        if payout_amount >= GAME_COOLDOWN_MIN_WIN:
-            winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
-            await callback.message.answer(
-                f"🔒 Наступний ПУСК для {user.mention_html()} буде доступний через {COOLDOWN_HOURS} годин.",
-                parse_mode="HTML"
-            )
+        await callback.message.answer(
+            f"🔒 Наступний ПУСК для {user.mention_html()} буде доступний через {COOLDOWN_HOURS} годин.",
+            parse_mode="HTML"
+        )
 
         logging.info(
             f"💰 JACKPOT {amount} грн забрав {user.id} в чаті {chat_id} "

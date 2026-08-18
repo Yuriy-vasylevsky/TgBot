@@ -254,6 +254,7 @@ async def init_db():
                 "piggy_bank_state (id INTEGER PRIMARY KEY CHECK (id = 1), balance INTEGER NOT NULL DEFAULT 0 CHECK (balance >= 0), limit_amount INTEGER NOT NULL DEFAULT 60 CHECK (limit_amount > 0), player_prize INTEGER NOT NULL DEFAULT 50 CHECK (player_prize >= 0), admin_prize INTEGER NOT NULL DEFAULT 10 CHECK (admin_prize >= 0), round_number INTEGER NOT NULL DEFAULT 1 CHECK (round_number > 0))",
                 "piggy_bank_events (id INTEGER PRIMARY KEY AUTOINCREMENT, round_number INTEGER NOT NULL, user_id INTEGER NOT NULL, amount INTEGER NOT NULL, pot_before INTEGER NOT NULL, pot_after INTEGER NOT NULL, triggered INTEGER NOT NULL DEFAULT 0, player_prize INTEGER NOT NULL DEFAULT 0, admin_prize INTEGER NOT NULL DEFAULT 0, created_at DATETIME DEFAULT (DATETIME('now', '+3 hours')))",
                 "piggy_bank_cooldowns (user_id INTEGER PRIMARY KEY, last_contribution_at REAL NOT NULL)",
+                "jackpot_cooldowns (user_id INTEGER PRIMARY KEY, cooldown_until TEXT NOT NULL)",
             ]
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
