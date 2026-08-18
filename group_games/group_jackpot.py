@@ -293,6 +293,7 @@ import asyncio
 import logging
 import random
 import time
+import weakref
 
 from handlers.config import ADMIN_ID
 from db import add_money_win, add_daily_game_win
@@ -326,6 +327,17 @@ COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 
 active_jackpots = {}
 winners_cooldown = {}
+_jackpot_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _jackpot_lock(chat_id: int) -> asyncio.Lock:
+    lock = _jackpot_locks.get(chat_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _jackpot_locks[chat_id] = lock
+    return lock
 
 
 # =====================================
@@ -445,33 +457,35 @@ def get_starters_text(starters: list) -> str:
 # ==========================
 async def create_jackpot(message: Message, required_presses: int, max_amount: int, title: str = "JACKPOT"):
     chat_id = message.chat.id
-    if chat_id in active_jackpots:
-        await message.answer("❌ В цьому чаті вже запущена гра Jackpot!")
-        return
+    async with _jackpot_lock(chat_id):
+        if chat_id in active_jackpots:
+            await message.answer("❌ В цьому чаті вже запущена гра Jackpot!")
+            return
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"🚀 ПУСК (0/{required_presses})", callback_data="jackpot_press")]
-    ])
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"🚀 ПУСК (0/{required_presses})", callback_data="jackpot_press")]
+        ])
 
-    msg = await message.answer(
-        f"<b>💸💸💸 Лови {title} 💸💸💸</b>\n\n"
-        f"💰 Максимальний можливий виграш: до <b>{max_amount} грн 🤑</b>\n\n"
-        f"Участь беруть <b>{required_presses} перших гравців</b>, що натиснуть ПУСК!\n"
-        f"💸 Приз росте кожну секунду",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
+        msg = await message.answer(
+            f"<b>💸💸💸 Лови {title} 💸💸💸</b>\n\n"
+            f"💰 Максимальний можливий виграш: до <b>{max_amount} грн 🤑</b>\n\n"
+            f"Участь беруть <b>{required_presses} перших гравців</b>, що натиснуть ПУСК!\n"
+            f"💸 Приз росте кожну секунду",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
 
-    active_jackpots[chat_id] = {
-        "message": msg,
-        "max_amount": max_amount,
-        "starters": [],
-        "starter_ids": set(),
-        "amount": 1,
-        "task": None,
-        "active": False,
-        "required_presses": required_presses   # зберігаємо для цієї гри
-    }
+        active_jackpots[chat_id] = {
+            "message": msg,
+            "max_amount": max_amount,
+            "starters": [],
+            "starter_ids": set(),
+            "amount": 1,
+            "task": None,
+            "active": False,
+            "status": "waiting",
+            "required_presses": required_presses,
+        }
 
 
 # ==========================
@@ -530,56 +544,59 @@ async def jackpot_press(callback: CallbackQuery):
         )
         return
 
-    if chat_id not in active_jackpots or active_jackpots[chat_id]["active"]:
-        await callback.answer("Гра вже запущена!", show_alert=True)
-        return
+    async with _jackpot_lock(chat_id):
+        game = active_jackpots.get(chat_id)
+        if game is None or game.get("status") != "waiting":
+            await callback.answer("Гра вже запущена!", show_alert=True)
+            return
+        if callback.message.message_id != game["message"].message_id:
+            await callback.answer("Ця кнопка вже застаріла.", show_alert=True)
+            return
 
-    game = active_jackpots[chat_id]
+        if user_id in game["starter_ids"]:
+            await callback.answer("Ти вже натиснув ПУСК!", show_alert=True)
+            return
 
-    if user_id in game["starter_ids"]:
-        await callback.answer("Ти вже натиснув ПУСК!", show_alert=True)
-        return
+        display_name = get_display_name(user)
+        game["starters"].append(display_name)
+        game["starter_ids"].add(user_id)
 
-    display_name = get_display_name(user)
-    game["starters"].append(display_name)
-    game["starter_ids"].add(user_id)
+        pressed = len(game["starters"])
+        required = game["required_presses"]
 
-    pressed = len(game["starters"])
-    required = game["required_presses"]
+        if pressed < required:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{required})", callback_data="jackpot_press")]
+            ])
+            await game["message"].edit_text(
+                f"🎰 <b>Лови JACKPOT!</b>\n\n"
+                f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
+                f"{get_starters_text(game['starters'])}\n\n"
+                f"<b>{pressed}/{required}</b>",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+            await callback.answer("ПУСК зараховано!")
+            return
 
-    if pressed < required:
+        game["active"] = True
+        game["status"] = "running"
+        game["amount"] = 5
+
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"🚀 ПУСК ({pressed}/{required})", callback_data="jackpot_press")]
+            [InlineKeyboardButton(text="💰 ЗАБРАТИ 5 ГРН", callback_data="jackpot_take")]
         ])
-
-        await callback.message.answer(
+        await game["message"].edit_text(
             f"🎰 <b>Лови JACKPOT!</b>\n\n"
             f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
             f"{get_starters_text(game['starters'])}\n\n"
-            f"<b>{pressed}/{required}</b>",
+            f"🔥 <b>ЛІЧИЛЬНИК ПРАЦЮЄ!</b>\n"
+            f"Натискай кнопку, щоб забрати поточний виграш!",
             reply_markup=keyboard,
             parse_mode="HTML"
         )
-        return
-
-    # === ЗАПУСК ГРИ ===
-    game["active"] = True
-
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💰 ЗАБРАТИ 1 ГРН", callback_data="jackpot_take")]
-    ])
-
-    await callback.message.answer(
-        f"🎰 <b>Лови JACKPOT!</b>\n\n"
-        f"Максимальний можливий виграш: до <b>{game['max_amount']} грн</b>\n\n"
-        f"{get_starters_text(game['starters'])}\n\n"
-        f"🔥 <b>ЛІЧИЛЬНИК ПРАЦЮЄ!</b>\n"
-        f"Натискай кнопку, щоб забрати поточний виграш!",
-        reply_markup=keyboard,
-        parse_mode="HTML"
-    )
-
-    game["task"] = asyncio.create_task(jackpot_counter(chat_id))
+        game["task"] = asyncio.create_task(jackpot_counter(chat_id))
+        await callback.answer("Jackpot запущено!")
 
 
 # ==========================
@@ -620,20 +637,29 @@ async def jackpot_counter(chat_id: int):
                 if "not modified" not in str(e).lower():
                     logging.warning(f"Jackpot edit warning: {e}")
 
-        if chat_id in active_jackpots and game.get("active"):
-            await msg.edit_text(
-                "⏰ Час вийшов!\n\n"
-                f"Максимум {max_amount} грн ніхто не забрав 😔",
-                reply_markup=None
-            )
-            del active_jackpots[chat_id]
+        async with _jackpot_lock(chat_id):
+            if (
+                active_jackpots.get(chat_id) is not game
+                or game.get("status") != "running"
+            ):
+                return
+            game["active"] = False
+            game["status"] = "finished"
+            active_jackpots.pop(chat_id, None)
+
+        await msg.edit_text(
+            "⏰ Час вийшов!\n\n"
+            f"Максимум {max_amount} грн ніхто не забрав 😔",
+            reply_markup=None
+        )
 
     except asyncio.CancelledError:
         logging.info(f"✅ Jackpot лічильник скасовано в чаті {chat_id}")
         raise
     except Exception as e:
         logging.error(f"❌ Помилка в jackpot_counter {chat_id}: {e}")
-        active_jackpots.pop(chat_id, None)
+        if active_jackpots.get(chat_id) is game:
+            active_jackpots.pop(chat_id, None)
 
 
 # ==========================
@@ -645,49 +671,69 @@ async def jackpot_take(callback: CallbackQuery):
     user = callback.from_user
     user_id = user.id
 
-    if chat_id not in active_jackpots:
-        await callback.answer("Гра вже закінчена!", show_alert=True)
-        return
+    async with _jackpot_lock(chat_id):
+        game = active_jackpots.get(chat_id)
+        if game is None or game.get("status") != "running":
+            await callback.answer("Гра вже закінчена!", show_alert=True)
+            return
+        if callback.message.message_id != game["message"].message_id:
+            await callback.answer("Ця кнопка вже застаріла.", show_alert=True)
+            return
 
-    game = active_jackpots[chat_id]
+        if user_id not in game.get("starter_ids", set()):
+            await callback.answer(
+                "❌ Ти не натискав ПУСК на початку гри!\n"
+                "Тільки учасники запуску можуть забирати приз.",
+                show_alert=True
+            )
+            return
 
-    if user_id not in game.get("starter_ids", set()):
-        await callback.answer(
-            "❌ Ти не натискав ПУСК на початку гри!\n"
-            "Тільки учасники запуску можуть забирати приз.",
-            show_alert=True
-        )
-        return
+        # Перше натискання атомарно резервує виграш. Усі наступні callback-и
+        # побачать settling і не зможуть повторно нарахувати гроші.
+        game["active"] = False
+        game["status"] = "settling"
+        amount = game.get("amount", 5)
+        task = game.get("task")
 
-    amount = game.get("amount", 1)
+    await callback.answer("Виграш зафіксовано!")
 
-    if game.get("task"):
-        task = game["task"]
-        if not task.done():
+    try:
+        if task and not task.done():
             task.cancel()
-            try: await task
-            except asyncio.CancelledError: pass
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
-    game["active"] = False
-    name = get_display_name(user)
+        name = get_display_name(user)
 
-    await callback.message.answer(
-        f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
-        f"{user.mention_html()} забрав <b>{amount} грн</b>!",
-        parse_mode="HTML",
-        reply_markup=None
-    )
+        try:
+            await game["message"].edit_text(
+                f"🎉 <b>ПЕРЕМОЖЕЦЬ!</b> 🏆\n\n"
+                f"{user.mention_html()} забрав <b>{amount} грн</b>!",
+                parse_mode="HTML",
+                reply_markup=None
+            )
+        except Exception as e:
+            logging.warning(f"Не вдалося оновити повідомлення Jackpot: {e}")
 
-    # Нарахування призу з перевіркою депозиту та ліміту виграшів
-    payout_amount = await _payout_winner(chat_id, callback.bot, user_id, name, amount)
-
-    # Кулдаун на 12 годин ставимо ТІЛЬКИ якщо гроші реально нарахувались
-    if payout_amount >= GAME_COOLDOWN_MIN_WIN:
-        winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
-        await callback.message.answer(
-            f"🔒 Наступний ПУСК для {user.mention_html()} буде доступний через {COOLDOWN_HOURS} годин.",
-            parse_mode="HTML"
+        payout_amount = await _payout_winner(
+            chat_id, callback.bot, user_id, name, amount
         )
 
-    logging.info(f"💰 JACKPOT {amount} грн забрав {user.id} в чаті {chat_id} (нараховано {payout_amount})")
-    active_jackpots.pop(chat_id, None)
+        if payout_amount >= GAME_COOLDOWN_MIN_WIN:
+            winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
+            await callback.message.answer(
+                f"🔒 Наступний ПУСК для {user.mention_html()} буде доступний через {COOLDOWN_HOURS} годин.",
+                parse_mode="HTML"
+            )
+
+        logging.info(
+            f"💰 JACKPOT {amount} грн забрав {user.id} в чаті {chat_id} "
+            f"(нараховано {payout_amount})"
+        )
+    finally:
+        async with _jackpot_lock(chat_id):
+            if active_jackpots.get(chat_id) is game:
+                game["status"] = "finished"
+                active_jackpots.pop(chat_id, None)
