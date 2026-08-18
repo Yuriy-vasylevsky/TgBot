@@ -58,7 +58,14 @@ class JackpotConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             "required_presses": 3,
         }
 
-        with patch.object(jackpot, "is_game_on_cooldown", AsyncMock(return_value=False)):
+        with (
+            patch.object(
+                jackpot, "is_game_on_cooldown", AsyncMock(return_value=False)
+            ),
+            patch.object(
+                jackpot, "is_jackpot_on_cooldown", AsyncMock(return_value=False)
+            ),
+        ):
             await jackpot.jackpot_press(make_callback(game_message, 101, chat_id))
             await jackpot.jackpot_press(make_callback(game_message, 202, chat_id))
 
@@ -100,7 +107,12 @@ class JackpotConcurrencyTests(unittest.IsolatedAsyncioTestCase):
             return 40
 
         payout = AsyncMock(side_effect=slow_payout)
-        with patch.object(jackpot, "_payout_winner", payout):
+        with (
+            patch.object(jackpot, "_payout_winner", payout),
+            patch.object(
+                jackpot, "set_jackpot_cooldown", new_callable=AsyncMock
+            ) as set_jackpot_cooldown,
+        ):
             first = asyncio.create_task(jackpot.jackpot_take(first_callback))
             await payout_started.wait()
             second = asyncio.create_task(jackpot.jackpot_take(second_callback))
@@ -110,7 +122,8 @@ class JackpotConcurrencyTests(unittest.IsolatedAsyncioTestCase):
 
         payout.assert_awaited_once()
         self.assertEqual(payout.await_args.args[2], 101)
-        game_message.answer.assert_not_awaited()
+        set_jackpot_cooldown.assert_awaited_once_with(101, hours=12)
+        self.assertEqual(game_message.answer.await_count, 1)
         game_message.edit_text.assert_awaited_once()
         self.assertNotIn(chat_id, jackpot.active_jackpots)
 
