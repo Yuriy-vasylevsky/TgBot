@@ -299,7 +299,9 @@ from db import add_money_win, add_daily_game_win
 from db.game_cooldown import (
     is_game_on_cooldown,
     get_game_cooldown_remaining,
-    set_game_cooldown,
+    set_game_cooldown_for_win,
+    GAME_COOLDOWN_HOURS,
+    GAME_COOLDOWN_MIN_WIN,
     format_cooldown as format_game_cooldown,
 )
 from db.wallet import (
@@ -319,7 +321,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 REQUIRED_PRESSES = 3      # для звичайного /jackpot
 MIN_MAX_AMOUNT = 100
 MAX_MAX_AMOUNT = 100
-COOLDOWN_HOURS = 12
+COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 # ==========================
 
 active_jackpots = {}
@@ -385,8 +387,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     if payout_amount > 0:
         await add_to_balance(user_id, payout_amount)
         await add_daily_game_win(user_id, payout_amount)
-        # Кулдаун гри ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
-        await set_game_cooldown(user_id)
+        await set_game_cooldown_for_win(user_id, payout_amount)
 
         from db.winlog import log_win
         await log_win(user_id, None, name, "group", "Jackpot", payout_amount)
@@ -681,7 +682,7 @@ async def jackpot_take(callback: CallbackQuery):
     payout_amount = await _payout_winner(chat_id, callback.bot, user_id, name, amount)
 
     # Кулдаун на 12 годин ставимо ТІЛЬКИ якщо гроші реально нарахувались
-    if payout_amount > 0:
+    if payout_amount >= GAME_COOLDOWN_MIN_WIN:
         winners_cooldown[user_id] = time.time() + COOLDOWN_HOURS * 3600
         await callback.message.answer(
             f"🔒 Наступний ПУСК для {user.mention_html()} буде доступний через {COOLDOWN_HOURS} годин.",

@@ -12,7 +12,9 @@ from db import add_money_win, add_daily_game_win
 from db.game_cooldown import (
     is_game_on_cooldown,
     get_game_cooldown_remaining,
-    set_game_cooldown,
+    set_game_cooldown_for_win,
+    GAME_COOLDOWN_HOURS,
+    GAME_COOLDOWN_MIN_WIN,
     format_cooldown as format_game_cooldown,
 )
 from db.wallet import (
@@ -27,11 +29,11 @@ router = Router(name="group_wordle")
 
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
-# chat_id → {"secret": str, "revealed": list, "messages": list[int]}
+# chat_id → стан гри (слово, відкриті літери, повідомлення та lock)
 active_wordle_games = {}
 
 PRIZE_AMOUNT = 50
-WIN_COOLDOWN_HOURS = 1
+WIN_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 
 # user_id → час, до якого діє кулдаун "вже вигравав"
 winners_cooldown = {}
@@ -99,8 +101,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     if payout_amount > 0:
         await add_to_balance(user_id, payout_amount)
         await add_daily_game_win(user_id, payout_amount)
-        # Кулдаун гри ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
-        await set_game_cooldown(user_id)
+        await set_game_cooldown_for_win(user_id, payout_amount)
 
         from db.winlog import log_win
         await log_win(user_id, None, name, "group", "Wordle", payout_amount)
@@ -227,7 +228,9 @@ async def start_wordle(message: Message):
     active_wordle_games[chat_id] = {
         "secret": secret_word,
         "revealed": ["❓"] * 5,
-        "messages": []           # сюди будемо складати id повідомлень для видалення
+        "messages": [],          # сюди будемо складати id повідомлень для видалення
+        "winner_id": None,
+        "lock": asyncio.Lock(),
     }
 
     logging.info(f"🧠 WORDLE ЗАПУЩЕНО в {chat_id} | Слово: {secret_word}")
@@ -267,61 +270,73 @@ async def handle_wordle(message: Message):
     user = message.from_user
     text = message.text.strip().lower()
 
-    if chat_id not in active_wordle_games:
+    game = active_wordle_games.get(chat_id)
+    if game is None:
         return
-
-    game = active_wordle_games[chat_id]
-    secret = game["secret"]
-    revealed = game["revealed"]
-    messages = game["messages"]
 
     if len(text) != 5 or not all(c in UKRAINIAN_LETTERS for c in text):
         return  # ігноруємо все, що не схоже на спробу — не смітимо в чат
 
-    # --- Кулдаун "вже вигравав" (1 година після перемоги) ---
-    on_cd, rem = is_on_cooldown(user.id)
-    if on_cd:
-        cd_msg = await message.answer(
-            f"⏳ {user.mention_html()}, ти вже вигравав!\n"
-            f"Наступна гра через {format_cooldown(rem)}",
+    # Усі спроби однієї гри обробляються по черзі. Після очікування lock
+    # обов'язково звіряємо об'єкт гри: за цей час її могли завершити або
+    # перезапустити. Це гарантує рівно одного переможця.
+    async with game["lock"]:
+        if active_wordle_games.get(chat_id) is not game:
+            return
+        if game["winner_id"] is not None:
+            return
+
+        secret = game["secret"]
+        revealed = game["revealed"]
+        messages = game["messages"]
+
+        # --- Кулдаун "вже вигравав" (1 година після перемоги) ---
+        on_cd, rem = is_on_cooldown(user.id)
+        if on_cd:
+            cd_msg = await message.answer(
+                f"⏳ {user.mention_html()}, ти вже вигравав!\n"
+                f"Наступна гра через {format_cooldown(rem)}",
+                parse_mode="HTML"
+            )
+            messages.append(message.message_id)
+            messages.append(cd_msg.message_id)
+            return
+
+        # --- Загальний ігровий кулдаун (спільний для всіх ігор) ---
+        if await is_game_on_cooldown(user.id):
+            remaining = await get_game_cooldown_remaining(user.id)
+            cd_text = format_game_cooldown(*remaining) if remaining else "невідомо"
+            cd_msg = await message.answer(
+                f"⏳ {user.mention_html()}, не так швидко! Зачекай ще {cd_text}",
+                parse_mode="HTML"
+            )
+            messages.append(message.message_id)
+            messages.append(cd_msg.message_id)
+            return
+
+        # Правильна відповідь резервує перемогу до першої відправки або
+        # виплати. Інші одночасні обробники побачать winner_id та завершаться.
+        if text == secret:
+            game["winner_id"] = user.id
+
+        messages.append(message.message_id)
+        feedback = get_wordle_feedback(text, secret)
+
+        for i in range(5):
+            if feedback[i] == '🟩' and revealed[i] == "❓":
+                revealed[i] = text[i].upper()
+
+        response_msg = await message.answer(
+            f"{user.mention_html()} → <b>{text.upper()}</b>\n"
+            f"{' '.join(feedback)}\n"
+            f"{' '.join(revealed)}",
             parse_mode="HTML"
         )
-        messages.append(message.message_id)
-        messages.append(cd_msg.message_id)
-        return
+        messages.append(response_msg.message_id)
 
-    # --- Загальний ігровий кулдаун (спільний для всіх ігор) ---
-    if await is_game_on_cooldown(user.id):
-        remaining = await get_game_cooldown_remaining(user.id)
-        cd_text = format_game_cooldown(*remaining) if remaining else "невідомо"
-        cd_msg = await message.answer(
-            f"⏳ {user.mention_html()}, не так швидко! Зачекай ще {cd_text}",
-            parse_mode="HTML"
-        )
-        messages.append(message.message_id)
-        messages.append(cd_msg.message_id)
-        return
+        if text != secret:
+            return
 
-    # Зберігаємо ID цього повідомлення (спроби користувача)
-    messages.append(message.message_id)
-
-    feedback = get_wordle_feedback(text, secret)
-
-    # Оновлюємо відкриті букви
-    for i in range(5):
-        if feedback[i] == '🟩' and revealed[i] == "❓":
-            revealed[i] = text[i].upper()
-
-    # Зберігаємо повідомлення з відповіддю бота
-    response_msg = await message.answer(
-        f"{user.mention_html()} → <b>{text.upper()}</b>\n"
-        f"{' '.join(feedback)}\n"
-        f"{' '.join(revealed)}",
-        parse_mode="HTML"
-    )
-    messages.append(response_msg.message_id)
-
-    if text == secret:
         name = f"@{user.username}" if user.username else user.full_name
 
         win_msg = await message.answer(
@@ -337,7 +352,7 @@ async def handle_wordle(message: Message):
         payout_amount = await _payout_winner(chat_id, message.bot, user.id, name, PRIZE_AMOUNT)
 
         # Кулдаун на годину ставимо ТІЛЬКИ якщо гроші реально нарахувались
-        if payout_amount > 0:
+        if payout_amount >= GAME_COOLDOWN_MIN_WIN:
             winners_cooldown[user.id] = time.time() + WIN_COOLDOWN_HOURS * 3600
 
         # Очищаємо чат — залишаємо тільки стартове + повідомлення про перемогу
@@ -352,8 +367,8 @@ async def handle_wordle(message: Message):
                 pass  # вже видалено / немає прав тощо
 
         # Завершуємо гру
-        del active_wordle_games[chat_id]
-        return
+        if active_wordle_games.get(chat_id) is game:
+            del active_wordle_games[chat_id]
 
 
 # Опціонально: команда для примусового завершення / очищення (для адміна)

@@ -621,7 +621,9 @@ from db import add_money_win, add_daily_game_win
 from db.game_cooldown import (
     is_game_on_cooldown,
     get_game_cooldown_remaining,
-    set_game_cooldown,
+    set_game_cooldown_for_win,
+    GAME_COOLDOWN_HOURS,
+    GAME_COOLDOWN_MIN_WIN,
     format_cooldown as format_game_cooldown,
 )
 from db.wallet import (
@@ -657,7 +659,7 @@ TURN_TIMEOUT = 10
 # === АНТИ-ФЛУД (збільшено спеціально для TG) ===
 API_CALL_INTERVAL = 1.8
 DISPLAY_DEBOUNCE = 2.0
-WINNER_COOLDOWN_HOURS = 12
+WINNER_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 
 # ==========================
 EMOJI_MONEY = "💰"
@@ -766,8 +768,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     if payout_amount > 0:
         await add_to_balance(user_id, payout_amount)
         await add_daily_game_win(user_id, payout_amount)
-        # Кулдаун гри ставимо ТІЛЬКИ якщо гроші реально нараховано на баланс
-        await set_game_cooldown(user_id)
+        await set_game_cooldown_for_win(user_id, payout_amount)
 
         await log_win(user_id, None, name, "group", "Minefield", payout_amount)
 
@@ -1336,7 +1337,7 @@ async def finish_minefield(chat_id: int):
         payout_amount = await _payout_winner(chat_id, bot, winner["id"], winner["name"], prize)
 
         # Бан на участь у наступній грі ставимо ТІЛЬКИ якщо гроші реально нарахувались
-        if payout_amount > 0:
+        if payout_amount >= GAME_COOLDOWN_MIN_WIN:
             banned_players[winner["id"]] = time.time() + WINNER_COOLDOWN_HOURS * 3600
             await bot.send_message(
                 chat_id=chat_id,

@@ -7,6 +7,13 @@ import random
 import time
 
 from handlers.config import ADMIN_ID
+from db.game_cooldown import (
+    GAME_COOLDOWN_HOURS,
+    format_cooldown as format_game_cooldown,
+    get_game_cooldown_remaining,
+    is_game_on_cooldown,
+    set_game_cooldown_for_win,
+)
 
 router = Router(name="group_vote_prize")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
@@ -17,7 +24,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 MIN_PLAYERS = 2
 MAX_PLAYERS = 10
 PRIZE_AMOUNT = 100
-VOTE_COOLDOWN_HOURS = 0
+VOTE_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 DISCUSSION_TIMER_SEC = 60
 VOTE_TIMER_SEC = 60
 MIN_VOTES_TO_WIN = 2
@@ -157,6 +164,17 @@ async def vote_join(callback: CallbackQuery):
             return
         else:
             del winners_cooldown[user_id]
+
+    if await is_game_on_cooldown(user_id):
+        remaining = await get_game_cooldown_remaining(user_id)
+        cooldown_text = (
+            format_game_cooldown(*remaining) if remaining else "невідомо"
+        )
+        await callback.answer(
+            f"⏳ Після виграшу зачекай ще {cooldown_text}",
+            show_alert=True,
+        )
+        return
 
     if user_id in game["participants"]:
         await callback.answer("Ти вже приєднався!", show_alert=True)
@@ -353,8 +371,10 @@ async def run_round(chat_id: int, round_num: int):
         
         await update_message(game["voting_message"], results_text)
         
-        if VOTE_COOLDOWN_HOURS > 0:
-            winners_cooldown[winner_id] = time.time() + VOTE_COOLDOWN_HOURS * 3600
+        await set_game_cooldown_for_win(winner_id, PRIZE_AMOUNT)
+        winners_cooldown[winner_id] = (
+            time.time() + VOTE_COOLDOWN_HOURS * 3600
+        )
         
         game["active"] = False
         return

@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from .core import DB_PATH
 
-GAME_COOLDOWN_HOURS = 1
+GAME_COOLDOWN_HOURS = 12
+GAME_COOLDOWN_MIN_WIN = 50
 KYIV_TZ = timezone(timedelta(hours=3))
 
 
@@ -87,6 +88,15 @@ async def set_game_cooldown(user_id: int, hours: int = GAME_COOLDOWN_HOURS):
         await db.commit()
 
     logging.info(f"🕐 Game cooldown встановлено для user {user_id} до {future_str}")
+
+
+async def set_game_cooldown_for_win(user_id: int, payout_amount: int) -> bool:
+    """Ставить спільний кулдаун лише після фактичної виплати від 50 грн."""
+    if payout_amount < GAME_COOLDOWN_MIN_WIN:
+        return False
+
+    await set_game_cooldown(user_id, hours=GAME_COOLDOWN_HOURS)
+    return True
 
 
 def format_cooldown(hours: int, minutes: int) -> str:
