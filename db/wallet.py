@@ -652,6 +652,63 @@ async def get_recent_manual_payment_remaining_minutes(
     return min(window_minutes, remaining_minutes)
 
 
+async def expire_stale_manual_payments(max_age_hours: int = 24) -> list[dict]:
+    """Відхиляє ручні заявки, які лишилися pending довше дозволеного часу."""
+    if max_age_hours <= 0:
+        raise ValueError("max_age_hours must be positive")
+
+    now = datetime.now(KYIV_ZONE)
+    cutoff = (now - timedelta(hours=max_age_hours)).strftime("%Y-%m-%d %H:%M:%S")
+    reviewed_at = now.strftime("%Y-%m-%d %H:%M:%S")
+    route_reason = f"автоматично відхилено після {max_age_hours} годин"
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        try:
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, amount, daily_number, created_at
+                FROM manual_payments
+                WHERE status = 'pending'
+                  AND created_at IS NOT NULL
+                  AND DATETIME(created_at) <= DATETIME(?)
+                ORDER BY id
+                """,
+                (cutoff,),
+            )
+            rows = await cursor.fetchall()
+            if rows:
+                await db.execute(
+                    """
+                    UPDATE manual_payments
+                    SET status = 'rejected',
+                        reviewed_at = ?,
+                        reviewed_by = 0,
+                        review_source = 'expired',
+                        route_reason = ?
+                    WHERE status = 'pending'
+                      AND created_at IS NOT NULL
+                      AND DATETIME(created_at) <= DATETIME(?)
+                    """,
+                    (reviewed_at, route_reason, cutoff),
+                )
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            raise
+
+    return [
+        {
+            "id": row[0],
+            "user_id": row[1],
+            "amount": row[2],
+            "daily_number": row[3],
+            "created_at": row[4],
+        }
+        for row in rows
+    ]
+
+
 async def get_manual_payment_daily_number(payment_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

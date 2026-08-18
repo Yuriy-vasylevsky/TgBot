@@ -325,6 +325,56 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
             await wallet.get_recent_manual_payment_remaining_minutes(707, 12)
         )
 
+    async def test_pending_manual_payment_expires_after_twenty_four_hours(self):
+        expired_id = await wallet.create_manual_payment(
+            808, "expired", "Expired User", 200, "old", "photo"
+        )
+        fresh_id = await wallet.create_manual_payment(
+            809, "fresh", "Fresh User", 300, "fresh", "photo"
+        )
+        approved_id = await wallet.create_manual_payment(
+            810, "approved", "Approved User", 400, "approved", "photo"
+        )
+        approved = await wallet.review_manual_payment(
+            approved_id, 999, "approved"
+        )
+        self.assertTrue(approved["ok"])
+
+        old_created_at = (
+            wallet.datetime.now(wallet.KYIV_ZONE) - wallet.timedelta(hours=25)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        async with aiosqlite.connect(wallet.DB_PATH) as db:
+            await db.execute(
+                "UPDATE manual_payments SET created_at = ? WHERE id IN (?, ?)",
+                (old_created_at, expired_id, approved_id),
+            )
+            await db.commit()
+
+        expired = await wallet.expire_stale_manual_payments(24)
+
+        self.assertEqual([payment["id"] for payment in expired], [expired_id])
+        async with aiosqlite.connect(wallet.DB_PATH) as db:
+            rows = await (
+                await db.execute(
+                    """
+                    SELECT id, status, review_source, route_reason
+                    FROM manual_payments
+                    ORDER BY id
+                    """
+                )
+            ).fetchall()
+        statuses = {row[0]: row[1:] for row in rows}
+        self.assertEqual(statuses[expired_id][0], "rejected")
+        self.assertEqual(statuses[expired_id][1], "expired")
+        self.assertIn("24", statuses[expired_id][2])
+        self.assertEqual(statuses[fresh_id][0], "pending")
+        self.assertEqual(statuses[approved_id][0], "approved")
+
+        replacement_id = await wallet.create_manual_payment(
+            808, "expired", "Expired User", 500, "replacement", "photo"
+        )
+        self.assertIsInstance(replacement_id, int)
+
     async def test_legacy_rows_are_numbered_without_manual_log_duplicate(self):
         legacy_path = Path(self.temp_dir.name) / "legacy.db"
         async with aiosqlite.connect(legacy_path) as db:

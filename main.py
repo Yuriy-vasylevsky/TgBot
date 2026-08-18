@@ -424,13 +424,58 @@ async def set_commands():
 
     
 import asyncio
-from db import cleanup_old_payment_logs, cleanup_expired_freezes
+from db import (
+    cleanup_old_payment_logs,
+    cleanup_expired_freezes,
+    expire_stale_manual_payments,
+)
 from handlers.casino_api import _matic_api as matic_api
+
+MANUAL_PAYMENT_EXPIRY_HOURS = 24
+
+
+async def _notify_expired_manual_payments(payments: list[dict]) -> None:
+    for payment in payments:
+        display_number = payment.get("daily_number") or payment["id"]
+        try:
+            await bot.send_message(
+                payment["user_id"],
+                f"⌛ <b>Заявку на поповнення №{display_number} автоматично "
+                f"відхилено.</b>\n\n"
+                f"💰 Сума: <b>{payment['amount']} грн</b>\n"
+                f"Причина: адміністратор не підтвердив платіж протягом "
+                f"{MANUAL_PAYMENT_EXPIRY_HOURS} годин.\n\n"
+                "Тепер ви можете створити нову заявку на поповнення.",
+                reply_markup=main_menu(),
+            )
+        except Exception:
+            logger.exception(
+                "Не вдалося повідомити користувача про прострочену заявку | "
+                "payment_id=%s user_id=%s",
+                payment["id"],
+                payment["user_id"],
+            )
+
 
 async def run_cleanup_loop():
     while True:
-        await cleanup_old_payment_logs()
-        await cleanup_expired_freezes()
+        try:
+            expired_payments = await expire_stale_manual_payments(
+                MANUAL_PAYMENT_EXPIRY_HOURS
+            )
+            if expired_payments:
+                logger.info(
+                    "Автоматично відхилено прострочених ручних платежів: %s",
+                    len(expired_payments),
+                )
+                await _notify_expired_manual_payments(expired_payments)
+        except Exception:
+            logger.exception("Помилка автоматичного відхилення старих платежів")
+        try:
+            await cleanup_old_payment_logs()
+            await cleanup_expired_freezes()
+        except Exception:
+            logger.exception("Помилка фонового очищення інших даних")
         await asyncio.sleep(60 * 60)
 # ==========================
 # ЗАПУСК

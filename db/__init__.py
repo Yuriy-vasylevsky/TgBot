@@ -82,6 +82,7 @@ from .wallet import (
     create_manual_payment,
     get_pending_manual_payment_for_user,
     get_recent_manual_payment_remaining_minutes,
+    expire_stale_manual_payments,
     get_manual_payment_daily_number,
     delete_pending_manual_payment,
     get_pending_manual_payment_for_retry,
