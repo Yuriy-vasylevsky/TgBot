@@ -7,7 +7,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 from db.safe import calculate_safe_prizes, close_safe_round_and_credit
-from group_games.group_safe import break_safe_button, get_safe_top_five
+from group_games.group_safe import (
+    BREAK_REQUIRED_YES,
+    break_safe_button,
+    break_vote_text,
+    get_safe_top_five,
+)
 
 
 class SafePrizeCalculationTests(unittest.TestCase):
@@ -43,6 +48,15 @@ class SafePrizeCalculationTests(unittest.TestCase):
             [user["user_id"] for user in get_safe_top_five(users)],
             [7, 6, 5, 4, 3],
         )
+
+    def test_breaking_safe_requires_four_yes_votes(self):
+        vote = {
+            "members": {str(user_id): {} for user_id in range(1, 6)},
+            "votes": {str(user_id): "yes" for user_id in range(1, 5)},
+        }
+
+        self.assertEqual(BREAK_REQUIRED_YES, 4)
+        self.assertIn("За: <b>4</b> / 4", break_vote_text(vote))
 
     def test_closing_round_credits_deposit_log_once(self):
         # aiosqlite's worker can briefly retain the file handle on Windows.

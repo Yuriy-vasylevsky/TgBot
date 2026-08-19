@@ -19,7 +19,7 @@ WIN_CELL = 198
 TOTAL_CELLS = 250
 BREAK_SAFE_CELLS = 125
 BREAK_VOTE_SECONDS = 7 * 60
-BREAK_REQUIRED_YES = 3
+BREAK_REQUIRED_YES = 4
 break_vote_lock = asyncio.Lock()
 _UNSET = object()
 
@@ -154,7 +154,7 @@ def break_vote_text(vote: dict) -> str:
     waiting = max(0, len(vote.get("members", {})) - len(votes))
     return (
         "🔨 <b>ГОЛОСУВАННЯ ЗА РОЗБИТТЯ СЕЙФА</b>\n\n"
-        "Якщо щонайменше 3 гравці з топ-5 проголосують «За», "
+        f"Якщо щонайменше {BREAK_REQUIRED_YES} гравці з топ-5 проголосують «За», "
         "сейф буде розбито без вгадування номера, а 1000 грн — поділено "
         "між топ-5 пропорційно клітинкам.\n\n"
         f"✅ За: <b>{yes_count}</b> / {BREAK_REQUIRED_YES}\n"
@@ -214,7 +214,8 @@ async def finish_break_vote(bot, state: dict, vote: dict, success: bool) -> None
         result_text = (
             "🔒 <b>СЕЙФ НЕ РОЗБИТО</b>\n\n"
             f"✅ За: <b>{yes_count}</b>\n❌ Проти: <b>{no_count}</b>\n\n"
-            "Потрібно щонайменше 3 голоси «За». Гру можна продовжувати."
+            f"Потрібно щонайменше {BREAK_REQUIRED_YES} голоси «За». "
+            "Гру можна продовжувати."
         )
 
     try:
