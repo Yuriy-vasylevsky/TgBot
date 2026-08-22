@@ -396,6 +396,61 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         self.assertTrue(result[0], result[1])
         self.assertEqual(analysis.recipient_iban, iban)
 
+    def test_hidden_iban_is_accepted_by_last_four_digits(self):
+        iban = "UA543077700000026202061068311"
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "recipient_card_suffix": None,
+                    "visible_card_number_suffixes": [],
+                    "card_candidates": [],
+                    "visible_ibans": ["UA953077700000029241827508311"],
+                    "recipient_iban": "UA953077700000029241827508311",
+                }
+            )
+        )
+
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296"},
+            allowed_ibans={iban},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_iban, iban)
+
+    def test_nonduplicated_extra_iban_digit_is_not_accepted(self):
+        iban = "UA543077700000026202061068311"
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "recipient_card_suffix": None,
+                    "visible_card_number_suffixes": [],
+                    "card_candidates": [],
+                    "visible_ibans": ["UA5430777000000262020610683119"],
+                    "recipient_iban": None,
+                }
+            )
+        )
+
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296"},
+            allowed_ibans={iban},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+
+        self.assertFalse(result[0])
+        self.assertIn("не збігаються", result[1])
+        self.assertNotIn("не вдалось", result[1])
+
     def test_partial_or_different_iban_is_not_accepted(self):
         iban = "UA953077700000029241827505098"
         for visible_iban in ("UA95307770000002924182750", "UA953077700000029241827505099"):

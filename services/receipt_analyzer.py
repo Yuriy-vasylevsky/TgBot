@@ -26,7 +26,10 @@ CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
 )
 PAYMENT_DETAILS_MISMATCH_REASON = (
-    "картка або IBAN одержувача не збігаються або їх не вдалось правильно розпізнати"
+    "знайдені картка або IBAN одержувача не збігаються з дозволеними реквізитами"
+)
+PAYMENT_DETAILS_NOT_RECOGNIZED_REASON = (
+    "картку або IBAN одержувача не вдалось правильно розпізнати"
 )
 CANCELLABLE_PAYMENT_REASON = "платіж ще можна скасувати"
 
@@ -787,13 +790,23 @@ def evaluate_auto_approval(
         if len(matching_cards) == 1:
             unambiguous_matches.append((suffix, next(iter(matching_cards))))
 
-    matching_ibans = normalized_allowed_ibans & visible_ibans
+    # Для IBAN звіряємо лише останні 4 цифри. Це робить перевірку стійкою до
+    # OCR-помилок у довгій середині рахунку та відповідає перевірці карток.
+    visible_iban_last4 = {iban[-4:] for iban in visible_ibans}
+    matching_ibans = {
+        allowed_iban
+        for allowed_iban in normalized_allowed_ibans
+        if allowed_iban[-4:] in visible_iban_last4
+    }
     if not unambiguous_matches and not matching_ibans:
-        mismatch_reason = (
-            PAYMENT_DETAILS_MISMATCH_REASON
-            if normalized_allowed_ibans
-            else CARD_MISMATCH_REASON
-        )
+        if normalized_allowed_ibans:
+            mismatch_reason = (
+                PAYMENT_DETAILS_MISMATCH_REASON
+                if visible_card_suffixes or visible_ibans
+                else PAYMENT_DETAILS_NOT_RECOGNIZED_REASON
+            )
+        else:
+            mismatch_reason = CARD_MISMATCH_REASON
         return False, mismatch_reason, None
 
     selected_card = None
