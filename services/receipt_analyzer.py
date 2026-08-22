@@ -818,12 +818,17 @@ def evaluate_auto_approval(
     if not visible_time_match:
         return False, "немає підтвердження, що час видимий на зображенні", None
 
-    if not analysis.payment_datetime:
-        return False, "час операції не визначено", None
-    payment_datetime_text = analysis.payment_datetime.strip()
+    # Structured output іноді правильно знаходить видимий HH:MM і його
+    # джерело, але лишає payment_datetime порожнім. У такому разі безпечно
+    # відновлюємо дату/час із самого видимого тексту: для HH:MM парсер обирає
+    # найближчу київську дату (вчора/сьогодні/завтра), після чого нижче все
+    # одно діє звичайне обмеження max_time_difference_minutes.
+    payment_datetime_text = (analysis.payment_datetime or visible_time_text).strip()
     payment_time = _parse_payment_datetime(payment_datetime_text, now_kyiv)
     if payment_time is None:
         return False, "час операції має невалідний формат", None
+    if not (analysis.payment_datetime or "").strip():
+        analysis.payment_datetime = payment_time.isoformat()
 
     if (
         payment_time.hour != int(visible_time_match.group("hour"))

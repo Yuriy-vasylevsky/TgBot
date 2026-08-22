@@ -139,6 +139,40 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
         )
         self.assertFalse(result[0])
 
+    def test_phone_status_bar_time_builds_missing_datetime(self):
+        result = self.evaluate(
+            payment_datetime=None,
+            payment_time_source="phone_status_bar",
+            payment_time_visible_text="15:06",
+        )
+
+        # 15:06 наступного дня/попереднього дня не може випадково пройти:
+        # evaluate() має now=14:30, тому різниця становить 36 хвилин.
+        self.assertFalse(result[0])
+        self.assertEqual(result[2], 36)
+
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "payment_datetime": None,
+                    "payment_time_source": "phone_status_bar",
+                    "payment_time_visible_text": "14:27",
+                }
+            )
+        )
+        approved = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+
+        self.assertTrue(approved[0], approved[1])
+        self.assertEqual(approved[2], 3)
+        self.assertEqual(analysis.payment_datetime, "2026-08-04T14:27:00+03:00")
+
     def test_datetime_must_match_visible_time_evidence(self):
         result = self.evaluate(payment_time_visible_text="04.08.2026 13:00")
         self.assertFalse(result[0])
