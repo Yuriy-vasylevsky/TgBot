@@ -1,4 +1,5 @@
 import aiosqlite
+import re
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -71,6 +72,76 @@ async def update_card(bank_name: str, display_name: str, new_number: str):
             (display_name, new_number, bank_name)
         )
         await db.commit()
+
+
+def normalize_iban(value: str) -> str:
+    """Прибирає пробіли/розділювачі та приводить IBAN до стандартного вигляду."""
+    return "".join(character for character in (value or "").upper() if character.isalnum())
+
+
+def is_valid_iban(value: str) -> bool:
+    """Перевіряє структуру та контрольне число IBAN (MOD-97)."""
+    iban = normalize_iban(value)
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", iban):
+        return False
+    rearranged = iban[4:] + iban[:4]
+    numeric = "".join(
+        character if character.isdigit() else str(ord(character) - ord("A") + 10)
+        for character in rearranged
+    )
+    return int(numeric) % 97 == 1
+
+
+async def ensure_payment_verification_ibans_table() -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS payment_verification_ibans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                iban TEXT NOT NULL UNIQUE,
+                created_at DATETIME DEFAULT (DATETIME('now', '+3 hours'))
+            )
+            """
+        )
+        await db.commit()
+
+
+async def get_payment_verification_ibans() -> list[tuple[int, str]]:
+    await ensure_payment_verification_ibans_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT id, iban FROM payment_verification_ibans ORDER BY id"
+        )
+        return await cursor.fetchall()
+
+
+async def add_payment_verification_iban(value: str) -> dict:
+    iban = normalize_iban(value)
+    if not is_valid_iban(iban):
+        return {"ok": False, "reason": "invalid"}
+
+    await ensure_payment_verification_ibans_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        try:
+            cursor = await db.execute(
+                "INSERT INTO payment_verification_ibans (iban) VALUES (?)",
+                (iban,),
+            )
+            await db.commit()
+        except aiosqlite.IntegrityError:
+            return {"ok": False, "reason": "exists", "iban": iban}
+    return {"ok": True, "id": cursor.lastrowid, "iban": iban}
+
+
+async def delete_payment_verification_iban(iban_id: int) -> bool:
+    await ensure_payment_verification_ibans_table()
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "DELETE FROM payment_verification_ibans WHERE id = ?",
+            (iban_id,),
+        )
+        await db.commit()
+        return cursor.rowcount > 0
 
 
 async def save_notification(user_id: int, username: str, full_name: str, type_: str, message: str):

@@ -12,8 +12,11 @@ from services.receipt_analyzer import (
     CARD_MISMATCH_REASON,
     CANCELLABLE_PAYMENT_REASON,
     PaymentReceiptAnalysis,
+    PaymentTimeEvidence,
+    _apply_verified_time_evidence,
     _build_receipt_detail_crops,
     _detail_crop_boxes,
+    _needs_time_recheck,
     analyze_receipt_with_openai,
     evaluate_auto_approval,
 )
@@ -40,6 +43,8 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             ],
             "visible_card_number_suffixes": [],
             "recipient_card_suffix": "2296",
+            "visible_ibans": [],
+            "recipient_iban": None,
             "payment_datetime": "2026-08-04T14:30:00+03:00",
             "payment_time_source": "operation",
             "payment_time_visible_text": "04.08.2026 14:30",
@@ -137,6 +142,78 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
     def test_datetime_must_match_visible_time_evidence(self):
         result = self.evaluate(payment_time_visible_text="04.08.2026 13:00")
         self.assertFalse(result[0])
+
+    def test_contradictory_not_visible_source_triggers_time_recheck(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "payment_datetime": "2026-08-04T14:30:00+03:00",
+                    "payment_time_source": "not_visible",
+                    "payment_time_visible_text": None,
+                }
+            )
+        )
+
+        self.assertTrue(_needs_time_recheck(analysis))
+        _apply_verified_time_evidence(
+            analysis,
+            PaymentTimeEvidence(
+                time_is_visible=True,
+                source="operation",
+                payment_datetime="2026-08-04T14:30:00+03:00",
+                visible_text="04.08.2026 14:30",
+                confidence=0.99,
+                reason="Дата і час операції чітко видно",
+            ),
+        )
+
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296"},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.payment_time_source, "operation")
+        self.assertEqual(analysis.payment_time_visible_text, "04.08.2026 14:30")
+
+    def test_failed_time_recheck_does_not_accept_unproven_datetime(self):
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "payment_datetime": "2026-08-04T14:30:00+03:00",
+                    "payment_time_source": "not_visible",
+                    "payment_time_visible_text": None,
+                }
+            )
+        )
+
+        _apply_verified_time_evidence(
+            analysis,
+            PaymentTimeEvidence(
+                time_is_visible=False,
+                source="not_visible",
+                payment_datetime=None,
+                visible_text=None,
+                confidence=0.9,
+                reason="Час на зображенні не читається",
+            ),
+        )
+
+        self.assertIsNone(analysis.payment_datetime)
+        self.assertEqual(analysis.payment_time_source, "not_visible")
+        self.assertFalse(
+            evaluate_auto_approval(
+                analysis,
+                expected_amount=200,
+                allowed_card_last4={"2296"},
+                now_kyiv=self.now,
+                max_time_difference_minutes=10,
+            )[0]
+        )
 
     def test_common_day_first_datetime_formats_are_supported(self):
         values = (
@@ -252,6 +329,64 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             ],
         )
         self.assertTrue(result[0], result[1])
+
+    def test_exact_hidden_iban_is_accepted_without_card_match(self):
+        iban = "UA953077700000029241827505098"
+        analysis = PaymentReceiptAnalysis(
+            **(
+                self.valid_data
+                | {
+                    "recipient_card_suffix": None,
+                    "visible_card_number_suffixes": [],
+                    "card_candidates": [],
+                    "visible_ibans": [
+                        " ".join(
+                            iban[index:index + 4]
+                            for index in range(0, len(iban), 4)
+                        )
+                    ],
+                    "recipient_iban": None,
+                }
+            )
+        )
+
+        result = evaluate_auto_approval(
+            analysis,
+            expected_amount=200,
+            allowed_card_last4={"2296"},
+            allowed_ibans={iban},
+            now_kyiv=self.now,
+            max_time_difference_minutes=10,
+        )
+
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(analysis.recipient_iban, iban)
+
+    def test_partial_or_different_iban_is_not_accepted(self):
+        iban = "UA953077700000029241827505098"
+        for visible_iban in ("UA95307770000002924182750", "UA953077700000029241827505099"):
+            with self.subTest(visible_iban=visible_iban):
+                analysis = PaymentReceiptAnalysis(
+                    **(
+                        self.valid_data
+                        | {
+                            "recipient_card_suffix": None,
+                            "visible_card_number_suffixes": [],
+                            "card_candidates": [],
+                            "visible_ibans": [visible_iban],
+                            "recipient_iban": None,
+                        }
+                    )
+                )
+                result = evaluate_auto_approval(
+                    analysis,
+                    expected_amount=200,
+                    allowed_card_last4={"2296"},
+                    allowed_ibans={iban},
+                    now_kyiv=self.now,
+                    max_time_difference_minutes=10,
+                )
+                self.assertFalse(result[0])
 
     def test_neutral_label_can_override_incorrect_sender_role(self):
         analysis = PaymentReceiptAnalysis(

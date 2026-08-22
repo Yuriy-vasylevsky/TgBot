@@ -49,6 +49,7 @@ from db import (
     award_referral_bonus,
     update_daily_net,
     get_cards,
+    get_payment_verification_ibans,
     create_manual_payment,
     get_pending_manual_payment_for_user,
     get_recent_manual_payment_remaining_minutes,
@@ -741,6 +742,10 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"****{escape(''.join(character for character in suffix if character.isdigit())[-4:] or '—')}"
         for suffix in analysis.visible_card_number_suffixes[:8]
     ) or "не знайдено"
+    matched_iban = escape(analysis.recipient_iban or "не знайдено")
+    visible_ibans = ", ".join(
+        escape(iban) for iban in analysis.visible_ibans[:5]
+    ) or "не знайдено"
     return (
         f"\n\n🤖 <b>Результат автоматичної перевірки</b>\n"
         f"Рішення: ручна перевірка\n"
@@ -749,6 +754,8 @@ def _analysis_admin_text(analysis: PaymentReceiptAnalysis | None) -> str:
         f"Картка: {card}\n"
         f"Знайдені картки: {card_candidates}\n"
         f"Усі видимі номери карток: {visible_card_numbers}\n"
+        f"IBAN: {matched_iban}\n"
+        f"Усі видимі IBAN: {visible_ibans}\n"
         f"Тип: {document_type}\n"
         f"Статус: {escape(analysis.payment_status)} ({visible_status})\n"
         f"Скасування: {cancellation}\n"
@@ -1068,19 +1075,21 @@ async def _process_manual_receipt(
         return
 
     cards = await get_cards()
+    verification_ibans = await get_payment_verification_ibans()
+    allowed_ibans = {iban for _, iban in verification_ibans}
     allowed_cards: list[dict[str, str]] = []
     for bank, number in cards:
         digits = "".join(character for character in (number or "") if character.isdigit())
         if len(digits) >= 4:
             allowed_cards.append({"bank": bank, "last4": digits[-4:]})
-    if not allowed_cards:
+    if not allowed_cards and not allowed_ibans:
         await _route_payment_to_manual_review(
             message,
             payment_id=payment_id,
             amount=amount,
             receipt_type=receipt_type,
             receipt_file_id=receipt_file_id,
-            reason="у системі немає валідних дозволених карток",
+            reason="у системі немає валідних дозволених карток або IBAN",
         )
         return
 
@@ -1118,6 +1127,7 @@ async def _process_manual_receipt(
             allowed_card_last4={card["last4"] for card in allowed_cards},
             now_kyiv=now_kyiv,
             max_time_difference_minutes=GPT_MAX_TIME_DIFFERENCE_MINUTES,
+            allowed_ibans=allowed_ibans,
         )
         route_reason = "auto_approved" if approved else code_reason
         await save_manual_payment_analysis(
@@ -1131,7 +1141,7 @@ async def _process_manual_receipt(
         logging.info(
             "GPT receipt result | payment_id=%s user_id=%s amount=%s "
             "status=%s amount_found=%s card_suffix=%s card_candidates=%s "
-            "allowed_last4=%s confidence=%.3f "
+            "allowed_last4=%s iban_match=%s confidence=%.3f "
             "final=%s reason=%s",
             payment_id,
             message.from_user.id,
@@ -1144,6 +1154,7 @@ async def _process_manual_receipt(
                 for candidate in analysis.card_candidates[:5]
             ],
             sorted(card["last4"] for card in allowed_cards),
+            analysis.recipient_iban in allowed_ibans,
             analysis.confidence,
             "approve" if approved else "manual_review",
             code_reason,

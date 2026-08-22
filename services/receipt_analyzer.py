@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import logging
 import re
 import warnings
 from dataclasses import dataclass
@@ -23,6 +24,9 @@ DETAIL_IMAGE_MAX_SCALE = 3.0
 PHONE_STATUS_BAR_HEIGHT_RATIO = 0.14
 CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
+)
+PAYMENT_DETAILS_MISMATCH_REASON = (
+    "картка або IBAN одержувача не збігаються або їх не вдалось правильно розпізнати"
 )
 CANCELLABLE_PAYMENT_REASON = "платіж ще можна скасувати"
 
@@ -65,6 +69,8 @@ class PaymentReceiptAnalysis(BaseModel):
     card_candidates: list[CardCandidate]
     visible_card_number_suffixes: list[str]
     recipient_card_suffix: str | None
+    visible_ibans: list[str]
+    recipient_iban: str | None
     payment_datetime: str | None
     payment_time_source: Literal["operation", "phone_status_bar", "not_visible"]
     payment_time_visible_text: str | None
@@ -72,6 +78,50 @@ class PaymentReceiptAnalysis(BaseModel):
     possible_editing: bool
     confidence: float = Field(ge=0, le=1)
     reason: str
+
+
+class PaymentTimeEvidence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time_is_visible: bool
+    source: Literal["operation", "phone_status_bar", "not_visible"]
+    payment_datetime: str | None
+    visible_text: str | None
+    confidence: float = Field(ge=0, le=1)
+    reason: str
+
+
+def _needs_time_recheck(analysis: PaymentReceiptAnalysis) -> bool:
+    """Detect the unsafe contradiction returned in some vision responses."""
+    return (
+        analysis.payment_time_source == "not_visible"
+        and bool((analysis.payment_datetime or "").strip())
+    )
+
+
+def _apply_verified_time_evidence(
+    analysis: PaymentReceiptAnalysis,
+    evidence: PaymentTimeEvidence,
+) -> None:
+    has_complete_visible_evidence = (
+        evidence.time_is_visible
+        and evidence.source in {"operation", "phone_status_bar"}
+        and bool((evidence.payment_datetime or "").strip())
+        and bool((evidence.visible_text or "").strip())
+    )
+    if has_complete_visible_evidence:
+        analysis.payment_datetime = evidence.payment_datetime
+        analysis.payment_time_source = evidence.source
+        analysis.payment_time_visible_text = evidence.visible_text
+    else:
+        # Не залишаємо дату, яку перша відповідь могла взяти з поточного часу
+        # запиту, якщо окрема перевірка не знайшла видимого доказу на зображенні.
+        analysis.payment_datetime = None
+        analysis.payment_time_source = "not_visible"
+        analysis.payment_time_visible_text = None
+    analysis.reason = (
+        f"{analysis.reason}; повторна перевірка часу: {evidence.reason}"
+    )
 
 
 @dataclass(frozen=True)
@@ -230,6 +280,67 @@ async def download_and_prepare_receipt(
     return await asyncio.to_thread(_normalize_image, original_bytes)
 
 
+async def _recheck_receipt_time_with_openai(
+    *,
+    client: AsyncOpenAI,
+    model: str,
+    timeout_seconds: int,
+    image_content: list[dict],
+    now_kyiv: datetime,
+    initial_analysis: PaymentReceiptAnalysis,
+) -> PaymentTimeEvidence:
+    prompt = f"""
+Перевір ТІЛЬКИ видимий час на цих зображеннях однієї банківської квитанції.
+Перша перевірка дала суперечливий результат: payment_datetime=
+{initial_analysis.payment_datetime!r}, але payment_time_source="not_visible".
+Не вважай попередній payment_datetime доказом і прочитай зображення заново.
+
+Перше зображення — повний документ, друге — збільшена верхня смуга, решта —
+збільшені фрагменти. Поточний час Europe/Kyiv: {now_kyiv.isoformat()}.
+
+Правила:
+- спочатку шукай явно підписані дату й час операції на квитанції; якщо вони
+  читаються, source="operation", visible_text — дослівний видимий фрагмент;
+- якщо часу операції немає, перевір системну панель телефона. HH:MM є часом
+  телефона лише поруч з індикаторами батареї, мережі, Wi-Fi або іншими
+  системними значками; тоді source="phone_status_bar";
+- якщо на панелі телефона видно тільки HH:MM без дати, для payment_datetime
+  використай поточну київську дату з цього запиту та актуальне зміщення;
+- time_is_visible=true став лише коли точний час реально читається на одному
+  із зображень. Не бери поточний час із тексту запиту та нічого не домислюй;
+- якщо час не читається, поверни time_is_visible=false, source="not_visible",
+  payment_datetime=null і visible_text=null;
+- якщо time_is_visible=true, payment_datetime має бути ISO 8601, а
+  visible_text обов'язково має дослівно містити прочитаний HH:MM.
+""".strip()
+    async with asyncio.timeout(timeout_seconds):
+        response = await client.responses.parse(
+            model=model,
+            input=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Ти незалежний модуль перевірки доказу часу на "
+                        "банківських квитанціях. Не довіряй попередньому "
+                        "результату без видимого підтвердження."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "input_text", "text": prompt},
+                        *image_content,
+                    ],
+                },
+            ],
+            text_format=PaymentTimeEvidence,
+            max_output_tokens=250,
+        )
+    if response.output_parsed is None:
+        raise ValueError("OpenAI не повернув результат повторної перевірки часу")
+    return response.output_parsed
+
+
 async def analyze_receipt_with_openai(
     *,
     api_key: str,
@@ -295,6 +406,15 @@ async def analyze_receipt_with_openai(
   пропущений;
 - не додавай у visible_card_number_suffixes телефон, IBAN із префіксом UA,
   номер квитанції, код операції, ЄДРПОУ чи інші службові ідентифікатори;
+- окремо знайди КОЖЕН повністю видимий IBAN і поверни його у visible_ibans.
+  IBAN починається з двох латинських літер і двох контрольних цифр; пробіли
+  між групами прибери, літери поверни великими. Особливо перевір поля «IBAN»,
+  «IBAN отримувача», «Рахунок отримувача», recipient account та beneficiary;
+- у recipient_iban поверни повний IBAN лише тоді, коли найближчий підпис явно
+  вказує на отримувача/одержувача/beneficiary. Якщо роль неясна — поверни його
+  тільки у visible_ibans, а recipient_iban=null;
+- не домислюй і не виправляй символи IBAN. Частково видимий, маскований або
+  нерозбірливий IBAN не додавай до visible_ibans і recipient_iban;
 - у visible_card_number_suffixes повертай лише реально видимі останні 2–4
   цифри кожної картки; якщо видно повний або маскований номер — поверни його
   останні 4 цифри;
@@ -363,6 +483,10 @@ async def analyze_receipt_with_openai(
   payment_datetime=null, payment_time_source="not_visible" та
   payment_time_visible_text=null; категорично не використовуй поточний час із
   тексту запиту як начебто прочитаний із зображення;
+- ці три поля мають бути узгоджені: заборонено повертати непорожній
+  payment_datetime разом із payment_time_source="not_visible". Якщо
+  payment_datetime заповнений, source має точно вказувати, де цей час видно,
+  а payment_time_visible_text має містити дослівний видимий фрагмент;
 - у reason коротко українською опиши, які фактичні дані вдалося прочитати.
 """.strip()
 
@@ -407,12 +531,29 @@ async def analyze_receipt_with_openai(
                 text_format=PaymentReceiptAnalysis,
                 max_output_tokens=700,
             )
+        analysis = response.output_parsed
+        if analysis is None:
+            raise ValueError("OpenAI не повернув структурований результат")
+
+        if _needs_time_recheck(analysis):
+            try:
+                time_evidence = await _recheck_receipt_time_with_openai(
+                    client=client,
+                    model=model,
+                    timeout_seconds=timeout_seconds,
+                    image_content=image_content,
+                    now_kyiv=now_kyiv,
+                    initial_analysis=analysis,
+                )
+            except Exception:
+                # Без успішної повторної перевірки суперечливий результат не
+                # послаблюємо: evaluate_auto_approval передасть його адміну.
+                logging.exception("OpenAI receipt time recheck failed")
+            else:
+                _apply_verified_time_evidence(analysis, time_evidence)
+        return analysis
     finally:
         await client.close()
-
-    if response.output_parsed is None:
-        raise ValueError("OpenAI не повернув структурований результат")
-    return response.output_parsed
 
 
 _TIME_PATTERN = re.compile(
@@ -477,6 +618,17 @@ def _normalize_card_suffix(value: str | None) -> str | None:
     if len(digits) >= 2:
         return digits
     return None
+
+
+def _normalize_iban(value: str | None) -> str | None:
+    normalized = "".join(
+        character
+        for character in (value or "").upper()
+        if character.isalnum()
+    )
+    if not re.fullmatch(r"[A-Z]{2}\d{2}[A-Z0-9]{11,30}", normalized):
+        return None
+    return normalized
 
 
 def _parse_payment_datetime(value: str, now_kyiv: datetime) -> datetime | None:
@@ -550,8 +702,9 @@ def evaluate_auto_approval(
     allowed_card_last4: set[str],
     now_kyiv: datetime,
     max_time_difference_minutes: int,
+    allowed_ibans: set[str] | None = None,
 ) -> tuple[bool, str, int | None]:
-    """Перевіряє тип документа, видимий час, суму та картку."""
+    """Перевіряє тип документа, видимий час, суму та картку або IBAN."""
     visible_status = (analysis.payment_status_visible_text or "").casefold()
     visible_status_is_blocking = bool(visible_status) and any(
         marker in visible_status for marker in _BLOCKING_STATUS_MARKERS
@@ -581,6 +734,17 @@ def evaluate_auto_approval(
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
         if candidate_suffix:
             visible_card_suffixes.add(candidate_suffix)
+
+    normalized_allowed_ibans = {
+        normalized
+        for iban in (allowed_ibans or set())
+        if (normalized := _normalize_iban(iban))
+    }
+    visible_ibans = {
+        normalized
+        for iban in [analysis.recipient_iban, *analysis.visible_ibans]
+        if (normalized := _normalize_iban(iban))
+    }
     checks: list[tuple[bool, str]] = [
         (
             not analysis.payment_can_be_cancelled
@@ -623,17 +787,29 @@ def evaluate_auto_approval(
         if len(matching_cards) == 1:
             unambiguous_matches.append((suffix, next(iter(matching_cards))))
 
-    if not unambiguous_matches:
-        return False, CARD_MISMATCH_REASON, None
+    matching_ibans = normalized_allowed_ibans & visible_ibans
+    if not unambiguous_matches and not matching_ibans:
+        mismatch_reason = (
+            PAYMENT_DETAILS_MISMATCH_REASON
+            if normalized_allowed_ibans
+            else CARD_MISMATCH_REASON
+        )
+        return False, mismatch_reason, None
 
-    # Повніші видимі закінчення мають пріоритет над короткими масками.
-    _, selected_card = max(
-        unambiguous_matches,
-        key=lambda item: (len(item[0]), item[0]),
-    )
+    selected_card = None
+    if unambiguous_matches:
+        # Повніші видимі закінчення мають пріоритет над короткими масками.
+        _, selected_card = max(
+            unambiguous_matches,
+            key=lambda item: (len(item[0]), item[0]),
+        )
 
-    # В адмінському результаті показуємо повні останні 4 цифри активної картки.
-    analysis.recipient_card_suffix = selected_card
+        # В адмінському результаті показуємо повні останні 4 цифри активної картки.
+        analysis.recipient_card_suffix = selected_card
+
+    selected_iban = sorted(matching_ibans)[0] if matching_ibans else None
+    if selected_iban:
+        analysis.recipient_iban = selected_iban
 
     if analysis.payment_time_source == "not_visible":
         return False, "час не видно на квитанції або екрані телефона", None
@@ -664,4 +840,5 @@ def evaluate_auto_approval(
             f"час операції перевищує допустимі {max_time_difference_minutes} хвилин",
             difference_minutes,
         )
-    return True, "сума, картка та час збігаються", difference_minutes
+    payment_detail = "IBAN" if selected_iban and not selected_card else "картка"
+    return True, f"сума, {payment_detail} та час збігаються", difference_minutes
