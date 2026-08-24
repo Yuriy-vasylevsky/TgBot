@@ -34,8 +34,8 @@ router = Router(name="group_maize")
 router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
 FIELD_SIZE = 5
-MIN_PATH_LENGTH = 5
-MAX_PATH_LENGTH = 10
+MIN_PATH_LENGTH = 10
+MAX_PATH_LENGTH = 16
 MIN_PLAYERS = 2
 MAX_PLAYERS = 5
 START_LIVES = 3
