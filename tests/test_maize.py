@@ -1,6 +1,8 @@
 import asyncio
 import random
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 
 from group_games import group_maize as maize
 
@@ -76,7 +78,20 @@ class MaizePathTests(unittest.TestCase):
         self.assertTrue(
             all(button.text == maize.DIRECTION_CELL for button in keyboard.inline_keyboard[5])
         )
+        self.assertEqual(
+            keyboard.inline_keyboard[0][0].callback_data,
+            "maize_cell_0_0_0",
+        )
         self.assertEqual(keyboard.inline_keyboard[6][0].callback_data, "maize_cancel")
+
+    def test_field_buttons_include_current_shared_progress(self):
+        game = make_game([(4, 2), (3, 2), (2, 2), (1, 2), (0, 2)], {})
+        game["progress"] = 3
+        keyboard = maize.build_field_keyboard(game)
+        self.assertEqual(
+            keyboard.inline_keyboard[2][4].callback_data,
+            "maize_cell_3_2_4",
+        )
 
     def test_join_keyboard_contains_cancel_button(self):
         keyboard = maize.build_join_keyboard()
@@ -146,6 +161,34 @@ class MaizeMoveTests(unittest.TestCase):
         self.assertEqual(result["reason"], "last_alive")
         self.assertEqual(result["winner_id"], 101)
         self.assertEqual(game["winner_id"], 101)
+
+
+class MaizeCallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncTearDown(self):
+        maize.active_maize_games.clear()
+
+    async def test_stale_click_is_not_treated_as_invalid_or_throttled(self):
+        chat_id = -1001
+        player = make_player(202)
+        game = make_game(
+            [(4, 2), (3, 2), (2, 2), (1, 2), (0, 2)],
+            {202: player},
+        )
+        game.update({"progress": 1, "last_clicks": {}, "update_task": None})
+        maize.active_maize_games[chat_id] = game
+        callback = SimpleNamespace(
+            data="maize_cell_0_4_2",
+            from_user=SimpleNamespace(id=202),
+            message=SimpleNamespace(chat=SimpleNamespace(id=chat_id)),
+            answer=AsyncMock(),
+        )
+
+        with patch.object(maize, "schedule_game_update") as schedule_update:
+            await maize.maize_cell_click(callback)
+
+        self.assertEqual(game["last_clicks"], {})
+        self.assertIn("Інший гравець", callback.answer.await_args.args[0])
+        schedule_update.assert_called_once_with(chat_id)
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ WRONG_CELL = "🟥"
 WIN_CELL = "🏆"
 DIRECTION_CELL = "⬆️"
 
-UPDATE_DEBOUNCE_SECONDS = 0.5
+UPDATE_DEBOUNCE_SECONDS = 0.15
 API_CALL_INTERVAL_SECONDS = 0.8
 
 active_maize_games: dict[int, dict] = {}
@@ -184,7 +184,9 @@ def build_field_keyboard(game: dict) -> InlineKeyboardMarkup:
             buttons.append(
                 InlineKeyboardButton(
                     text=symbol,
-                    callback_data=f"maize_cell_{row}_{col}",
+                    callback_data=(
+                        f"maize_cell_{game.get('progress', 0)}_{row}_{col}"
+                    ),
                 )
             )
         rows.append(buttons)
@@ -674,7 +676,16 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
         return
 
     try:
-        _, _, raw_row, raw_col = callback.data.split("_")
+        parts = callback.data.split("_")
+        if len(parts) == 5:
+            _, _, raw_progress, raw_row, raw_col = parts
+            button_progress = int(raw_progress)
+        elif len(parts) == 4:
+            # Compatibility with a keyboard created just before this update.
+            _, _, raw_row, raw_col = parts
+            button_progress = game["progress"]
+        else:
+            raise ValueError
         cell = (int(raw_row), int(raw_col))
     except (TypeError, ValueError):
         await callback.answer("Некоректна клітинка.", show_alert=True)
@@ -692,6 +703,12 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
             result = {"status": "not_player"}
         elif not game["players"][user_id]["alive"]:
             result = {"status": "dead"}
+        elif button_progress != game["progress"]:
+            result = {"status": "stale"}
+        elif cell in game["correct_open"]:
+            result = {"status": "already_correct"}
+        elif cell in game["wrong_open"]:
+            result = {"status": "already_wrong"}
         else:
             now = time.monotonic()
             elapsed = now - game["last_clicks"].get(user_id, 0)
@@ -710,6 +727,13 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
                     )
 
     status = result["status"]
+    if status in {"correct", "wrong"}:
+        schedule_game_update(chat_id)
+    elif status == "stale":
+        update_task = game.get("update_task")
+        if not update_task or update_task.done():
+            schedule_game_update(chat_id)
+
     if status == "correct":
         await callback.answer("🟩 Правильний крок!")
     elif status == "wrong":
@@ -733,6 +757,18 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
             "↔️ Обери сусідню клітинку попереду або збоку.",
             show_alert=True,
         )
+    elif status == "stale":
+        await callback.answer(
+            "🔄 Інший гравець уже зробив цей крок. Поле оновлюється.",
+            show_alert=True,
+        )
+    elif status == "already_correct":
+        await callback.answer(
+            "🟩 Цю клітинку вже пройдено. Обери наступну біля останньої зеленої.",
+            show_alert=True,
+        )
+    elif status == "already_wrong":
+        await callback.answer("🟥 Ця клітинка вже перевірена.", show_alert=True)
     elif status == "not_player":
         await callback.answer("Ти не береш участі в цій грі.", show_alert=True)
     elif status == "dead":
@@ -742,8 +778,6 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
 
     if winner_data:
         await finish_maize(chat_id, winner_data[0], winner_data[1])
-    elif status in {"correct", "wrong"}:
-        schedule_game_update(chat_id)
 
 
 @router.callback_query(F.data.startswith("maize_direction_"))
