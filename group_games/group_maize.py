@@ -95,48 +95,75 @@ def _winner_cooldown_remaining(user_id: int) -> int:
 
 
 def generate_path(rng=None) -> list[tuple[int, int]]:
-    """Build one continuous route that cannot touch its future sections."""
+    """Build a continuous bottom-to-top route within configured length limits."""
     rng = rng or random
-    row = FIELD_SIZE - 1
-    col = rng.randrange(FIELD_SIZE)
-    path = [(row, col)]
-    visited = {path[0]}
 
-    while row > 0:
-        candidates = [(row - 1, col)]
-        for side_col in (col - 1, col + 1):
-            side = (row, side_col)
-            if row == FIELD_SIZE - 1:
+    def search(
+        path: list[tuple[int, int]],
+        visited: set[tuple[int, int]],
+        target_length: int,
+    ) -> list[tuple[int, int]] | None:
+        row, col = path[-1]
+        if len(path) == target_length:
+            return path if row == 0 else None
+
+        remaining_steps = target_length - len(path)
+        if row > remaining_steps:
+            return None
+
+        candidates = []
+        if row > 0:
+            candidates.append((row - 1, col))
+        # The bottom row must contain only one possible starting route cell.
+        if row < FIELD_SIZE - 1:
+            candidates.extend(((row, col - 1), (row, col + 1)))
+        rng.shuffle(candidates)
+
+        for next_row, next_col in candidates:
+            next_cell = (next_row, next_col)
+            if not 0 <= next_row < FIELD_SIZE or not 0 <= next_col < FIELD_SIZE:
                 continue
-            if not 0 <= side_col < FIELD_SIZE or side in visited:
+            if next_cell in visited:
                 continue
-            # After this move there must still be enough room to reach row 0.
-            if len(path) + 1 + row > MAX_PATH_LENGTH:
+
+            remaining_after_move = target_length - len(path) - 1
+            if next_row > remaining_after_move:
                 continue
-            # A future part may only touch the immediately previous cell. This
-            # prevents a legal-looking shortcut from cutting the route in two.
+
+            # The route may touch only its immediately preceding cell. This
+            # keeps every red choice outside the hidden route.
             neighbours = {
-                (side[0] - 1, side[1]),
-                (side[0] + 1, side[1]),
-                (side[0], side[1] - 1),
-                (side[0], side[1] + 1),
+                (next_row - 1, next_col),
+                (next_row + 1, next_col),
+                (next_row, next_col - 1),
+                (next_row, next_col + 1),
             }
-            if neighbours.intersection(visited) == {path[-1]}:
-                candidates.append(side)
+            if neighbours.intersection(visited) != {path[-1]}:
+                continue
 
-        # Side steps make each route less predictable, while the upward step
-        # guarantees that generation always finishes.
-        side_candidates = [cell for cell in candidates if cell[0] == row]
-        if side_candidates and rng.random() < 0.45:
-            next_cell = rng.choice(side_candidates)
-        else:
-            next_cell = (row - 1, col)
+            result = search(
+                path + [next_cell],
+                visited | {next_cell},
+                target_length,
+            )
+            if result is not None:
+                return result
+        return None
 
-        path.append(next_cell)
-        visited.add(next_cell)
-        row, col = next_cell
+    target_lengths = list(range(MIN_PATH_LENGTH, MAX_PATH_LENGTH + 1))
+    rng.shuffle(target_lengths)
+    for target_length in target_lengths:
+        start_columns = list(range(FIELD_SIZE))
+        rng.shuffle(start_columns)
+        for start_col in start_columns:
+            start = (FIELD_SIZE - 1, start_col)
+            result = search([start], {start}, target_length)
+            if result is not None:
+                return result
 
-    return path
+    raise RuntimeError(
+        f"Unable to generate a Maize route of at least {MIN_PATH_LENGTH} cells"
+    )
 
 
 def get_allowed_moves(game: dict) -> set[tuple[int, int]]:
@@ -241,6 +268,7 @@ def build_join_text(game: dict) -> str:
     return (
         "<b>🌽 MAIZE</b>\n\n"
         "Знайдіть приховану доріжку крізь поле 5×5.\n"
+        f"🌽 У доріжці щонайменше {MIN_PATH_LENGTH} клітинок\n"
         "⬆️ Рух дозволено вперед або вбік\n"
         f"❤️ У кожного гравця {START_LIVES} життів\n"
         f"⏱ Між натисканнями одного гравця — {CLICK_COOLDOWN_SECONDS} секунд\n"
