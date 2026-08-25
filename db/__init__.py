@@ -113,6 +113,7 @@ from .users import (
     get_all_users_info,
     add_or_update_user, 
     search_users,          
+    get_top_players_by_losses,
 )
 
 # ==================== PROMO ====================

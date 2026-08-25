@@ -193,6 +193,51 @@ async def get_total_money_won():
         cur = await db.execute("SELECT SUM(money_won) FROM users")
         row = await cur.fetchone()
         return row[0] or 0
+
+
+async def get_top_players_by_losses(
+    limit: int = 10,
+    offset: int = 0,
+) -> tuple[list[dict], int, int]:
+    """Повертає рейтинг гравців за чистим програшем за весь час.
+
+    ``total_losses_all_time`` містить підсумок закритих днів, а ``daily_net``
+    — ще не закритий поточний день. Їх сума тому є актуальним підсумком за
+    весь час незалежно від того, чи вже спрацювало щоденне перенесення.
+    """
+    limit = max(1, int(limit))
+    offset = max(0, int(offset))
+    loss_sql = (
+        "COALESCE(total_losses_all_time, 0) + COALESCE(daily_net, 0)"
+    )
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            f"""
+            SELECT user_id, username, full_name, {loss_sql} AS total_loss
+            FROM users
+            WHERE {loss_sql} > 0
+            ORDER BY total_loss DESC, user_id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (limit, offset),
+        ) as cursor:
+            players = [dict(row) for row in await cursor.fetchall()]
+
+        async with db.execute(
+            f"""
+            SELECT COUNT(*), COALESCE(SUM(total_loss), 0)
+            FROM (
+                SELECT {loss_sql} AS total_loss
+                FROM users
+            )
+            WHERE total_loss > 0
+            """
+        ) as cursor:
+            count, total_loss = await cursor.fetchone()
+
+    return players, int(count), int(total_loss)
     
 
 async def add_or_update_user(user_id: int, username: str, full_name: str):

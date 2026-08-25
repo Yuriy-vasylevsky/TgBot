@@ -17,6 +17,7 @@ from .checks import router as admin_checks_router
 from .payment_history import router as payment_history_router
 from .losses import router as losses_router
 from .piggy_bank import router as piggy_bank_router
+from .top_players import router as top_players_router
 
 router = Router(name="admin")
 
@@ -25,6 +26,7 @@ router.include_router(admin_checks_router)
 router.include_router(payment_history_router)
 router.include_router(losses_router)
 router.include_router(piggy_bank_router)
+router.include_router(top_players_router)
 router.include_router(base_router)
 router.include_router(winrate_router)
 router.include_router(users_router)
