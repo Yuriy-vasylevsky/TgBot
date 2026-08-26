@@ -41,6 +41,7 @@ MAX_PLAYERS = 5
 START_LIVES = 2
 PRIZE_AMOUNT = 50
 CLICK_COOLDOWN_SECONDS = 4
+INACTIVITY_TIMEOUT_SECONDS = 30
 WINNER_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 
 UNKNOWN_CELL = "⬜"
@@ -272,6 +273,7 @@ def build_join_text(game: dict) -> str:
         "⬆️ Рух дозволено вперед або вбік\n"
         f"❤️ У кожного гравця {START_LIVES} життів\n"
         f"⏱ Між натисканнями одного гравця — {CLICK_COOLDOWN_SECONDS} секунд\n"
+        f"⌛ Якщо ніхто не зробить хід {INACTIVITY_TIMEOUT_SECONDS} секунд — усі програють\n"
         f"🏆 Приз — <b>{PRIZE_AMOUNT} грн</b>\n\n"
         f"👥 Гравців: <b>{len(players)}/{MAX_PLAYERS}</b> "
         f"(мінімум {MIN_PLAYERS})\n{player_lines}\n\n"
@@ -294,6 +296,7 @@ def build_game_text(game: dict) -> str:
         [
             "",
             f"🌽 Доріжка: <b>{game['progress']}/{path_length}</b>",
+            f"⌛ На хід є {INACTIVITY_TIMEOUT_SECONDS} секунд.",
             "⬆️ Починайте з нижнього активного рядка.",
             "🟩 правильна клітинка  🟥 неправильна клітинка",
         ]
@@ -444,6 +447,62 @@ def _cancel_update(game: dict) -> None:
     game["update_task"] = None
 
 
+def _cancel_inactivity_timer(game: dict) -> None:
+    task = game.get("inactivity_task")
+    if task and not task.done():
+        task.cancel()
+    game["inactivity_task"] = None
+
+
+async def finish_maize_for_inactivity(chat_id: int, token: int) -> None:
+    """End the game without a winner when no valid move was made in time."""
+    game = active_maize_games.get(chat_id)
+    if not game:
+        return
+
+    async with game["lock"]:
+        if game.get("phase") != "playing" or game.get("inactivity_token") != token:
+            return
+        game["phase"] = "finished"
+        _cancel_update(game)
+        game["inactivity_task"] = None
+
+    try:
+        await _rate_limited_edit(
+            chat_id,
+            lambda: game["message"].edit_text(
+                "⌛ <b>Час вийшов!</b>\n\n"
+                f"Протягом {INACTIVITY_TIMEOUT_SECONDS} секунд ніхто не зробив хід.\n"
+                "❌ Усі гравці програли. Приз не нараховується.",
+                reply_markup=None,
+                parse_mode="HTML",
+            ),
+        )
+    finally:
+        active_maize_games.pop(chat_id, None)
+        _last_api_call.pop(chat_id, None)
+        _api_locks.pop(chat_id, None)
+
+
+def reset_inactivity_timer(chat_id: int) -> None:
+    game = active_maize_games.get(chat_id)
+    if not game or game.get("phase") != "playing":
+        return
+
+    _cancel_inactivity_timer(game)
+    token = game.get("inactivity_token", 0) + 1
+    game["inactivity_token"] = token
+
+    async def expire_after_inactivity() -> None:
+        try:
+            await asyncio.sleep(INACTIVITY_TIMEOUT_SECONDS)
+            await finish_maize_for_inactivity(chat_id, token)
+        except asyncio.CancelledError:
+            return
+
+    game["inactivity_task"] = asyncio.create_task(expire_after_inactivity())
+
+
 def schedule_game_update(chat_id: int) -> None:
     game = active_maize_games.get(chat_id)
     if not game or game["phase"] != "playing":
@@ -535,6 +594,7 @@ async def finish_maize(chat_id: int, winner_id: int, reason: str) -> None:
 
     game["phase"] = "finished"
     _cancel_update(game)
+    _cancel_inactivity_timer(game)
     winner = game["players"][winner_id]
     bot = game["message"].bot
 
@@ -594,6 +654,8 @@ async def start_maize(message: Message) -> None:
         "last_clicks": {},
         "lock": asyncio.Lock(),
         "update_task": None,
+        "inactivity_task": None,
+        "inactivity_token": 0,
         "message": None,
     }
     status_message = await message.answer(
@@ -683,6 +745,7 @@ async def begin_maize(callback: CallbackQuery) -> None:
             return
         game["path"] = generate_path()
         game["phase"] = "playing"
+        reset_inactivity_timer(chat_id)
 
     await callback.answer("🌽 Гра почалася!")
     await _rate_limited_edit(
@@ -748,6 +811,8 @@ async def maize_cell_click(callback: CallbackQuery) -> None:
             else:
                 game["last_clicks"][user_id] = now
                 result = apply_move(game, user_id, cell)
+                if result["status"] in {"correct", "wrong"}:
+                    reset_inactivity_timer(chat_id)
                 if result["status"] == "winner":
                     winner_data = (
                         result["winner_id"],
@@ -820,6 +885,7 @@ async def cancel_maize_game(chat_id: int, game: dict) -> bool:
             return False
         game["phase"] = "finished"
         _cancel_update(game)
+        _cancel_inactivity_timer(game)
 
     await _rate_limited_edit(
         chat_id,

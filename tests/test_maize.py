@@ -19,6 +19,9 @@ def make_game(path, players):
         "finish_reason": None,
         "last_action": "",
         "lock": asyncio.Lock(),
+        "update_task": None,
+        "inactivity_task": None,
+        "inactivity_token": 0,
     }
 
 
@@ -189,6 +192,22 @@ class MaizeCallbackTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(game["last_clicks"], {})
         self.assertIn("Інший гравець", callback.answer.await_args.args[0])
         schedule_update.assert_called_once_with(chat_id)
+
+    async def test_inactivity_finishes_without_winner_or_payout(self):
+        chat_id = -1002
+        game = make_game(
+            [(4, 2), (3, 2), (2, 2), (1, 2), (0, 2)],
+            {202: make_player(202)},
+        )
+        game["inactivity_token"] = 7
+        game["message"] = SimpleNamespace(edit_text=AsyncMock())
+        maize.active_maize_games[chat_id] = game
+
+        await maize.finish_maize_for_inactivity(chat_id, 7)
+
+        self.assertNotIn(chat_id, maize.active_maize_games)
+        self.assertIsNone(game["winner_id"])
+        self.assertIn("Час вийшов", game["message"].edit_text.await_args.args[0])
 
 
 if __name__ == "__main__":
