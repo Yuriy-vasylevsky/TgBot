@@ -1469,10 +1469,14 @@ async def get_all_balances() -> list[dict]:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             """
-            SELECT u.user_id, u.balance, u.full_name, u.username
+            SELECT
+                u.user_id,
+                COALESCE(u.balance, 0) + COALESCE(u.frozen_balance, 0) AS balance,
+                u.full_name,
+                u.username
             FROM users u
-            WHERE u.balance > 0
-            ORDER BY u.balance DESC
+            WHERE COALESCE(u.balance, 0) + COALESCE(u.frozen_balance, 0) > 0
+            ORDER BY balance DESC
             """
         )
         rows = await cursor.fetchall()
