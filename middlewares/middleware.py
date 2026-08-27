@@ -126,7 +126,7 @@ from typing import Callable, Awaitable, Dict, Any
 from aiogram import BaseMiddleware, types
 from aiogram.types import Message, CallbackQuery
 
-from db import DB_PATH, save_user
+from db import DB_PATH, ensure_ban_table, save_user
 
 
 class BanMiddleware(BaseMiddleware):
@@ -146,12 +146,13 @@ class BanMiddleware(BaseMiddleware):
     """
 
     async def is_banned(self, user_id: int) -> str | None:
+        await ensure_ban_table()
         async with aiosqlite.connect(DB_PATH) as db:
             cursor = await db.execute(
                 "SELECT reason FROM banned_users WHERE user_id = ?", (user_id,)
             )
             row = await cursor.fetchone()
-        return row[0] if row else None
+        return (row[0] or "Без причини") if row else None
 
     async def __call__(
         self,
@@ -159,8 +160,22 @@ class BanMiddleware(BaseMiddleware):
         event: Message | CallbackQuery,
         data: Dict[str, Any],
     ) -> Any:
-        # Глобальне блокування вимкнено навмисно — бан тепер діє точково
-        # лише всередині Matic-хендлерів, а не на весь бот.
+        user = getattr(event, "from_user", None)
+        if not user:
+            return await handler(event, data)
+
+        reason = await self.is_banned(user.id)
+        if reason is not None:
+            text = f"🚫 Ви заблоковані в боті.\nПричина: {reason or '—'}"
+            try:
+                if isinstance(event, CallbackQuery):
+                    await event.answer(text, show_alert=True)
+                else:
+                    await event.answer(text)
+            except Exception:
+                logging.exception("Не вдалося повідомити заблокованого користувача")
+            return None
+
         return await handler(event, data)
 
 
