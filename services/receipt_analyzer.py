@@ -344,6 +344,7 @@ async def _recheck_receipt_time_with_openai(
     image_content: list[dict],
     now_kyiv: datetime,
     initial_analysis: PaymentReceiptAnalysis,
+    disable_reasoning: bool = False,
 ) -> PaymentTimeEvidence:
     prompt = f"""
 Перевір ТІЛЬКИ видимий час на цих зображеннях однієї банківської квитанції.
@@ -391,6 +392,7 @@ async def _recheck_receipt_time_with_openai(
             ],
             text_format=PaymentTimeEvidence,
             max_output_tokens=250,
+            reasoning={"effort": "none"} if disable_reasoning else None,
         )
     if response.output_parsed is not None:
         return response.output_parsed
@@ -593,6 +595,9 @@ async def analyze_receipt_with_openai(
                 ],
                 text_format=PaymentReceiptAnalysis,
                 max_output_tokens=700,
+                # DeepSeek Vision has thinking enabled by default. Receipt OCR
+                # needs a short deterministic JSON answer, not chain-of-thought.
+                reasoning={"effort": "none"} if base_url else None,
             )
         analysis = response.output_parsed
         if analysis is None:
@@ -607,6 +612,7 @@ async def analyze_receipt_with_openai(
                     image_content=image_content,
                     now_kyiv=now_kyiv,
                     initial_analysis=analysis,
+                    disable_reasoning=bool(base_url),
                 )
             except Exception:
                 # Без успішної повторної перевірки суперечливий результат не
