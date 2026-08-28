@@ -22,6 +22,9 @@ from aiogram.fsm.state import State, StatesGroup
 import monobank
 from handlers.config import (
     ADMIN_ID,
+    DEEPSEEK_API_KEY,
+    DEEPSEEK_TIMEOUT_SECONDS,
+    DEEPSEEK_VISION_MODEL,
     GPT_MAX_TIME_DIFFERENCE_MINUTES,
     MAX_RECEIPT_FILE_SIZE_MB,
     MONO_ACCOUNT,
@@ -68,11 +71,14 @@ from db import (
 from handlers.menu import main_menu
 from services.receipt_analyzer import (
     PaymentReceiptAnalysis,
+    RECEIPT_ANALYZER_DEEPSEEK,
     ReceiptFileTooLarge,
     UnsupportedReceiptFile,
+    analyze_receipt_with_deepseek,
     analyze_receipt_with_openai,
     download_and_prepare_receipt,
     evaluate_auto_approval,
+    get_receipt_analyzer,
 )
 
 import asyncio
@@ -886,6 +892,7 @@ async def _send_auto_approval_to_admin(
     receipt_file_id: str,
     analysis: PaymentReceiptAnalysis,
     computed_time_difference: int,
+    analyzer_label: str,
 ) -> None:
     display_number = await _payment_display_number(payment_id)
     card = escape(analysis.recipient_card_suffix or "—")
@@ -896,7 +903,8 @@ async def _send_auto_approval_to_admin(
         f"💳 Картка: **** {card}\n"
         f"🕐 Час операції: {operation_time}\n"
         f"⏱ Різниця: {computed_time_difference} хв\n"
-        f"📊 Впевненість GPT: {analysis.confidence:.0%}"
+        f"🧠 Аналізатор: {analyzer_label}\n"
+        f"📊 Впевненість: {analysis.confidence:.0%}"
     )
     try:
         await _send_receipt_to_admin(
@@ -1093,34 +1101,56 @@ async def _process_manual_receipt(
         )
         return
 
-    if not OPENAI_API_KEY:
+    analyzer_name = get_receipt_analyzer()
+    if analyzer_name == RECEIPT_ANALYZER_DEEPSEEK:
+        api_key = DEEPSEEK_API_KEY
+        model = DEEPSEEK_VISION_MODEL
+        timeout_seconds = DEEPSEEK_TIMEOUT_SECONDS
+        analyzer_label = "DeepSeek V4 Flash Vision"
+    else:
+        api_key = OPENAI_API_KEY
+        model = OPENAI_MODEL
+        timeout_seconds = OPENAI_TIMEOUT_SECONDS
+        analyzer_label = "GPT"
+
+    if not api_key:
         await _route_payment_to_manual_review(
             message,
             payment_id=payment_id,
             amount=amount,
             receipt_type=receipt_type,
             receipt_file_id=receipt_file_id,
-            reason="OpenAI API не налаштований",
+            reason=f"API для аналізатора {analyzer_label} не налаштований",
         )
         return
 
-    await mark_manual_payment_analysis_started(payment_id)
+    await mark_manual_payment_analysis_started(payment_id, analyzer_name)
     logging.info(
-        "Starting GPT receipt analysis | payment_id=%s user_id=%s amount=%s model=%s",
+        "Starting receipt analysis | analyzer=%s payment_id=%s user_id=%s amount=%s model=%s",
+        analyzer_name,
         payment_id,
         message.from_user.id,
         amount,
-        OPENAI_MODEL,
+        model,
     )
     try:
         now_kyiv = datetime.now(KYIV_ZONE)
-        analysis = await analyze_receipt_with_openai(
-            api_key=OPENAI_API_KEY,
-            model=OPENAI_MODEL,
-            timeout_seconds=OPENAI_TIMEOUT_SECONDS,
-            image=prepared,
-            now_kyiv=now_kyiv,
-        )
+        if analyzer_name == RECEIPT_ANALYZER_DEEPSEEK:
+            analysis = await analyze_receipt_with_deepseek(
+                api_key=api_key,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                image=prepared,
+                now_kyiv=now_kyiv,
+            )
+        else:
+            analysis = await analyze_receipt_with_openai(
+                api_key=api_key,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                image=prepared,
+                now_kyiv=now_kyiv,
+            )
         approved, code_reason, computed_difference = evaluate_auto_approval(
             analysis,
             expected_amount=amount,
@@ -1139,10 +1169,11 @@ async def _process_manual_receipt(
             route_reason=route_reason,
         )
         logging.info(
-            "GPT receipt result | payment_id=%s user_id=%s amount=%s "
+            "Receipt analysis result | analyzer=%s payment_id=%s user_id=%s amount=%s "
             "status=%s amount_found=%s card_suffix=%s card_candidates=%s "
             "allowed_last4=%s iban_match=%s confidence=%.3f "
             "final=%s reason=%s",
+            analyzer_name,
             payment_id,
             message.from_user.id,
             amount,
@@ -1161,12 +1192,13 @@ async def _process_manual_receipt(
         )
     except Exception as error:
         logging.exception(
-            "OpenAI receipt analysis failed | payment_id=%s user_id=%s error=%s",
+            "Receipt analysis failed | analyzer=%s payment_id=%s user_id=%s error=%s",
+            analyzer_name,
             payment_id,
             message.from_user.id,
             type(error).__name__,
         )
-        reason = f"помилка OpenAI: {type(error).__name__}"
+        reason = f"помилка {analyzer_label}: {type(error).__name__}"
         await save_manual_payment_analysis(
             payment_id,
             result_json=None,
@@ -1202,7 +1234,7 @@ async def _process_manual_receipt(
         payment_id,
         admin_id=0,
         decision="approved",
-        review_source="gpt",
+        review_source=analyzer_name,
     )
     if not result.get("ok"):
         if result.get("reason") == "already_reviewed":
@@ -1252,6 +1284,7 @@ async def _process_manual_receipt(
             receipt_file_id=receipt_file_id,
             analysis=analysis,
             computed_time_difference=computed_difference or 0,
+            analyzer_label=analyzer_label,
         )
     except Exception:
         logging.exception(

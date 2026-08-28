@@ -36,6 +36,12 @@ GPT_MAX_TIME_DIFFERENCE_MINUTES = int(
     os.getenv("GPT_MAX_TIME_DIFFERENCE_MINUTES", "10")
 )
 OPENAI_TIMEOUT_SECONDS = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "30"))
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "").strip()
+DEEPSEEK_VISION_MODEL = (
+    os.getenv("DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp").strip()
+    or "deepseek-v4-flash-vision-exp"
+)
+DEEPSEEK_TIMEOUT_SECONDS = int(os.getenv("DEEPSEEK_TIMEOUT_SECONDS", "30"))
 MAX_RECEIPT_FILE_SIZE_MB = int(os.getenv("MAX_RECEIPT_FILE_SIZE_MB", "10"))
   
 CASINO_API_BASE = "https://chcwhite.net"   

@@ -162,4 +162,5 @@ cython_debug/
 users.db
 safe_state.json
 data/wallet_settings.json
+data/receipt_analyzer_settings.json
 *.db

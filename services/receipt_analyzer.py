@@ -3,10 +3,13 @@ import base64
 import hashlib
 import io
 import logging
+import json
+import os
 import re
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -22,6 +25,12 @@ SUPPORTED_IMAGE_FORMATS = {"JPEG", "PNG", "WEBP"}
 DETAIL_IMAGE_TARGET_LONG_SIDE = 2400
 DETAIL_IMAGE_MAX_SCALE = 3.0
 PHONE_STATUS_BAR_HEIGHT_RATIO = 0.14
+RECEIPT_ANALYZER_OPENAI = "gpt"
+RECEIPT_ANALYZER_DEEPSEEK = "deepseek"
+RECEIPT_ANALYZERS = {RECEIPT_ANALYZER_OPENAI, RECEIPT_ANALYZER_DEEPSEEK}
+_RECEIPT_ANALYZER_SETTINGS_FILE = Path(
+    os.getenv("DATA_DIR", "data")
+) / "receipt_analyzer_settings.json"
 CARD_MISMATCH_REASON = (
     "картка одержувача не збігається або її не вдалось правильно розпізнати"
 )
@@ -40,6 +49,31 @@ class UnsupportedReceiptFile(ValueError):
 
 class ReceiptFileTooLarge(ValueError):
     pass
+
+
+def get_receipt_analyzer() -> str:
+    """Return the administrator-selected receipt analyzer, defaulting to GPT."""
+    try:
+        data = json.loads(_RECEIPT_ANALYZER_SETTINGS_FILE.read_text(encoding="utf-8"))
+        analyzer = data.get("receipt_analyzer")
+        if analyzer in RECEIPT_ANALYZERS:
+            return analyzer
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError):
+        logging.exception("Unable to load receipt analyzer settings")
+    return RECEIPT_ANALYZER_OPENAI
+
+
+def set_receipt_analyzer(analyzer: str) -> None:
+    """Persist the analyzer choice without ever storing API credentials."""
+    if analyzer not in RECEIPT_ANALYZERS:
+        raise ValueError(f"Unsupported receipt analyzer: {analyzer}")
+    _RECEIPT_ANALYZER_SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _RECEIPT_ANALYZER_SETTINGS_FILE.write_text(
+        json.dumps({"receipt_analyzer": analyzer}),
+        encoding="utf-8",
+    )
 
 
 class CardCandidate(BaseModel):
@@ -351,6 +385,7 @@ async def analyze_receipt_with_openai(
     timeout_seconds: int,
     image: PreparedReceipt,
     now_kyiv: datetime,
+    base_url: str | None = None,
 ) -> PaymentReceiptAnalysis:
     if not api_key:
         raise RuntimeError("OPENAI_API_KEY не налаштований")
@@ -509,7 +544,11 @@ async def analyze_receipt_with_openai(
         }
         for receipt_image in receipt_images
     ]
-    client = AsyncOpenAI(api_key=api_key, timeout=timeout_seconds)
+    client = AsyncOpenAI(
+        api_key=api_key,
+        timeout=timeout_seconds,
+        **({"base_url": base_url} if base_url else {}),
+    )
     try:
         async with asyncio.timeout(timeout_seconds):
             response = await client.responses.parse(
@@ -557,6 +596,27 @@ async def analyze_receipt_with_openai(
         return analysis
     finally:
         await client.close()
+
+
+async def analyze_receipt_with_deepseek(
+    *,
+    api_key: str,
+    model: str,
+    timeout_seconds: int,
+    image: PreparedReceipt,
+    now_kyiv: datetime,
+) -> PaymentReceiptAnalysis:
+    """Analyze a receipt with DeepSeek's OpenAI-compatible Vision API."""
+    if not api_key:
+        raise RuntimeError("DEEPSEEK_API_KEY не налаштований")
+    return await analyze_receipt_with_openai(
+        api_key=api_key,
+        model=model,
+        timeout_seconds=timeout_seconds,
+        image=image,
+        now_kyiv=now_kyiv,
+        base_url="https://api.deepseek.com",
+    )
 
 
 _TIME_PATTERN = re.compile(

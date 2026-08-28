@@ -926,17 +926,20 @@ async def save_manual_payment_analysis(
         await db.commit()
 
 
-async def mark_manual_payment_analysis_started(payment_id: int) -> None:
+async def mark_manual_payment_analysis_started(
+    payment_id: int,
+    analyzer: str = "gpt",
+) -> None:
     started_at = datetime.now(KYIV_ZONE).strftime("%Y-%m-%d %H:%M:%S")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             """
             UPDATE manual_payments
             SET analysis_started_at = ?,
-                route_reason = 'gpt_analysis_started'
+                route_reason = ?
             WHERE id = ? AND status = 'pending'
             """,
-            (started_at, payment_id),
+            (started_at, f"{analyzer}_analysis_started", payment_id),
         )
         await db.commit()
 
@@ -954,7 +957,7 @@ async def review_manual_payment(
     """
     if decision not in {"approved", "rejected"}:
         return {"ok": False, "reason": "invalid_decision"}
-    if review_source not in {"manual", "gpt"}:
+    if review_source not in {"manual", "gpt", "deepseek"}:
         return {"ok": False, "reason": "invalid_review_source"}
 
     async with aiosqlite.connect(DB_PATH) as db:
