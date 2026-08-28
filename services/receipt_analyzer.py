@@ -161,6 +161,25 @@ def _apply_verified_time_evidence(
     )
 
 
+def _parse_json_response(
+    response: object,
+    response_model: type[BaseModel],
+) -> BaseModel:
+    """Parse JSON returned by OpenAI-compatible providers without SDK helpers."""
+    raw_text = (getattr(response, "output_text", None) or "").strip()
+    if raw_text.startswith("```"):
+        raw_text = raw_text.split("\n", 1)[-1]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+        raw_text = raw_text.strip()
+    if not raw_text:
+        raise ValueError("Модель не повернула JSON-відповідь")
+    try:
+        return response_model.model_validate_json(raw_text)
+    except Exception as error:
+        raise ValueError("Модель повернула некоректну JSON-відповідь") from error
+
+
 @dataclass(frozen=True)
 class PreparedReceipt:
     image_bytes: bytes
@@ -373,9 +392,9 @@ async def _recheck_receipt_time_with_openai(
             text_format=PaymentTimeEvidence,
             max_output_tokens=250,
         )
-    if response.output_parsed is None:
-        raise ValueError("OpenAI не повернув результат повторної перевірки часу")
-    return response.output_parsed
+    if response.output_parsed is not None:
+        return response.output_parsed
+    return _parse_json_response(response, PaymentTimeEvidence)
 
 
 async def analyze_receipt_with_openai(
@@ -526,6 +545,8 @@ async def analyze_receipt_with_openai(
   payment_datetime заповнений, source має точно вказувати, де цей час видно,
   а payment_time_visible_text має містити дослівний видимий фрагмент;
 - у reason коротко українською опиши, які фактичні дані вдалося прочитати.
+- поверни тільки один валідний JSON-об'єкт строго за заданою схемою, без
+  Markdown, пояснень або тексту до чи після JSON.
 """.strip()
 
     detail_crops = await asyncio.to_thread(
@@ -575,7 +596,7 @@ async def analyze_receipt_with_openai(
             )
         analysis = response.output_parsed
         if analysis is None:
-            raise ValueError("OpenAI не повернув структурований результат")
+            analysis = _parse_json_response(response, PaymentReceiptAnalysis)
 
         if _needs_time_recheck(analysis):
             try:

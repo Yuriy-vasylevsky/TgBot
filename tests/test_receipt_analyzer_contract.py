@@ -1,9 +1,11 @@
 import ast
 import io
 import inspect
+import json
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from PIL import Image
@@ -17,6 +19,7 @@ from services.receipt_analyzer import (
     _build_receipt_detail_crops,
     _detail_crop_boxes,
     _needs_time_recheck,
+    _parse_json_response,
     analyze_receipt_with_openai,
     evaluate_auto_approval,
 )
@@ -99,6 +102,23 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
 
         self.assertEqual(passed_keywords, required_keywords)
         self.assertLessEqual(passed_keywords, accepted_keywords)
+
+    def test_json_fallback_parses_openai_compatible_response(self):
+        response = SimpleNamespace(
+            output_text=json.dumps(
+                {
+                    "time_is_visible": False,
+                    "source": "not_visible",
+                    "payment_datetime": None,
+                    "visible_text": None,
+                    "confidence": 1.0,
+                    "reason": "Час не видно",
+                }
+            )
+        )
+        evidence = _parse_json_response(response, PaymentTimeEvidence)
+        self.assertIsInstance(evidence, PaymentTimeEvidence)
+        self.assertFalse(evidence.time_is_visible)
 
     def test_portrait_receipt_is_split_into_overlapping_detail_bands(self):
         boxes = _detail_crop_boxes(600, 1200)
