@@ -283,7 +283,6 @@ def build_join_text(game: dict) -> str:
 
 def build_game_text(game: dict) -> str:
     lines = ["<b>🌽 MAIZE</b>", "", "<b>👥 Гравці:</b>"]
-    path_length = len(game["path"])
     for player in game["players"].values():
         if player["alive"]:
             hearts = "❤️" * player["lives"]
@@ -295,7 +294,6 @@ def build_game_text(game: dict) -> str:
     lines.extend(
         [
             "",
-            f"🌽 Доріжка: <b>{game['progress']}/{path_length}</b>",
             f"⌛ На хід є {INACTIVITY_TIMEOUT_SECONDS} секунд.",
             "⬆️ Починайте з нижнього активного рядка.",
             "🟩 правильна клітинка  🟥 неправильна клітинка",
