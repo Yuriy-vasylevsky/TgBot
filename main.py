@@ -357,36 +357,6 @@ async def cancel_reset_gifts(callback: types.CallbackQuery):
     await callback.message.answer("❌ Скасовано.")
 
 
-# ==========================
-# КОМАНДИ ТА МЕНЮ
-# ==========================
-# async def set_commands():
-#     await bot.set_my_commands(
-#         [BotCommand(command="start", description="🔄 Рестарт")],
-#         scope=BotCommandScopeAllPrivateChats()
-#     )
-#     await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
-
-#     admin_commands = [
-#         BotCommand(command="safe", description="🔒 Показати Сейф"),
-#         BotCommand(command="open", description="🔓 Відкрити клітинку"),
-#         BotCommand(command="bowling", description="🎳 Боулінг"),
-#         BotCommand(command="basketball", description="🏀 Баскетбол"),
-#         BotCommand(command="football", description="⚽ Футбол"),
-#         BotCommand(command="wordle", description="🎭 Вгадай слово"),
-#         BotCommand(command="numbers", description="🕵️‍♂️ Вгадай код"),
-#         BotCommand(command="jackpot2", description="💵💵 Jackpot"),
-#         BotCommand(command="jackpot", description="💵💵💵 Jackpot"),
-#         BotCommand(command="jackpot5", description="💵💵💵💵💵 Jackpot"),
-#         BotCommand(command="skarb", description="💎 Найди скарб"),
-#         BotCommand(command="/vote_prize", description="Голосування"),
-#         BotCommand(command="/minefield", description="Промо борьба"),
-#         BotCommand(command="/bank", description="Банк "),
-#     ]
-#     await bot.set_my_commands(
-#         commands=admin_commands,
-#         scope=BotCommandScopeAllChatAdministrators()
-#     )
 
 async def set_commands():
     await bot.set_my_commands(

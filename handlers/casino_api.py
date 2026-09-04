@@ -2,9 +2,12 @@
 
 import hashlib
 import logging
-from datetime import datetime
+import asyncio
+from datetime import datetime, time, timedelta
 from urllib.parse import urlencode
 from typing import Optional
+from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -13,6 +16,7 @@ from handlers.config import (
     CASINO_API_BASE,
     CASINO_PUBLIC_KEY,
     CASINO_SECRET_KEY,
+    CASINO_TIMEZONE,
     CASINO_TR_PREFIX,
 )
 
@@ -58,7 +62,8 @@ def _build_url(endpoint: str, params: dict):
     params = params.copy()
     
     if "tr" not in params:
-        params["tr"] = f"{CASINO_TR_PREFIX}{int(datetime.now().timestamp() * 1000)}"
+        # Кожен запит має власний tr, інакше Champion повертає кешовану відповідь.
+        params["tr"] = f"{CASINO_TR_PREFIX}{uuid4().hex}"
     
     params["key"] = CASINO_PUBLIC_KEY
 
@@ -75,6 +80,105 @@ def _build_url(endpoint: str, params: dict):
     full_url = f"{CASINO_API_BASE}{endpoint}?{urlencode(sorted_params)}&sign={sign}"
     
     return full_url, params["tr"]
+
+
+def champion_yesterday_period(now: datetime | None = None) -> tuple[datetime, datetime]:
+    """Операційна доба Champion: учора 07:00 — сьогодні 07:00, час Києва."""
+    timezone = ZoneInfo(CASINO_TIMEZONE)
+    if now is None:
+        now = datetime.now(timezone)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone)
+    else:
+        now = now.astimezone(timezone)
+
+    end = datetime.combine(now.date(), time(7), tzinfo=timezone)
+    start = end - timedelta(days=1)
+    return start, end
+
+
+def _api_date(value: datetime) -> str:
+    return value.strftime("%Y%m%d%H%M%S")
+
+
+async def _casino_get(endpoint: str, params: dict) -> dict | None:
+    """Виконує підписаний GET-запит та повертає лише коректну JSON-відповідь."""
+    if not CASINO_PUBLIC_KEY or not CASINO_SECRET_KEY:
+        logger.error("Champion API keys are not configured")
+        return None
+
+    url, _ = _build_url(endpoint, params)
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+            if "application/json" not in response.headers.get("content-type", ""):
+                logger.error("Champion returned a non-JSON response")
+                return None
+            return response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Champion request to %s failed: %s", endpoint, exc)
+        return None
+
+
+async def get_champion_yesterday_stats() -> dict:
+    """Збирає сумарний report-user за всіма субагентами за попередню операційну добу."""
+    start, end = champion_yesterday_period()
+    start_value, end_value = _api_date(start), _api_date(end)
+
+    subagents: list[dict] = []
+    page = 1
+    while True:
+        data = await _casino_get(
+            "/api/subagents", {"parent": "", "page": page, "psize": 100}
+        )
+        if not data or not data.get("success"):
+            return {
+                "success": False,
+                "start": start,
+                "end": end,
+                "message": (data or {}).get("message", "Не вдалося отримати список субагентів."),
+            }
+
+        subagents.extend(data.get("sub-agents", []))
+        metadata = data.get("_metadata", {})
+        if page >= int(metadata.get("totalPages", page)):
+            break
+        page += 1
+
+    async def report_for(agent: dict) -> tuple[dict, dict | None]:
+        login = agent.get("login")
+        if not login:
+            return agent, None
+        report = await _casino_get(
+            "/api/report-user",
+            {"login": login, "start": start_value, "end": end_value},
+        )
+        return agent, report if report and report.get("success") else None
+
+    reports = await asyncio.gather(*(report_for(agent) for agent in subagents))
+    totals = {"credit": 0.0, "deposit": 0.0, "close": 0.0, "result": 0.0, "invoice": 0.0}
+    items: list[dict] = []
+    failed: list[str] = []
+    for agent, report in reports:
+        login = str(agent.get("login", "—"))
+        if report is None:
+            failed.append(login)
+            continue
+        item = {field: float(report.get(field, 0) or 0) for field in totals}
+        item["login"] = login
+        items.append(item)
+        for field in totals:
+            totals[field] += item[field]
+
+    return {
+        "success": True,
+        "start": start,
+        "end": end,
+        "items": items,
+        "totals": totals,
+        "failed": failed,
+    }
 
 
 async def create_invoice(sum_grn: float):
