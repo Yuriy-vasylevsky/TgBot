@@ -55,7 +55,7 @@ async def ensure_users_table_and_columns():
         ]:
             if col not in cols:
                 await db.execute(sql)
-                print(f"✅ Додано колонку: {col}")
+                logging.info("Added database column: %s", col)
 
         await db.commit()
 
@@ -191,11 +191,10 @@ async def create_used_monobank_txs_table():
 from db.winlog import ensure_win_log_table 
 
 async def init_db():
-    print("🔧 init_db() запущено...")
+    logging.info("Initializing database")
     try:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("PRAGMA journal_mode=WAL")
             await ensure_users_table_and_columns()
             await create_pending_payments_table()
             await create_used_monobank_txs_table()
@@ -302,13 +301,13 @@ async def init_db():
                     "INSERT INTO cards (bank_name, display_name, card_number) VALUES (?, ?, ?)",
                     [("Карта 1", "Абанк", ""), ("Карта 2", "Приват", "")]
                 )
-                print("✅ Default cards added")
+                logging.info("Added default card slots")
 
             await db.commit()
             from db.check_operations import ensure_check_operations
             await ensure_check_operations(db)
             await db.commit()
-            print("🎉 База даних ініціалізована!")
+            logging.info("Database initialized")
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR in init_db: {e}", exc_info=True)
         raise

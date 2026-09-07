@@ -34,6 +34,14 @@ def get_matic_api() -> SuperplatMatic:
     return _matic_api
 
 
+async def close_matic_api() -> None:
+    """Close the shared Matic HTTP session during application shutdown."""
+    global _matic_api
+    if _matic_api is not None:
+        await _matic_api.close()
+        _matic_api = None
+
+
 async def create_matic_checks(amount: int, count: int = 1):
     """Створює Matic чеки через Superplat API"""
     try:

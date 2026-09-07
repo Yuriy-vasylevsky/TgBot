@@ -12,7 +12,6 @@ from html import escape
 from secrets import choice
 from db.promo import claim_gift
 from services.health import health
-from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiohttp import web
  
 from aiogram import Bot, Dispatcher, F, types
@@ -108,7 +107,6 @@ def acquire_instance_lock():
 # НАЛАШТУВАННЯ ЛОГІВ ТА БАЗИ
 # ==========================
 logging.basicConfig(level=logging.INFO)
-print(f"📁 DB_PATH = {DB_PATH}")
 
 # ==========================
 # ІНІЦІАЛІЗАЦІЯ БОТА
@@ -117,7 +115,7 @@ bot = Bot(
     token=config.TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher(events_isolation=SimpleEventIsolation())
+dp = Dispatcher()
 
 # Підключаємо роутери (тільки один раз!)
 dp.include_router(maize_router)
@@ -175,7 +173,6 @@ async def safe_api(request):
     response = web.json_response({
         "opened": state.get("opened", []),
         "total": 250,
-        "win_cell": state.get("win_cell", 198),      # ← додано (корисно)
         "users": state.get("users", {})              # ← САМЕ ГОЛОВНЕ для лідерборду!
     })
 
@@ -318,7 +315,7 @@ async def confirm_reset_gifts(message: types.Message):
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
         return
     await callback.answer()
     await callback.message.answer("🔄 Скидаємо...")
@@ -329,7 +326,7 @@ async def reset_gifts_confirmed(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "cancel_reset_gifts")
 async def cancel_reset_gifts(callback: types.CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
-        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        await callback.answer("⛔ Тільки адміністратор.", show_alert=True)
         return
     await callback.answer()
     await callback.message.answer("❌ Скасовано.")
@@ -447,7 +444,7 @@ async def main():
         if cleanup_task:
             cleanup_task.cancel()
             await asyncio.gather(cleanup_task, return_exceptions=True)
-        resources = [close_matic_api(), bot.session.close(), dp.storage.close(), dp.fsm.events_isolation.close()]
+        resources = [close_matic_api(), bot.session.close(), dp.storage.close()]
         if api_runner:
             resources.append(api_runner.cleanup())
         for result in await asyncio.gather(*resources, return_exceptions=True):
