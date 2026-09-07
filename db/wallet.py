@@ -8,7 +8,7 @@ from .core import DB_PATH
 from .referral import REFERRAL_BONUS, award_referral_bonus_in_transaction
 from datetime import datetime, timezone, timedelta
 
-KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 FIRST_DEPOSIT_BONUS = 50
 
@@ -37,7 +37,18 @@ async def _next_manual_payment_number(
     return int((await cursor.fetchone())[0])
 
 async def add_to_balance(user_id: int, amount_grn: int):
+    if type(amount_grn) is not int:
+        raise ValueError("Balance changes must be integer hryvnias")
     async with aiosqlite.connect(DB_PATH) as db:
+        if amount_grn < 0:
+            cur = await db.execute(
+                "UPDATE users SET balance=balance+? WHERE user_id=? AND balance>=?",
+                (amount_grn, user_id, -amount_grn),
+            )
+            if cur.rowcount != 1:
+                raise ValueError("Insufficient balance")
+            await db.commit()
+            return
         await db.execute("""
             INSERT INTO users (user_id, balance)
             VALUES (?, ?)
@@ -46,6 +57,45 @@ async def add_to_balance(user_id: int, amount_grn: int):
         """, (user_id, amount_grn, amount_grn))
 
         await db.commit()
+
+
+async def settle_monobank_payment(tx_id: str, user_id: int, amount_kop: int,
+                                  payment_id: str, username: str) -> dict:
+    """Reserve TX, credit balance/bonus/referral and close payment atomically."""
+    if not tx_id or amount_kop <= 0 or amount_kop % 100:
+        return {"ok": False, "reason": "invalid_payment"}
+    await ensure_daily_reset(user_id)
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
+        cur = await db.execute(
+            "SELECT 1 FROM pending_payments WHERE user_id=? AND comment=? AND amount_kop=?",
+            (user_id, payment_id, amount_kop),
+        )
+        if not await cur.fetchone():
+            return {"ok": False, "reason": "payment_changed"}
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO used_monobank_txs(tx_id,user_id,amount_kop,payment_id) "
+            "VALUES (?,?,?,?)", (tx_id,user_id,amount_kop,payment_id),
+        )
+        if cur.rowcount != 1:
+            return {"ok": False, "reason": "already_used"}
+        cur = await db.execute(
+            "SELECT first_deposit_bonus_pending FROM users WHERE user_id=?", (user_id,)
+        )
+        bonus = FIRST_DEPOSIT_BONUS if (await cur.fetchone())[0] else 0
+        amount = amount_kop // 100
+        await db.execute(
+            "UPDATE users SET balance=COALESCE(balance,0)+?,first_deposit_bonus_pending=0,"
+            "daily_net=COALESCE(daily_net,0)+? WHERE user_id=?", (amount+bonus,amount,user_id),
+        )
+        await db.execute("DELETE FROM pending_payments WHERE user_id=? AND comment=?", (user_id,payment_id))
+        await db.execute(
+            "INSERT INTO payment_logs(user_id,username,amount,comment) VALUES (?,?,?,?)",
+            (user_id,username,amount,payment_id),
+        )
+        referrer_id = await award_referral_bonus_in_transaction(db,user_id,REFERRAL_BONUS)
+        await db.commit()
+        return {"ok": True, "bonus": bonus, "referrer_id": referrer_id}
 
 
 async def _parse_iso_dt(dt_str: str | None) -> datetime | None:
@@ -85,7 +135,6 @@ async def _release_expired_freeze(db: aiosqlite.Connection, user_id: int) -> boo
         "UPDATE users SET balance = COALESCE(balance, 0) + ?, frozen_balance = 0, freeze_until = NULL WHERE user_id = ?",
         (frozen_balance or 0, user_id),
     )
-    await db.commit()
     return True
 
 
@@ -93,6 +142,7 @@ async def cleanup_expired_freezes() -> int:
     now = datetime.now(KYIV_TZ)
     released_count = 0
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
             "SELECT user_id, COALESCE(frozen_balance, 0), freeze_until FROM users WHERE freeze_until IS NOT NULL"
         )
@@ -121,7 +171,9 @@ async def cleanup_expired_freezes() -> int:
 
 async def get_freeze_info(user_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         await _release_expired_freeze(db, user_id)
+        await db.commit()
         cursor = await db.execute(
             "SELECT COALESCE(frozen_balance, 0), freeze_until FROM users WHERE user_id = ?",
             (user_id,),
@@ -165,6 +217,7 @@ async def freeze_balance(user_id: int, amount: int, hours: int) -> dict:
         return {"success": False, "reason": "invalid_duration"}
 
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         await _release_expired_freeze(db, user_id)
         cursor = await db.execute(
             "SELECT COALESCE(balance, 0), COALESCE(frozen_balance, 0), freeze_until FROM users WHERE user_id = ?",
@@ -199,6 +252,7 @@ async def freeze_balance(user_id: int, amount: int, hours: int) -> dict:
 
 async def unfreeze_balance(user_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
             "SELECT COALESCE(frozen_balance, 0) FROM users WHERE user_id = ?",
             (user_id,),
@@ -228,14 +282,14 @@ async def unfreeze_balance(user_id: int) -> dict:
 from datetime import datetime, date
 import aiosqlite
 
-KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 from datetime import datetime, timezone, timedelta
 import logging
 import aiosqlite
  
-KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
  
 CASHBACK_PERCENT = 0.10
 CASHBACK_GOAL = 1000
@@ -248,6 +302,7 @@ async def ensure_daily_reset(user_id: int):
     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
             "SELECT daily_net, yesterday_net, last_net_date FROM users WHERE user_id = ?",
             (user_id,)
@@ -469,7 +524,9 @@ async def has_recent_deposit(user_id: int) -> bool:
 
 async def get_balance(user_id: int) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         await _release_expired_freeze(db, user_id)
+        await db.commit()
         cursor = await db.execute(
             "SELECT COALESCE(balance, 0) FROM users WHERE user_id = ?", (user_id,)
         )
@@ -1510,6 +1567,7 @@ async def ensure_daily_game_win_reset(user_id: int):
     yesterday_str = (datetime.now(KYIV_TZ).date() - timedelta(days=1)).isoformat()
 
     async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("BEGIN IMMEDIATE")
         cursor = await db.execute(
             "SELECT daily_game_win, yesterday_game_win, last_game_win_date FROM users WHERE user_id = ?",
             (user_id,)
@@ -1629,7 +1687,7 @@ import aiosqlite
 from .core import DB_PATH
 from .wallet import get_daily_net, get_yesterday_net, get_daily_game_win
 
-KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 
 
@@ -1693,7 +1751,7 @@ from datetime import datetime, timezone, timedelta
 from .core import DB_PATH
 from .wallet import get_daily_net, get_balance, ensure_daily_reset
 
-KYIV_TZ = timezone(timedelta(hours=3))
+KYIV_TZ = ZoneInfo("Europe/Kyiv")
 
 PROMO_GOAL = 500
 PROMO_BALANCE_LIMIT = 0

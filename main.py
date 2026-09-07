@@ -8,7 +8,11 @@ import os
 import time
 from datetime import datetime, timedelta
 
-import monobank
+from html import escape
+from secrets import choice
+from db.promo import claim_gift
+from services.health import health
+from aiogram.fsm.storage.memory import SimpleEventIsolation
 from aiohttp import web
  
 from aiogram import Bot, Dispatcher, F, types
@@ -91,13 +95,14 @@ logger = logging.getLogger(__name__)
 # ===============================
 # ЗАХИСТ ВІД ПОДВІЙНОГО ЗАПУСКУ
 # ===============================
-LOCK_PORT = 9999
-_lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-try:
-    _lock_socket.bind(("127.0.0.1", LOCK_PORT))
-except OSError:
-    print("❌ Бот уже запущений! Другий екземпляр заблоковано.")
-    sys.exit(0)
+def acquire_instance_lock():
+    lock_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock_socket.bind(("127.0.0.1", int(os.getenv("LOCK_PORT", "9999"))))
+    except OSError:
+        lock_socket.close()
+        raise RuntimeError("Another bot instance is running or LOCK_PORT is unavailable")
+    return lock_socket
 
 # ==========================
 # НАЛАШТУВАННЯ ЛОГІВ ТА БАЗИ
@@ -112,7 +117,7 @@ bot = Bot(
     token=config.TOKEN,
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
-dp = Dispatcher()
+dp = Dispatcher(events_isolation=SimpleEventIsolation())
 
 # Підключаємо роутери (тільки один раз!)
 dp.include_router(maize_router)
@@ -175,8 +180,11 @@ async def safe_api(request):
     })
 
     # CORS (залишаємо як було)
-    origin = request.headers.get("Origin", "*")
-    response.headers["Access-Control-Allow-Origin"] = origin
+    origin = request.headers.get("Origin")
+    if origin in config.SAFE_API_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Vary"] = "Origin"
+    response.headers["Cache-Control"] = "no-store"
     response.headers["Access-Control-Allow-Methods"] = "GET, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "*"
     response.headers["Access-Control-Max-Age"] = "3600"
@@ -186,6 +194,7 @@ async def safe_api(request):
 
 async def run_api():
     app = web.Application()
+    app.router.add_get("/healthz", health)
     app.router.add_get("/api/safe", safe_api)
     app.router.add_options("/api/safe", safe_api)
 
@@ -193,7 +202,11 @@ async def run_api():
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
+    try:
+        await site.start()
+    except BaseException:
+        await runner.cleanup()
+        raise
     logger.info(f"🌐 Safe API запущено на порту {port}")
     return runner
 
@@ -201,51 +214,7 @@ async def run_api():
 # ==========================
 # ЗАПУСК
 # ==========================
-async def main():
-    await init_db()
-    await set_commands()
 
-    # Фонові завдання
-    asyncio.create_task(run_cleanup_loop())
-    
-    # Запускаємо Web API
-    api_runner = None
-    try:
-        api_runner = await run_api()
-    except Exception as e:
-        logger.error(f"Не вдалося запустити Safe API: {e}")
-
-        logger.info("🚀 Бот успішно запущений!")
-
-    try:
-        await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        pass
-    finally:
-        print("🛑 Завершуємо роботу бота...")
-        
-        # Закриваємо Matic API
-        try:
-            await matic_api.close()
-        except:
-            pass
-        
-        # Закриваємо бот
-        try:
-            await bot.session.close()
-        except:
-            pass
-        
-        # Закриваємо Web API
-        if api_runner:
-            try:
-                await api_runner.cleanup()
-            except:
-                pass
-        
-        print("✅ Бот коректно завершено.")
 
 
 # ==========================
@@ -253,7 +222,7 @@ async def main():
 # ==========================
 def generate_promocode(length: int = 8) -> str:
     chars = string.ascii_uppercase + string.digits
-    return "".join(random.choices(chars, k=length))
+    return "".join((choice(chars) for _ in range(length)))
 
 
 # ==========================
@@ -292,7 +261,7 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
     keyboard = main_menu(is_admin=is_admin, user_has_gift=gift_claimed)
 
     caption = (
-        f"👋 Привіт, {message.from_user.full_name}!\n\n"
+        f"👋 Привіт, {escape(message.from_user.full_name)}!\n\n"
         "Ласкаво просимо до гри 🎮"
     )
     if is_new_user:
@@ -317,8 +286,9 @@ async def gift_command(message: types.Message):
         return
 
     promo = generate_promocode()
-    await add_promocode(promo)
-    await set_gift_claimed(user_id, True)
+    if not await claim_gift(user_id, promo):
+        await message.answer("?? ?? ??? ???????? ?????????.")
+        return
 
     await message.answer(
         f"🎉 Ваш подарунковий промокод:\n\n💎 `{promo}`\n\nВикористайте його в боті!",
@@ -347,6 +317,10 @@ async def confirm_reset_gifts(message: types.Message):
 
 @dp.callback_query(F.data == "confirm_reset_gifts")
 async def reset_gifts_confirmed(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        return
+    await callback.answer()
     await callback.message.answer("🔄 Скидаємо...")
     await reset_all_gifts()
     await callback.message.answer("✅ Усі подарунки скинуто.")
@@ -354,6 +328,10 @@ async def reset_gifts_confirmed(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "cancel_reset_gifts")
 async def cancel_reset_gifts(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        return
+    await callback.answer()
     await callback.message.answer("❌ Скасовано.")
 
 
@@ -386,9 +364,9 @@ async def set_commands():
         BotCommand(command="jackpot5", description="💵💵💵💵💵 Jackpot"),
         BotCommand(command="skarb", description="💎 Найди скарб"),
         BotCommand(command="maize", description="🌽 Maize"),
-        BotCommand(command="/vote_prize", description="Голосування"),
-        BotCommand(command="/minefield", description="Промо борьба"),
-        BotCommand(command="/bank", description="Банк "),
+        BotCommand(command="vote_prize", description="Голосування"),
+        BotCommand(command="minefield", description="Промо борьба"),
+        BotCommand(command="bank", description="Банк "),
     ]
     await bot.set_my_commands(
         commands=admin_commands,
@@ -402,7 +380,7 @@ from db import (
     cleanup_expired_freezes,
     expire_stale_manual_payments,
 )
-from handlers.casino_api import _matic_api as matic_api
+from handlers.casino_api import close_matic_api
 
 MANUAL_PAYMENT_EXPIRY_HOURS = 24
 
@@ -454,30 +432,29 @@ async def run_cleanup_loop():
 # ЗАПУСК
 # ==========================
 async def main():
-    await init_db()
-    await set_commands()
-
-    asyncio.create_task(run_cleanup_loop())
-    api_runner = await run_api()
-
-    print("🚀 Бот успішно запущений!")
-
+    config.validate_config()
+    instance_lock = acquire_instance_lock()
+    api_runner = None
+    cleanup_task = None
     try:
+        await init_db()
+        await set_commands()
+        api_runner = await run_api()
+        cleanup_task = asyncio.create_task(run_cleanup_loop(), name="database-cleanup")
+        logger.info("Bot started")
         await dp.start_polling(bot)
-    except asyncio.CancelledError:
-        pass
-    except KeyboardInterrupt:
-        pass
     finally:
-        print("🛑 Завершуємо роботу бота...")
-        try:
-            await matic_api.close()
-        except:
-            pass
-        await bot.session.close()
-        if 'api_runner' in locals():
-            await api_runner.cleanup()
-        print("✅ Бот коректно завершено.")
+        if cleanup_task:
+            cleanup_task.cancel()
+            await asyncio.gather(cleanup_task, return_exceptions=True)
+        resources = [close_matic_api(), bot.session.close(), dp.storage.close(), dp.fsm.events_isolation.close()]
+        if api_runner:
+            resources.append(api_runner.cleanup())
+        for result in await asyncio.gather(*resources, return_exceptions=True):
+            if isinstance(result, BaseException):
+                logger.error("Shutdown cleanup failed: %s", type(result).__name__)
+        instance_lock.close()
+        logger.info("Bot stopped")
 
 
 if __name__ == "__main__":

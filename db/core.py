@@ -5,34 +5,7 @@ import aiosqlite
 from datetime import datetime, timezone, timedelta
 import json
 import time
-
-# DATA_DIR = os.environ.get("DATA_DIR", "/data")
-# DB_PATH = Path(DATA_DIR) / "users.db"
-
-# logging.basicConfig(level=logging.INFO)
-# print(f"💾 Final DB path: {DB_PATH}")
-
-# Визначення DATA_DIR з розумним fallback
-if os.getenv("RAILWAY_ENVIRONMENT"):  # або RAILWAY_GIT_COMMIT_SHA, RAILWAY_VOLUME_NAME тощо — будь-яка Railway-специфічна змінна
-    DATA_DIR = "/data"  # Volume на Railway монтується сюди
-else:
-    # Локально — використовуємо теку "data" в корені проєкту (створимо автоматично)
-    DATA_DIR = "data"
-
-# Повний шлях до бази
-DB_PATH = Path(DATA_DIR) / "users.db"
-
-# Створюємо теку автоматично (працює і локально, і на Railway)
-Path(DATA_DIR).mkdir(parents=True, exist_ok=True)
-
-# Додай це для дебагу (можна видалити після тестів)
-print(f"Поточна робоча директорія: {Path.cwd()}")
-print(f"DATA_DIR: {DATA_DIR}")
-print(f"Final DB path (resolved): {DB_PATH.resolve()}")
-print(f"Тека існує і доступна для запису? {Path(DATA_DIR).exists() and os.access(Path(DATA_DIR), os.W_OK)}")
-
-logging.basicConfig(level=logging.INFO)
-print(f"💾 Final DB path: {DB_PATH}")
+from settings import DATA_DIR, DB_PATH
 
 
 # ===================== ІНІЦІАЛІЗАЦІЯ =====================
@@ -220,7 +193,9 @@ from db.winlog import ensure_win_log_table
 async def init_db():
     print("🔧 init_db() запущено...")
     try:
+        Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("PRAGMA journal_mode=WAL")
             await ensure_users_table_and_columns()
             await create_pending_payments_table()
             await create_used_monobank_txs_table()
@@ -330,9 +305,13 @@ async def init_db():
                 print("✅ Default cards added")
 
             await db.commit()
+            from db.check_operations import ensure_check_operations
+            await ensure_check_operations(db)
+            await db.commit()
             print("🎉 База даних ініціалізована!")
     except Exception as e:
         logging.error(f"❌ CRITICAL ERROR in init_db: {e}", exc_info=True)
+        raise
 
 
 

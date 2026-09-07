@@ -1,3 +1,4 @@
+from db.promo import redeem_promocode
 
 
 
@@ -58,7 +59,7 @@ async def create_promocode(message: types.Message, state: FSMContext):
 async def save_promocode_handler(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-    code = message.text.strip()
+    code = (message.text or "").strip()
     await add_promocode(code)
     await message.answer(
         f"✅ Промокод <b>{code}</b> збережено",
@@ -183,6 +184,9 @@ async def show_promocodes(message: types.Message):
 
 @router.callback_query(F.data == "copy_codes")
 async def copy_codes_callback(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        return
     codes = await list_promocodes()
     if not codes:
         await callback.message.answer("❌ Немає активних промокодів")
@@ -197,6 +201,9 @@ async def copy_codes_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "confirm_clear_codes")
 async def confirm_clear_codes(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        return
     builder = InlineKeyboardBuilder()
     builder.button(text="✅ Так, видалити", callback_data="clear_codes")
     builder.button(text="❌ Скасувати", callback_data="cancel_clear")
@@ -211,6 +218,9 @@ async def confirm_clear_codes(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "clear_codes")
 async def clear_codes(callback: types.CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("? ?????? ?????????????.", show_alert=True)
+        return
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM promocodes")
         await db.commit()
@@ -235,18 +245,11 @@ async def enter_promocode(message: types.Message, state: FSMContext):
 
 @router.message(EnterPromoFSM.waiting_for_code)
 async def check_user_promo(message: types.Message, state: FSMContext):
-    code = message.text.strip()
+    code = (message.text or "").strip()
     user_id = message.from_user.id
     gift_claimed = await has_claimed_gift(user_id)
 
-    if await check_promocode(code):
-        # ✅ Видаляємо використаний промокод з бази
-        async with aiosqlite.connect(DB_PATH) as db:
-            await db.execute("DELETE FROM promocodes WHERE code = ?", (code,))
-            await db.commit()
-
-        await set_user_access(user_id, True)
-        await increment_games_played(user_id)
+    if await redeem_promocode(user_id, code):
         text = (
             "✅ <b>Промокод активовано!</b>\n\n"
             "🎮 Виберіть гру, щоб перевірити свою удачу!\n\n"

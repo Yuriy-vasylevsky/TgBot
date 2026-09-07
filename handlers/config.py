@@ -1,26 +1,30 @@
-from pathlib import Path
 import os
-from pathlib import Path
-from dotenv import load_dotenv
-
-import os
-from pathlib import Path
-
-DATA_DIR = os.environ.get("DATA_DIR", "/data")  
-DB_PATH = Path(DATA_DIR) / "users.db"
+from settings import DATA_DIR, DB_PATH
 
 
 CONTACT_PHONE = "https://t.me/KaSSa_4444"
 GROUP_LINK ="https://t.me/+Z2dJLGrGRVdmM2Yy"
 
 
-load_dotenv()
-
 TOKEN = os.getenv("TOKEN")
 MONO_TOKEN = os.getenv("MONO_TOKEN")
 MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 MONO_CARD = os.getenv("MONO_CARD")
+MATIC_SUBAGENT = os.getenv("MATIC_SUBAGENT", "").strip()
+MATIC_PASSWORD = os.getenv("MATIC_PASSWORD", "")
+SAFE_API_ORIGINS = tuple(filter(None, (
+    origin.strip() for origin in os.getenv("SAFE_API_ORIGINS", "").split(",")
+)))
+
+
+def validate_config():
+    from aiogram.utils.token import validate_token
+    if not TOKEN:
+        raise ValueError("TOKEN is required")
+    validate_token(TOKEN)
+    if ADMIN_ID <= 0:
+        raise ValueError("ADMIN_ID must be a positive Telegram user ID")
 
 import os
 

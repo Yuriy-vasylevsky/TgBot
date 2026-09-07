@@ -168,12 +168,15 @@ async def set_winrate(value: float):
 
 
 async def spend_promo_for_fortune(user_id: int, cost: int = 3) -> bool:
-    if await get_promo(user_id) < cost:
-        return False
+    if type(cost) is not int or cost <= 0:
+        raise ValueError("cost must be a positive integer")
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("UPDATE users SET games_played = games_played - ? WHERE user_id = ?", (cost, user_id))
+        cur = await db.execute(
+            "UPDATE users SET games_played = games_played - ? "
+            "WHERE user_id = ? AND games_played >= ?", (cost, user_id, cost)
+        )
         await db.commit()
-    return True
+        return cur.rowcount == 1
 
 
 async def add_promo(user_id: int, amount: int = 1):
