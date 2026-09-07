@@ -47,6 +47,8 @@ MAX_RECEIPT_FILE_SIZE_MB = int(os.getenv("MAX_RECEIPT_FILE_SIZE_MB", "10"))
 CASINO_API_BASE = "https://chcwhite.net"   
 CASINO_TR_PREFIX = "BOT_"  
 CASINO_TIMEZONE = os.getenv("CASINO_TIMEZONE", "Europe/Kyiv")
+# Логін касира Champion, для якого бот показує щоденний звіт.
+CASINO_REPORT_LOGIN = os.getenv("CASINO_REPORT_LOGIN", "Xbtrat1234").strip()
 
 
 CASINO_PUBLIC_KEY = os.getenv("CASINO_PUBLIC_KEY")

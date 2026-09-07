@@ -834,16 +834,6 @@ async def register_receipt_fingerprints(
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("BEGIN IMMEDIATE")
         try:
-            cursor = await db.execute(
-                """
-                SELECT file_sha256, perceptual_hash
-                FROM manual_payments
-                WHERE id = ?
-                """,
-                (payment_id,),
-            )
-            current = await cursor.fetchone()
-            previous_own_sha = current[0] if current else None
             await db.execute(
                 """
                 UPDATE manual_payments
@@ -865,13 +855,8 @@ async def register_receipt_fingerprints(
             previous = await cursor.fetchall()
 
             duplicate = None
-            if previous_own_sha and previous_own_sha == file_sha256:
-                duplicate = {
-                    "duplicate": True,
-                    "kind": "exact",
-                    "payment_id": payment_id,
-                    "distance": 0,
-                }
+            # Retrying an uncredited request after an OCR/API failure is not
+            # another payment. Other requests still participate in deduplication.
             for previous_id, previous_sha in previous:
                 if duplicate:
                     break

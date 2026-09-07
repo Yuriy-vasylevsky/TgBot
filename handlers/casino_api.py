@@ -2,7 +2,6 @@
 
 import hashlib
 import logging
-import asyncio
 from datetime import datetime, time, timedelta
 from urllib.parse import urlencode
 from typing import Optional
@@ -15,6 +14,7 @@ from .ma import SuperplatMatic
 from handlers.config import (
     CASINO_API_BASE,
     CASINO_PUBLIC_KEY,
+    CASINO_REPORT_LOGIN,
     CASINO_SECRET_KEY,
     CASINO_TIMEZONE,
     CASINO_TR_PREFIX,
@@ -115,69 +115,51 @@ async def _casino_get(endpoint: str, params: dict) -> dict | None:
             if "application/json" not in response.headers.get("content-type", ""):
                 logger.error("Champion returned a non-JSON response")
                 return None
-            return response.json()
+            data = response.json()
+            logger.info(
+                "Champion response for %s: success=%r, fields=%s",
+                endpoint,
+                data.get("success"),
+                ", ".join(sorted(data.keys())),
+            )
+            return data
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("Champion request to %s failed: %s", endpoint, exc)
         return None
 
 
 async def get_champion_yesterday_stats() -> dict:
-    """Збирає сумарний report-user за всіма субагентами за попередню операційну добу."""
+    """Повертає report-user касира за попередню операційну добу."""
     start, end = champion_yesterday_period()
     start_value, end_value = _api_date(start), _api_date(end)
+    if not CASINO_REPORT_LOGIN:
+        return {
+            "success": False,
+            "start": start,
+            "end": end,
+            "message": "Не задано CASINO_REPORT_LOGIN.",
+        }
 
-    subagents: list[dict] = []
-    page = 1
-    while True:
-        data = await _casino_get(
-            "/api/subagents", {"parent": "", "page": page, "psize": 100}
-        )
-        if not data or not data.get("success"):
-            return {
-                "success": False,
-                "start": start,
-                "end": end,
-                "message": (data or {}).get("message", "Не вдалося отримати список субагентів."),
-            }
-
-        subagents.extend(data.get("sub-agents", []))
-        metadata = data.get("_metadata", {})
-        if page >= int(metadata.get("totalPages", page)):
-            break
-        page += 1
-
-    async def report_for(agent: dict) -> tuple[dict, dict | None]:
-        login = agent.get("login")
-        if not login:
-            return agent, None
-        report = await _casino_get(
-            "/api/report-user",
-            {"login": login, "start": start_value, "end": end_value},
-        )
-        return agent, report if report and report.get("success") else None
-
-    reports = await asyncio.gather(*(report_for(agent) for agent in subagents))
-    totals = {"credit": 0.0, "deposit": 0.0, "close": 0.0, "result": 0.0, "invoice": 0.0}
-    items: list[dict] = []
-    failed: list[str] = []
-    for agent, report in reports:
-        login = str(agent.get("login", "—"))
-        if report is None:
-            failed.append(login)
-            continue
-        item = {field: float(report.get(field, 0) or 0) for field in totals}
-        item["login"] = login
-        items.append(item)
-        for field in totals:
-            totals[field] += item[field]
+    data = await _casino_get(
+        "/api/report-user",
+        {"login": CASINO_REPORT_LOGIN, "start": start_value, "end": end_value},
+    )
+    if not data or not data.get("success"):
+        return {
+            "success": False,
+            "start": start,
+            "end": end,
+            "message": (data or {}).get("message", "Не вдалося отримати звіт касира."),
+        }
 
     return {
         "success": True,
         "start": start,
         "end": end,
-        "items": items,
-        "totals": totals,
-        "failed": failed,
+        "login": CASINO_REPORT_LOGIN,
+        "deposit": float(data.get("deposit", 0) or 0),
+        "close": float(data.get("close", 0) or 0),
+        "result": float(data.get("result", 0) or 0),
     }
 
 

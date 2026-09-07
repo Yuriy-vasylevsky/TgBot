@@ -67,6 +67,8 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                     gpt_confidence REAL,
                     analysis_started_at TEXT,
                     analysis_completed_at TEXT,
+                    file_sha256 TEXT,
+                    perceptual_hash TEXT,
                     receipt_retry_count INTEGER NOT NULL DEFAULT 0,
                     payment_date TEXT,
                     daily_number INTEGER
@@ -299,6 +301,23 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                 payment_id, 606, "fourth", "photo"
             )
         )
+
+    async def test_same_receipt_can_retry_own_pending_payment_but_not_another(self):
+        first = await wallet.create_manual_payment(901, "player", "Player", 200, "file", "photo")
+        self.assertFalse((await wallet.register_receipt_fingerprints(first, "hash1", "phash"))["duplicate"])
+        await wallet.update_pending_manual_payment_receipt(first, 901, "file", "photo")
+        self.assertFalse((await wallet.register_receipt_fingerprints(first, "hash1", "phash"))["duplicate"])
+        other = await wallet.create_manual_payment(902, "other", "Other", 200, "file", "photo")
+        duplicate = await wallet.register_receipt_fingerprints(other, "hash1", "phash")
+        self.assertTrue(duplicate["duplicate"])
+        self.assertEqual(duplicate["payment_id"], first)
+
+    async def test_same_layout_with_different_file_is_not_a_duplicate(self):
+        first = await wallet.create_manual_payment(903, "one", "One", 200, "one", "photo")
+        other = await wallet.create_manual_payment(904, "two", "Two", 300, "two", "photo")
+        await wallet.register_receipt_fingerprints(first, "hash1", "same-layout")
+        result = await wallet.register_receipt_fingerprints(other, "hash2", "same-layout")
+        self.assertFalse(result["duplicate"])
 
     async def test_recent_payment_returns_remaining_manual_review_window(self):
         payment_id = await wallet.create_manual_payment(

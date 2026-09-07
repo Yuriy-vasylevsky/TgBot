@@ -1134,7 +1134,8 @@ async def _process_manual_receipt(
         model,
     )
     try:
-        now_kyiv = datetime.now(KYIV_ZONE)
+        # Validate against receipt arrival, not download/API queue completion.
+        now_kyiv = message.date.astimezone(KYIV_ZONE)
         if analyzer_name == RECEIPT_ANALYZER_DEEPSEEK:
             analysis = await analyze_receipt_with_deepseek(
                 api_key=api_key,
@@ -1172,6 +1173,7 @@ async def _process_manual_receipt(
             "Receipt analysis result | analyzer=%s payment_id=%s user_id=%s amount=%s "
             "status=%s amount_found=%s card_suffix=%s card_candidates=%s "
             "allowed_last4=%s iban_match=%s confidence=%.3f "
+            "time=%s time_source=%s visible_time=%s difference_minutes=%s "
             "final=%s reason=%s",
             analyzer_name,
             payment_id,
@@ -1187,6 +1189,10 @@ async def _process_manual_receipt(
             sorted(card["last4"] for card in allowed_cards),
             analysis.recipient_iban in allowed_ibans,
             analysis.confidence,
+            analysis.payment_datetime,
+            analysis.payment_time_source,
+            analysis.payment_time_visible_text,
+            computed_difference,
             "approve" if approved else "manual_review",
             code_reason,
         )
@@ -1214,6 +1220,7 @@ async def _process_manual_receipt(
             receipt_type=receipt_type,
             receipt_file_id=receipt_file_id,
             reason=reason,
+            offer_retry=True,
         )
         return
 
@@ -1340,10 +1347,10 @@ async def receive_manual_receipt(message: Message, state: FSMContext):
         await message.answer("⏳ Ваша попередня квитанція вже обробляється.")
         return
 
-    await state.clear()
-    await message.answer("🔍 Квитанцію отримано. Перевіряю платіж...")
     async with lock:
         try:
+            await state.clear()
+            await message.answer("🔍 Квитанцію отримано. Перевіряю платіж...")
             await _process_manual_receipt(
                 message,
                 amount=amount,

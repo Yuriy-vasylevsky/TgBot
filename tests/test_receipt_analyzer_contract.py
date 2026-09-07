@@ -151,6 +151,17 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
     def test_valid_payment_receipt_is_approved(self):
         self.assertTrue(self.evaluate()[0])
 
+    def test_formatted_amount_without_kopecks_is_accepted(self):
+        for amount in ("200,00 грн", "−200.00 UAH", "200 ₴"):
+            with self.subTest(amount=amount):
+                self.assertTrue(self.evaluate(amount_found=amount)[0])
+
+    def test_fractional_amount_cannot_be_rounded_into_expected_amount(self):
+        for amount in ("200,50 грн", "199.99"):
+            with self.subTest(amount=amount):
+                with self.assertRaises(ValueError):
+                    PaymentReceiptAnalysis(**(self.valid_data | {"amount_found": amount}))
+
     def test_missing_visible_time_is_sent_to_manual_review(self):
         result = self.evaluate(
             payment_datetime=None,
@@ -196,6 +207,82 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
     def test_datetime_must_match_visible_time_evidence(self):
         result = self.evaluate(payment_time_visible_text="04.08.2026 13:00")
         self.assertFalse(result[0])
+
+    def test_utc_datetime_matches_kyiv_visible_time(self):
+        result = self.evaluate(payment_datetime="2026-08-04T11:30:00Z")
+        self.assertTrue(result[0], result[1])
+
+    def test_empty_and_invalid_generated_datetime_use_complete_visible_evidence(self):
+        for raw in (None, "", "   ", "не визначено", "invalid"):
+            with self.subTest(raw=raw):
+                result = self.evaluate(payment_datetime=raw)
+                self.assertTrue(result[0], result[1])
+
+    def test_time_separators_and_direction_marks(self):
+        for text in ("04.08.2026 14 : 30", "04.08.2026 14：30", "04.08.2026 14.30", "04.08.2026 14\u200e:30"):
+            with self.subTest(text=text):
+                result = self.evaluate(payment_datetime=None, payment_time_visible_text=text)
+                self.assertTrue(result[0], result[1])
+
+    def test_date_alone_is_not_visible_time(self):
+        result = self.evaluate(payment_datetime=None, payment_time_visible_text="04.08.2026")
+        self.assertFalse(result[0])
+
+    def test_phone_time_uses_nearest_kyiv_date_at_midnight(self):
+        self.now = datetime(2026, 8, 5, 0, 2, tzinfo=ZoneInfo("Europe/Kyiv"))
+        result = self.evaluate(
+            payment_datetime="2026-08-05T23:59:00+03:00",
+            payment_time_source="phone_status_bar",
+            payment_time_visible_text="23:59",
+        )
+        self.assertTrue(result[0], result[1])
+        self.assertEqual(result[2], 3)
+
+    def test_phone_time_uses_winter_kyiv_offset(self):
+        self.now = datetime(2026, 12, 4, 14, 30, tzinfo=ZoneInfo("Europe/Kyiv"))
+        result = self.evaluate(
+            payment_datetime="2026-12-04T14:30:00+03:00",
+            payment_time_source="phone_status_bar",
+            payment_time_visible_text="14:30",
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_old_visible_operation_date_cannot_be_replaced_by_generated_today(self):
+        result = self.evaluate(payment_time_visible_text="03.08.2026 14:30")
+        self.assertFalse(result[0])
+        self.assertIn("дата", result[1])
+
+    def test_invalid_visible_date_does_not_fall_back_to_today(self):
+        result = self.evaluate(payment_datetime=None, payment_time_visible_text="31.02.2026 14:30")
+        self.assertFalse(result[0])
+
+    def test_time_recheck_includes_missing_time_and_inconsistent_evidence(self):
+        for changes in (
+            {"payment_datetime": None, "payment_time_source": "not_visible", "payment_time_visible_text": None},
+            {"payment_time_visible_text": None},
+            {"payment_time_visible_text": "04.08.2026 13:00"},
+        ):
+            with self.subTest(changes=changes):
+                analysis = PaymentReceiptAnalysis(**(self.valid_data | changes))
+                self.assertTrue(_needs_time_recheck(analysis, self.now))
+
+    def test_rechecked_visible_phone_time_does_not_require_generated_datetime(self):
+        analysis = PaymentReceiptAnalysis(**self.valid_data)
+        _apply_verified_time_evidence(analysis, PaymentTimeEvidence(
+            time_is_visible=True, source="phone_status_bar",
+            payment_datetime=None, visible_text="14:30", confidence=1,
+            reason="Час видно на телефоні",
+        ))
+        result = evaluate_auto_approval(
+            analysis, expected_amount=200, allowed_card_last4={"2296"},
+            now_kyiv=self.now, max_time_difference_minutes=10,
+        )
+        self.assertTrue(result[0], result[1])
+
+    def test_visible_stale_time_still_fails_without_generated_datetime(self):
+        result = self.evaluate(payment_datetime=None, payment_time_visible_text="04.08.2026 13:00")
+        self.assertFalse(result[0])
+        self.assertEqual(result[2], 90)
 
     def test_contradictory_not_visible_source_triggers_time_recheck(self):
         analysis = PaymentReceiptAnalysis(
@@ -383,6 +470,28 @@ class ReceiptAnalyzerContractTests(unittest.TestCase):
             ],
         )
         self.assertTrue(result[0], result[1])
+
+    def test_correct_card_in_transcribed_evidence_survives_wrong_suffix_field(self):
+        for number in ("4323 3570 3173 2296", "432335******2296"):
+            with self.subTest(number=number):
+                result = self.evaluate(
+                    recipient_card_suffix="3296", card_candidates=[{
+                        "role": "recipient", "visible_suffix": "3296",
+                        "context_label": "Картка отримувача",
+                        "evidence_text": f"Картка отримувача: {number}",
+                    }],
+                )
+                self.assertTrue(result[0], result[1])
+
+    def test_iban_evidence_does_not_supply_card_match(self):
+        result = self.evaluate(
+            recipient_card_suffix=None, card_candidates=[{
+                "role": "recipient", "visible_suffix": "",
+                "context_label": "Картка / IBAN",
+                "evidence_text": "UA95 3077 7000 0002 9241 8275 02296",
+            }],
+        )
+        self.assertFalse(result[0])
 
     def test_exact_hidden_iban_is_accepted_without_card_match(self):
         iban = "UA953077700000029241827505098"

@@ -8,6 +8,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass
+from decimal import Decimal
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -17,7 +18,7 @@ import imagehash
 from aiogram import Bot
 from openai import AsyncOpenAI
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, UnidentifiedImageError
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
@@ -116,6 +117,25 @@ class PaymentReceiptAnalysis(BaseModel):
     confidence: float = Field(ge=0, le=1)
     reason: str
 
+    @field_validator("amount_found", mode="before")
+    @classmethod
+    def normalize_amount(cls, value):
+        if not isinstance(value, str):
+            return value
+        text = value.strip().replace("−", "-")
+        # Compatible providers sometimes return the bank's formatted string.
+        # Normalize currency and grouping; never round non-zero kopecks.
+        match = re.fullmatch(
+            r"([+-]?(?:[0-9]+|[0-9]{1,3}(?:[ \u00a0\u202f][0-9]{3})+)(?:[.,][0-9]{1,2})?)"
+            r"\s*(?:грн\.?|UAH|₴)?", text, re.IGNORECASE,
+        )
+        if not match:
+            return value
+        number = Decimal(re.sub(r"\s", "", match[1]).replace(",", "."))
+        if number != number.to_integral_value():
+            raise ValueError("Сума містить ненульові копійки; округлення заборонене")
+        return int(number)
+
 
 class PaymentTimeEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -128,12 +148,16 @@ class PaymentTimeEvidence(BaseModel):
     reason: str
 
 
-def _needs_time_recheck(analysis: PaymentReceiptAnalysis) -> bool:
+def _needs_time_recheck(
+    analysis: PaymentReceiptAnalysis, now_kyiv: datetime | None = None,
+) -> bool:
     """Detect the unsafe contradiction returned in some vision responses."""
-    return (
-        analysis.payment_time_source == "not_visible"
-        and bool((analysis.payment_datetime or "").strip())
-    )
+    if analysis.payment_time_source == "not_visible":
+        return True
+    if now_kyiv is not None:
+        _, reason = _resolve_receipt_time(analysis, now_kyiv)
+        return reason is not None
+    return not _TIME_PATTERN.search(_normalize_time_text(analysis.payment_time_visible_text))
 
 
 def _apply_verified_time_evidence(
@@ -143,8 +167,7 @@ def _apply_verified_time_evidence(
     has_complete_visible_evidence = (
         evidence.time_is_visible
         and evidence.source in {"operation", "phone_status_bar"}
-        and bool((evidence.payment_datetime or "").strip())
-        and bool((evidence.visible_text or "").strip())
+        and bool(_TIME_PATTERN.search(_normalize_time_text(evidence.visible_text)))
     )
     if has_complete_visible_evidence:
         analysis.payment_datetime = evidence.payment_datetime
@@ -348,8 +371,10 @@ async def _recheck_receipt_time_with_openai(
 ) -> PaymentTimeEvidence:
     prompt = f"""
 Перевір ТІЛЬКИ видимий час на цих зображеннях однієї банківської квитанції.
-Перша перевірка дала суперечливий результат: payment_datetime=
-{initial_analysis.payment_datetime!r}, але payment_time_source="not_visible".
+Перша перевірка дала неповний або суперечливий результат: payment_datetime=
+{initial_analysis.payment_datetime!r}, payment_time_source=
+{initial_analysis.payment_time_source!r}, видимий текст=
+{initial_analysis.payment_time_visible_text!r}.
 Не вважай попередній payment_datetime доказом і прочитай зображення заново.
 
 Перше зображення — повний документ, друге — збільшена верхня смуга, решта —
@@ -391,7 +416,7 @@ async def _recheck_receipt_time_with_openai(
                 },
             ],
             text_format=PaymentTimeEvidence,
-            max_output_tokens=250,
+            max_output_tokens=500,
             reasoning={"effort": "none"} if disable_reasoning else None,
         )
     if response.output_parsed is not None:
@@ -451,6 +476,9 @@ async def analyze_receipt_with_openai(
   payment_can_be_cancelled=false та cancellation_visible_text=null;
 - amount_found — фактична сума переказу цілим числом; знак мінус збережи,
   якщо він показаний біля вибраної суми;
+- обирай суму переказу/зарахування отримувачу, без комісії. Наприклад,
+  «Сума операції: 200,00», «Комісія: 7,00», «Сума до списання: 207,00»
+  означає amount_found=200. Не використовуй залишок на рахунку;
 - спочатку знайди КОЖНУ видиму картку або платіжний інструмент і додай її до
   card_candidates. Для кожної вкажи role, лише фактично видиме закінчення,
   точний найближчий підпис у context_label та короткий дослівний фрагмент у
@@ -594,7 +622,7 @@ async def analyze_receipt_with_openai(
                     },
                 ],
                 text_format=PaymentReceiptAnalysis,
-                max_output_tokens=700,
+                max_output_tokens=1600,
                 # DeepSeek Vision has thinking enabled by default. Receipt OCR
                 # needs a short deterministic JSON answer, not chain-of-thought.
                 reasoning={"effort": "none"} if base_url else None,
@@ -603,7 +631,7 @@ async def analyze_receipt_with_openai(
         if analysis is None:
             analysis = _parse_json_response(response, PaymentReceiptAnalysis)
 
-        if _needs_time_recheck(analysis):
+        if _needs_time_recheck(analysis, now_kyiv):
             try:
                 time_evidence = await _recheck_receipt_time_with_openai(
                     client=client,
@@ -721,8 +749,82 @@ def _normalize_iban(value: str | None) -> str | None:
     return normalized
 
 
+def _card_suffixes_from_evidence(candidate: CardCandidate) -> set[str]:
+    """Recover full/masked card numbers already transcribed in a card field."""
+    label = candidate.context_label.casefold()
+    if "iban" in label or not any(
+        marker in label for marker in ("карт", "card", "платіжного інструмент", "електронного гаман")
+    ):
+        return set()
+    evidence = candidate.evidence_text
+    if re.search(r"\b[A-Z]{2}\s*[0-9]{2}", evidence, re.IGNORECASE):
+        return set()  # A mixed IBAN field must not turn into a card suffix.
+    full_cards = re.findall(
+        r"(?<![A-Za-z0-9])(?:[0-9][ \u00a0-]?){15}[0-9](?![A-Za-z0-9])",
+        evidence,
+    )
+    masked_suffixes = re.findall(r"[*•xX]{2,}\s*([0-9]{2,4})(?![0-9])", evidence)
+    return {
+        suffix for value in [*full_cards, *masked_suffixes]
+        if (suffix := _normalize_card_suffix(value))
+    }
+
+
+def _normalize_time_text(value: str | None) -> str:
+    text = (value or "").translate(str.maketrans({
+        "：": ":", "∶": ":", "\u200e": "", "\u200f": "", "\u200b": "",
+    }))
+    text = re.sub(r"\s*:\s*", ":", text)
+    # HH.MM is used by some banks; never interpret part of a date as time.
+    text = re.sub(r"(?<![\d.])([01]?\d|2[0-3])\.([0-5]\d)(?![\d.])", r"\1:\2", text)
+    return " ".join(text.strip().replace(",", " ").split())
+
+
+def _resolve_receipt_time(
+    analysis: PaymentReceiptAnalysis, now_kyiv: datetime,
+) -> tuple[datetime | None, str | None]:
+    if analysis.payment_time_source == "not_visible":
+        return None, "час не видно на квитанції або екрані телефона"
+    visible = _normalize_time_text(analysis.payment_time_visible_text)
+    time_matches = list(_TIME_PATTERN.finditer(visible))
+    if not time_matches:
+        return None, "немає підтвердження, що час видимий на зображенні"
+    if len({match.group(0) for match in time_matches}) != 1:
+        return None, "знайдено кілька різних значень часу; потрібне уточнення часу операції"
+
+    raw = (analysis.payment_datetime or "").strip()
+    parsed = _parse_payment_datetime(raw, now_kyiv) if raw else None
+    visible_date = bool(
+        _DAY_FIRST_DATE_PATTERN.search(visible) or _YEAR_FIRST_DATE_PATTERN.search(visible)
+    )
+    evidence_time = _parse_payment_datetime(visible, now_kyiv)
+    if evidence_time is None:
+        return None, "час операції має невалідний формат"
+
+    if analysis.payment_time_source == "phone_status_bar":
+        # The model invents the date/offset when only HH:MM is visible. Build
+        # those locally, including midnight and Kyiv daylight-saving changes.
+        payment_time = evidence_time
+    elif not raw or parsed is None:
+        # Recover only from a complete visible operation date, or from HH:MM
+        # when no generated date existed. Do not erase an unreadable old date.
+        if raw and not visible_date:
+            return None, "час операції має невалідний формат"
+        payment_time = evidence_time
+    else:
+        payment_time = parsed.astimezone(KYIV_ZONE)
+        if visible_date and payment_time.date() != evidence_time.date():
+            return None, "розпізнана дата не збігається з видимим текстом"
+        if (payment_time.hour, payment_time.minute) != (
+            evidence_time.hour, evidence_time.minute,
+        ):
+            return None, "розпізнаний час не збігається з видимим текстом"
+
+    return payment_time.astimezone(KYIV_ZONE), None
+
+
 def _parse_payment_datetime(value: str, now_kyiv: datetime) -> datetime | None:
-    text = " ".join(value.strip().replace(",", " ").split())
+    text = _normalize_time_text(value)
     try:
         parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
         return parsed if parsed.tzinfo else parsed.replace(tzinfo=KYIV_ZONE)
@@ -824,6 +926,7 @@ def evaluate_auto_approval(
         candidate_suffix = _normalize_card_suffix(candidate.visible_suffix)
         if candidate_suffix:
             visible_card_suffixes.add(candidate_suffix)
+        visible_card_suffixes.update(_card_suffixes_from_evidence(candidate))
 
     normalized_allowed_ibans = {
         normalized
@@ -911,30 +1014,10 @@ def evaluate_auto_approval(
     if selected_iban:
         analysis.recipient_iban = selected_iban
 
-    if analysis.payment_time_source == "not_visible":
-        return False, "час не видно на квитанції або екрані телефона", None
-    visible_time_text = (analysis.payment_time_visible_text or "").strip()
-    visible_time_match = _TIME_PATTERN.search(visible_time_text)
-    if not visible_time_match:
-        return False, "немає підтвердження, що час видимий на зображенні", None
-
-    # Structured output іноді правильно знаходить видимий HH:MM і його
-    # джерело, але лишає payment_datetime порожнім. У такому разі безпечно
-    # відновлюємо дату/час із самого видимого тексту: для HH:MM парсер обирає
-    # найближчу київську дату (вчора/сьогодні/завтра), після чого нижче все
-    # одно діє звичайне обмеження max_time_difference_minutes.
-    payment_datetime_text = (analysis.payment_datetime or visible_time_text).strip()
-    payment_time = _parse_payment_datetime(payment_datetime_text, now_kyiv)
-    if payment_time is None:
-        return False, "час операції має невалідний формат", None
-    if not (analysis.payment_datetime or "").strip():
-        analysis.payment_datetime = payment_time.isoformat()
-
-    if (
-        payment_time.hour != int(visible_time_match.group("hour"))
-        or payment_time.minute != int(visible_time_match.group("minute"))
-    ):
-        return False, "розпізнаний час не збігається з видимим текстом", None
+    payment_time, time_error = _resolve_receipt_time(analysis, now_kyiv)
+    if time_error:
+        return False, time_error, None
+    analysis.payment_datetime = payment_time.isoformat()
 
     difference_minutes = round(
         abs((now_kyiv - payment_time.astimezone(KYIV_ZONE)).total_seconds()) / 60
