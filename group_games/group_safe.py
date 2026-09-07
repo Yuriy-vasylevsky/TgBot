@@ -10,7 +10,7 @@ import random
 import re
 import string
 from html import escape
-from handlers.config import ADMIN_ID
+from handlers.config import ADMIN_ID, SAFE_WEB_URL
 from db import close_safe_round_and_credit, get_safe_state, save_safe_state
 
 router = Router(name="group_safe")
@@ -129,7 +129,7 @@ def safe_status_text(state: dict) -> str:
         "🔒 <b>СЕЙФ 250</b> 🔒\n\n"
         f"🔓 Відкрито: <b>{len(state.get('opened', []))}</b> / {TOTAL_CELLS}\n"
         "🏆 Виграшний номер: <b>❓❓❓</b>\n\n"
-        "🔗 <a href='http://77.42.71.244:8080/'>Переглянути Сейф</a>"
+        f"🔗 <a href='{SAFE_WEB_URL}/'>Переглянути Сейф</a>"
     )
 
 
@@ -646,6 +646,12 @@ async def admin_open_cell(message: Message):
             f"🔓 Клітинка <b>{win_cell}</b> — ВИГРАШНА!\n"
             f"💰 Виграш: <b>2000 грн</b>",
             parse_mode="HTML"
+        )
+
+        await save_state(
+            opened=[],
+            win_cell=win_cell,
+            users={}
         )
 
         await message.bot.send_message(

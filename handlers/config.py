@@ -16,6 +16,7 @@ MATIC_PASSWORD = os.getenv("MATIC_PASSWORD", "")
 SAFE_API_ORIGINS = tuple(filter(None, (
     origin.strip() for origin in os.getenv("SAFE_API_ORIGINS", "").split(",")
 )))
+SAFE_WEB_URL = os.getenv("SAFE_WEB_URL", "http://77.42.71.244:8080/").rstrip("/")
 
 
 def validate_config():
