@@ -543,7 +543,7 @@ async def _payout_winner(
         await bot.send_message(
             chat_id,
             f"👤 <b>{safe_name}</b> — виграш <b>{prize} грн</b>\n"
-            "❌ Не було депозиту! Виграш не нараховано❗",
+            "❌ Не було депозиту або у вас був вивід протягом дня! Виграш не нараховано❗",
             parse_mode="HTML",
         )
         return 0

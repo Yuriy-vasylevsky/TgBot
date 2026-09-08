@@ -211,7 +211,7 @@ async def _payout_player(chat_id: int, bot, user_id: int, name: str, taken: int)
             chat_id=chat_id,
             text=(
                 f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
-                f"❌ Не було депозиту! Виграш не нараховано❗"
+                f"❌ Не було депозиту або у вас був вивід протягом дня! Виграш не нараховано❗"
             ),
             parse_mode="HTML"
         )

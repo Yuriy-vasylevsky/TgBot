@@ -104,7 +104,7 @@ async def fortune_spin(cb: CallbackQuery):
 
     if total_net < 200:
         await cb.answer(
-            "❌ Не було депозиту!\n\n",
+            "❌ Не було депозиту або у вас був вивід протягом дня!\n\n",
             show_alert=True,
         )
         return

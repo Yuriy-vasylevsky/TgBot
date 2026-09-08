@@ -13,7 +13,7 @@ async def reject_without_deposit(message, tracked_messages: list[int]) -> bool:
 
     notice = await message.answer(
         f"{message.from_user.mention_html()}, ви не можете брати участь у цій грі.\n"
-        "❌ Потрібно мати депозит сьогодні або вчора.",
+        "❌ Не було депозиту сьогодні або вчора, або у вас був вивід протягом дня.",
         parse_mode="HTML",
     )
     tracked_messages.append(notice.message_id)
