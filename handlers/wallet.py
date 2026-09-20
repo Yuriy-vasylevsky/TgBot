@@ -94,7 +94,7 @@ _payment_locks: dict[int, asyncio.Lock] = {}
 _manual_receipt_locks: dict[int, asyncio.Lock] = {}
 router = Router(name="wallet")
 
-MIN_SUM = 200
+MIN_SUM = 300
 KYIV_OFFSET = timedelta(hours=3)
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 

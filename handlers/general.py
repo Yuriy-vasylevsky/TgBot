@@ -44,7 +44,7 @@ async def send_card(message: types.Message):
     text = "💳 Поточні картки:\n\n" + "\n".join(
         [f"{bank}: <code>{num}</code>" for bank, num in cards]
     )
-    text += "\n\n💵 Мінімальний платіж — 200 грн\n💸 Мінімальний вивід — 400 грн\n\n⏰ Касир доступний 9:00–00:00"
+    text += "\n\n💵 Мінімальний платіж — 300 грн\n💸 Мінімальний вивід — 500 грн\n\n⏰ Касир доступний 9:00–00:00"
     await message.answer(text, parse_mode="HTML")
 
 
