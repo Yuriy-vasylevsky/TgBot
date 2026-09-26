@@ -1,6 +1,7 @@
 from aiogram import Router, F, types
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from datetime import datetime, timezone, timedelta
+from html import escape
 from db import get_all_users_info, search_users, get_issued_checks_for_user, get_all_balances
 from handlers.config import ADMIN_ID
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
@@ -694,8 +695,12 @@ async def show_all_balances(message: types.Message):
     medals = {1: "🥇", 2: "🥈", 3: "🥉"}
 
     for i, u in enumerate(users, start=1):
-        name = (u.get("full_name") or "Без імені")[:20]
-        username = f"@{u['username']}" if u.get("username") else f"<code>{u['user_id']}</code>"
+        name = escape(str(u.get("full_name") or "Без імені")[:20])
+        username = (
+            f"@{escape(str(u['username']))}"
+            if u.get("username")
+            else f"<code>{u['user_id']}</code>"
+        )
         medal = medals.get(i, f"{i}.")
         balance = u["balance"]
 
@@ -727,6 +732,8 @@ async def show_all_balances(message: types.Message):
                 chunks.append(chunk)
                 chunk = ""
             chunk += line + "\n\n"
+        if chunk:
+            chunks.append(chunk)
         header = f"┌──────────────\n  │  💰 <b>БАЛАНСИ ГРАВЦІВ</b>\n└──────────────\n\n"
         footer = f"\n{'─' * 10}\n👥 Гравців: <b>{len(users)}</b>\n💵 Загальна сума: <b>{total} грн</b>\n{'─' * 10}"
         chunks[-1] += footer
