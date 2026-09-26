@@ -323,8 +323,8 @@ async def show_user_detail(callback: types.CallbackQuery):
         await callback.message.answer("Користувача вже немає в базі.")
         return
 
-    full_name = user.get("full_name") or "—"
-    username = user.get("username") or "—"
+    full_name = escape(str(user.get("full_name") or "—"))
+    username = escape(str(user.get("username") or "—"))
     last_active = format_time_kyiv(user.get("last_active"))
 
     games_played = user.get("games_played", 0)
@@ -367,7 +367,7 @@ async def show_user_detail(callback: types.CallbackQuery):
 
     if show_all_actions:
         actions_show = actions_list[-MAX_ACTIONS_EXPANDED:]
-        actions_text = "\n".join([f"• {act}" for act in actions_show]) or "немає записів"
+        actions_text = "\n".join([f"• {escape(act)}" for act in actions_show]) or "немає записів"
         actions_block = f"<b>Останні дії (до {MAX_ACTIONS_EXPANDED}):</b>\n{actions_text}\n"
     else:
         actions_block = ""
@@ -406,7 +406,10 @@ async def show_user_detail(callback: types.CallbackQuery):
         lines = []
         for ch in checks:
             dt = format_time_kyiv(ch["issued_at"])
-            lines.append(f"• {ch['check_type']} | <code>{ch['code']}</code> | {dt}")
+            lines.append(
+                f"• {escape(str(ch['check_type']))} | "
+                f"<code>{escape(str(ch['code']))}</code> | {dt}"
+            )
         return "\n".join(lines)
 
     today_sum = sum(ch["price"] for ch in today_checks)
