@@ -2,6 +2,7 @@
 import aiosqlite
 import time
 import logging
+from .promo_access import record_deposit, get_access, EXPIRED_MESSAGE
 from zoneinfo import ZoneInfo
 
 from .core import DB_PATH
@@ -84,6 +85,7 @@ async def settle_monobank_payment(tx_id: str, user_id: int, amount_kop: int,
         )
         bonus = FIRST_DEPOSIT_BONUS if (await cur.fetchone())[0] else 0
         amount = amount_kop // 100
+        await record_deposit(db, user_id, amount)
         await db.execute(
             "UPDATE users SET balance=COALESCE(balance,0)+?,first_deposit_bonus_pending=0,"
             "daily_net=COALESCE(daily_net,0)+? WHERE user_id=?", (amount+bonus,amount,user_id),
@@ -472,7 +474,7 @@ async def claim_cashback(user_id: int) -> dict:
 
 
 
-async def update_daily_net(user_id: int, amount: int):
+async def update_daily_net(user_id: int, amount: int, *, deposit: bool = False):
     """Оновлює daily_net з гарантованим reset'ом"""
     await ensure_daily_reset(user_id)   # ← Додаємо
 
@@ -486,6 +488,8 @@ async def update_daily_net(user_id: int, amount: int):
                 last_net_date = ?
             WHERE user_id = ?
         """, (amount, today_str, user_id))
+        if deposit:
+            await record_deposit(db, user_id, amount)
         await db.commit()
 
 
@@ -515,10 +519,16 @@ async def get_yesterday_net(user_id: int) -> int:
 
 
 async def has_recent_deposit(user_id: int) -> bool:
-    """Whether the user has a positive deposit today or yesterday."""
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    return today_net > 0 or yesterday_net > 0
+    return (await get_promo_access(user_id))["active"]
+
+
+async def get_promo_access(user_id: int) -> dict:
+    return await get_access(DB_PATH, user_id)
+
+
+async def get_promo_deposit_base(user_id: int) -> int:
+    access = await get_promo_access(user_id)
+    return access["deposits"] if access["active"] else 0
 
 
 
@@ -566,6 +576,7 @@ async def credit_deposit_with_bonus(user_id: int, amount_grn: int) -> dict:
             """,
             (user_id, amount_grn + bonus),
         )
+        await record_deposit(db, user_id, amount_grn)
         await db.commit()
         return {"bonus": bonus, "credited": amount_grn + bonus}
 
@@ -1066,6 +1077,7 @@ async def review_manual_payment(
 
             if decision == "approved":
                 today_str = datetime.now(KYIV_ZONE).date().isoformat()
+                await record_deposit(db, user_id, amount)
                 await db.execute(
                     """
                     INSERT OR IGNORE INTO users (user_id, username, full_name)
@@ -1647,9 +1659,7 @@ async def get_yesterday_game_win(user_id: int) -> int:
 
 async def get_available_game_win(user_id: int) -> int:
     """Return the remaining cash payout limit based on recent deposits."""
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    total_net = max(today_net, 0) + max(yesterday_net, 0)
+    total_net = await get_promo_deposit_base(user_id)
 
     daily_win = await get_daily_game_win(user_id)
     yesterday_win = await get_yesterday_game_win(user_id)
@@ -1699,22 +1709,22 @@ def _positive_or_zero(value: int) -> int:
 async def can_receive_prize(user_id: int, prize_amount: int = 0) -> tuple[bool, str]:
     """
     Перевіряє можливість отримання призу з урахуванням:
-    - Депозитів/програшу (сьогодні + вчора, мінусові дні ігноруються)
+    - Доступу протягом 24 годин після депозиту або призу із сейфа
+    - Поповнень сьогодні + вчора, без віднімання виводів
     - Виграшів у іграх (сьогодні + вчора, мінусові дні ігноруються)
     """
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
+    if not await has_recent_deposit(user_id):
+        return False, EXPIRED_MESSAGE
+    total_net = await get_promo_deposit_base(user_id)
     daily_game_win = await get_daily_game_win(user_id)
     yesterday_game_win = await get_yesterday_game_win(user_id)
 
     # === Сумарний внесок (мінусові дні не враховуються) ===
-    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
 
     if total_net < 200:
         return False, (
             "❌ Ви не можете отримати виграш.\n\n"
-            "❗Потрібно мати мінімум 200 грн депозиту\n"
-            "протягом останніх 48 годин (сьогодні або вчора).\nТакож причиною відмови може бути вивід протягом дня."
+            "❗Для ліміту потрібно мати мінімум 200 грн поповнень за сьогодні та вчора."
         )
 
     # === Сумарний виграш за сьогодні + вчора (мінусові дні не враховуються) ===

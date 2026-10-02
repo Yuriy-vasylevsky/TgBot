@@ -534,16 +534,15 @@ async def _payout_winner(
     name: str,
     prize: int,
 ) -> int:
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+    from db.wallet import get_promo_deposit_base
+    total_net = await get_promo_deposit_base(user_id)
     safe_name = _safe_name(name)
 
     if total_net <= 0:
         await bot.send_message(
             chat_id,
             f"👤 <b>{safe_name}</b> — виграш <b>{prize} грн</b>\n"
-            "❌ Не було депозиту або у вас був вивід протягом дня! Виграш не нараховано❗",
+            "❌ Минуло 24 години від депозиту або призу із сейфа. Виграш не нараховано❗",
             parse_mode="HTML",
         )
         return 0

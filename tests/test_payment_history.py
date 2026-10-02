@@ -144,6 +144,9 @@ class PaymentHistoryTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertFalse(repeated["ok"])
                 self.assertEqual(repeated["reason"], "already_reviewed")
+                access = await wallet.get_promo_access(referred_id)
+                self.assertTrue(access["active"])
+                self.assertEqual(access["deposits"], 200)
 
                 async with aiosqlite.connect(wallet.DB_PATH) as db:
                     cursor = await db.execute(

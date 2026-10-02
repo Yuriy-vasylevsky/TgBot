@@ -739,9 +739,8 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
     if taken <= 0:
         return 0
 
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+    from db.wallet import get_promo_deposit_base
+    total_net = await get_promo_deposit_base(user_id)
 
     if total_net <= 0:
         # Немає депозиту — гроші не нараховуємо, кулдаун гри НЕ ставимо
@@ -749,7 +748,7 @@ async def _payout_winner(chat_id: int, bot, user_id: int, name: str, taken: int)
             chat_id=chat_id,
             text=(
                 f"👤 <b>{name}</b> — виграш <b>{taken} грн</b>\n"
-                f"❌ Не було депозиту або у вас був вивід протягом дня! Виграш не нараховано❗"
+                f"❌ Минуло 24 години від депозиту або призу із сейфа. Виграш не нараховано❗"
             ),
             parse_mode="HTML"
         )

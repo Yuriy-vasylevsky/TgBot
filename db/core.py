@@ -234,6 +234,9 @@ async def init_db():
             for t in tables:
                 await db.execute(f"CREATE TABLE IF NOT EXISTS {t}")
 
+            from db.promo_access import migrate_deposits
+            await migrate_deposits(db)
+
             await db.execute(
                 """
                 INSERT OR IGNORE INTO piggy_bank_state

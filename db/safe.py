@@ -137,6 +137,8 @@ async def close_safe_round_and_credit(
                     """,
                     (user_id, display_name, amount, "SAFE_TOP_5"),
                 )
+                from .promo_access import record_deposit
+                await record_deposit(db, user_id, amount)
 
             cleared_state = {
                 "opened": [],

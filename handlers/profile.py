@@ -47,9 +47,8 @@ async def get_available_win_limit(user_id: int) -> int:
     (та ж формула, що і в can_receive_prize / груповій грі): 
     80 грн на кожні 200 грн депозиту (сьогодні + вчора), мінус вже вигране.
     """
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
+    from db.wallet import get_promo_deposit_base
+    total_net = await get_promo_deposit_base(user_id)
 
     daily_game_win = await get_daily_game_win(user_id)
     yesterday_game_win = await get_yesterday_game_win(user_id)
@@ -339,7 +338,7 @@ async def cb_open_fortune(callback: types.CallbackQuery):
         f"🎡 <b>Колесо Фортуни</b>\n\n"
         f"🔹 У тебе <b>🎟️ PROMO</b>: <code>{promo}</code>\n"
         f"🔹 Один оберт коштує <b>{FORTUNE_COST} 🎟️</b>\n\n"
-        f"❗ Для запуску колеса потрібно мати депозит (сьогодні або вчора).\n",
+        f"❗ Колесо доступне протягом 24 годин від останнього депозиту або призу із сейфа.\n",
         reply_markup=fortune_keyboard(promo),
         parse_mode="HTML",
     )

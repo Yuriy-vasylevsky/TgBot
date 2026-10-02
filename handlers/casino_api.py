@@ -2,11 +2,9 @@
 
 import hashlib
 import logging
-from datetime import datetime, time, timedelta
 from urllib.parse import urlencode
 from typing import Optional
 from uuid import uuid4
-from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -14,9 +12,7 @@ from .ma import SuperplatMatic
 from handlers.config import (
     CASINO_API_BASE,
     CASINO_PUBLIC_KEY,
-    CASINO_REPORT_LOGIN,
     CASINO_SECRET_KEY,
-    CASINO_TIMEZONE,
     CASINO_TR_PREFIX,
 )
 
@@ -88,87 +84,6 @@ def _build_url(endpoint: str, params: dict):
     full_url = f"{CASINO_API_BASE}{endpoint}?{urlencode(sorted_params)}&sign={sign}"
     
     return full_url, params["tr"]
-
-
-def champion_yesterday_period(now: datetime | None = None) -> tuple[datetime, datetime]:
-    """Операційна доба Champion: учора 07:00 — сьогодні 07:00, час Києва."""
-    timezone = ZoneInfo(CASINO_TIMEZONE)
-    if now is None:
-        now = datetime.now(timezone)
-    elif now.tzinfo is None:
-        now = now.replace(tzinfo=timezone)
-    else:
-        now = now.astimezone(timezone)
-
-    end = datetime.combine(now.date(), time(7), tzinfo=timezone)
-    start = end - timedelta(days=1)
-    return start, end
-
-
-def _api_date(value: datetime) -> str:
-    return value.strftime("%Y%m%d%H%M%S")
-
-
-async def _casino_get(endpoint: str, params: dict) -> dict | None:
-    """Виконує підписаний GET-запит та повертає лише коректну JSON-відповідь."""
-    if not CASINO_PUBLIC_KEY or not CASINO_SECRET_KEY:
-        logger.error("Champion API keys are not configured")
-        return None
-
-    url, _ = _build_url(endpoint, params)
-    try:
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            response = await client.get(url)
-            response.raise_for_status()
-            if "application/json" not in response.headers.get("content-type", ""):
-                logger.error("Champion returned a non-JSON response")
-                return None
-            data = response.json()
-            logger.info(
-                "Champion response for %s: success=%r, fields=%s",
-                endpoint,
-                data.get("success"),
-                ", ".join(sorted(data.keys())),
-            )
-            return data
-    except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("Champion request to %s failed: %s", endpoint, exc)
-        return None
-
-
-async def get_champion_yesterday_stats() -> dict:
-    """Повертає report-user касира за попередню операційну добу."""
-    start, end = champion_yesterday_period()
-    start_value, end_value = _api_date(start), _api_date(end)
-    if not CASINO_REPORT_LOGIN:
-        return {
-            "success": False,
-            "start": start,
-            "end": end,
-            "message": "Не задано CASINO_REPORT_LOGIN.",
-        }
-
-    data = await _casino_get(
-        "/api/report-user",
-        {"login": CASINO_REPORT_LOGIN, "start": start_value, "end": end_value},
-    )
-    if not data or not data.get("success"):
-        return {
-            "success": False,
-            "start": start,
-            "end": end,
-            "message": (data or {}).get("message", "Не вдалося отримати звіт касира."),
-        }
-
-    return {
-        "success": True,
-        "start": start,
-        "end": end,
-        "login": CASINO_REPORT_LOGIN,
-        "deposit": float(data.get("deposit", 0) or 0),
-        "close": float(data.get("close", 0) or 0),
-        "result": float(data.get("result", 0) or 0),
-    }
 
 
 async def create_invoice(sum_grn: float):

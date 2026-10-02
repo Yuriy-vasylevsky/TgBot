@@ -52,7 +52,7 @@ async def simple_win_start(message: Message):
         f"💰 <b>Швидкий Бездеп</b>\n\n"
         f"🔹 У тебе <b>🎟️</b>: <code>{promo}</code> шт.\n"
         f"🔹 Один раз коштує <b>{WIN_COST} 🎟️</b>\n\n"
-        f"🔹 Отримай гарантовані 100 грн якщо у вас був депозит протягом тижня! 💵",
+        f"🔹 Отримай 100 грн протягом 24 годин від депозиту або призу із сейфа! 💵",
         reply_markup=simple_win_keyboard(promo),
         parse_mode="HTML",
     )
@@ -61,6 +61,11 @@ async def simple_win_start(message: Message):
 @router.callback_query(F.data == "simple_win:claim")
 async def simple_win_claim(cb: CallbackQuery):
     user_id = cb.from_user.id
+    from db.wallet import has_recent_deposit
+    from db.promo_access import EXPIRED_MESSAGE
+    if not await has_recent_deposit(user_id):
+        await cb.answer(EXPIRED_MESSAGE, show_alert=True)
+        return
 
     if not await spend_promo_for_fortune(user_id, WIN_COST):  # Адаптуємо функцію, або створіть нову якщо потрібно
         current = await get_promo(user_id)
@@ -107,7 +112,7 @@ async def perform_simple_win(cb: CallbackQuery):
     result_text = (
         f"🎉 <b>ВИ ОТРИМАЛИ 100 грн!</b>\n\n"
         f"💵 <b>Ваш виграш буде видано касиром одразу на код</b>\n\n"
-        f"❌ <b>Якщо протягом цього тижня ви не грали то виграш буде нарахований до депозиту</b>\n\n"
+        f"⏱ <b>Участь доступна 24 години від останнього депозиту або призу із сейфа.</b>\n\n"
     )
 
     await cb.message.answer(
@@ -148,7 +153,7 @@ async def back_to_simple_win(cb: CallbackQuery):
         f"💰 <b>Швидкий Бездеп</b>\n\n"
         f"У тебе <b>PROMO</b>: <code>{promo}</code> шт.\n"
         f"Один раз коштує <b>{WIN_COST}🎟️ PROMO</b>\n\n"
-        f"Отримай гарантовані 100 грн якщо у вас був депозит протягом тижня! 💵",
+        f"Отримай 100 грн протягом 24 годин від депозиту або призу із сейфа! 💵",
         reply_markup=simple_win_keyboard(promo),
         parse_mode="HTML",
     )

@@ -116,6 +116,10 @@ class SafePrizeCalculationTests(unittest.TestCase):
                 logs = db.execute(
                     "SELECT user_id, amount, comment FROM payment_logs ORDER BY user_id"
                 ).fetchall()
+                deposits = db.execute(
+                    "SELECT user_id, amount FROM promo_deposits ORDER BY user_id"
+                ).fetchall()
+            self.assertEqual(deposits, [(10, 667), (20, 333)])
             self.assertEqual(balances, [(10, 667, 667), (20, 333, 333)])
             self.assertEqual(
                 logs,

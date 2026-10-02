@@ -75,7 +75,7 @@ async def fortune_start(message: Message):
         f"🎡 <b>Колесо Фортуни</b>\n\n"
         f"🔹 У тебе <b>🎟️ PROMO</b>: <code>{promo}</code>\n"
         f"🔹 Один оберт коштує <b>{FORTUNE_COST} 🎟️</b>\n\n"
-        f"❗ Для запуску колеса потрібно мати депозит (сьогодні або вчора).\n",
+        f"❗ Колесо доступне протягом 24 годин від останнього депозиту або призу із сейфа.\n",
         reply_markup=fortune_keyboard(promo),
         parse_mode="HTML",
     )
@@ -98,16 +98,6 @@ async def fortune_spin(cb: CallbackQuery):
     user_id = cb.from_user.id
 
     # === Перевірка депозиту сьогодні + вчора (мінусові дні ігноруються) ===
-    today_net = await get_daily_net(user_id)
-    yesterday_net = await get_yesterday_net(user_id)
-    total_net = _positive_or_zero(today_net) + _positive_or_zero(yesterday_net)
-
-    if total_net < 200:
-        await cb.answer(
-            "❌ Не було депозиту або у вас був вивід протягом дня!\n\n",
-            show_alert=True,
-        )
-        return
 
     # === Перевірка ліміту виграшу ===
     allowed, msg = await can_receive_prize(user_id, prize_amount=30)
@@ -231,7 +221,7 @@ async def show_promo_info(cb: CallbackQuery):
         f"1. Грайте в групові ігри (⚽, 🏀, 🎳) — вигравайте PROMO за перемоги!\n\n"
         f"2. Отримуйте 🎟️ PROMO за кожні 500 грн депозиту протягом дня.\n\n"
         f"<b>Правила виплат:</b>\n"
-        f"❗ Для запуску колеса — мінімум 200 грн за останні 48 годин.\n"
+        f"❗ Доступ — 24 години від депозиту або призу із сейфа; для ліміту — мінімум 200 грн поповнень за сьогодні та вчора.\n"
         f"❗ Максимум 80 грн виграшу на кожні 200 грн депозиту.\n"
         f"   Якщо приз більший за ліміт — йде до депозиту.\n\n"
         f"У тебе зараз: <code>{promo}</code> 🎟️ PROMO"

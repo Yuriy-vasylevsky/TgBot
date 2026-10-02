@@ -326,6 +326,9 @@ async def show_user_detail(callback: types.CallbackQuery):
     full_name = escape(str(user.get("full_name") or "—"))
     username = escape(str(user.get("username") or "—"))
     last_active = format_time_kyiv(user.get("last_active"))
+    from db.wallet import get_promo_access
+    from db.promo_access import format_remaining
+    promo_timer = format_remaining(await get_promo_access(user_id))
 
     games_played = user.get("games_played", 0)
     balance = await get_balance(user_id)
@@ -424,9 +427,10 @@ async def show_user_detail(callback: types.CallbackQuery):
         checks_block = ""
 
     # ==================== ТЕКСТ ====================
+    user_link = '@' + username if username != '—' else f'<a href="tg://user?id={user_id}">{user_id}</a>'
     text = (
         f"👤 <b>{full_name}</b>\n"
-        f"{'@' + username if username != '—' else f'<a href=\"tg://user?id={user_id}\">{user_id}</a>'}\n\n"
+        f"{user_link}\n\n"
         f"🆔 <code>{user_id}</code>\n"
         f"🕒 Активність: {last_active}\n\n"
         f"🎮 Зібрано промо: <b>{games_played}</b>\n"
@@ -440,6 +444,7 @@ async def show_user_detail(callback: types.CallbackQuery):
         f"{cashback_text}\n\n" 
         f"{total_losses_label}: <b>{abs(total_losses_all_time)} грн</b>\n\n"
         f"{cooldown_text}\n\n"
+        f"{promo_timer}\n\n"
         f"{checks_block}\n"
         f"{actions_block}"
     )
@@ -610,7 +615,7 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
     user_id = data["user_id"]
 
     await add_to_balance(user_id, amount)
-    await update_daily_net(user_id, amount)
+    await update_daily_net(user_id, amount, deposit=True)
     balance = await get_balance(user_id)
 
     await message.answer(
@@ -922,7 +927,7 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
 
             if action == "add":
                 await add_to_balance(user_id, amount)
-                await update_daily_net(user_id, amount)
+                await update_daily_net(user_id, amount, deposit=True)
                 balance = await get_balance(user_id)
 
                 result_text = (
