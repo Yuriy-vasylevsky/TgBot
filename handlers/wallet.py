@@ -29,8 +29,6 @@ from handlers.config import (
     MAX_RECEIPT_FILE_SIZE_MB,
     MONO_ACCOUNT,
     MONO_CARD,
-    MONO_JAR_CARD,
-    MONO_JAR_LINK,
     MONO_TOKEN,
     OPENAI_API_KEY,
     OPENAI_MODEL,
@@ -593,9 +591,8 @@ async def process_amount(message: Message, state: FSMContext):
 
     text = (
         f"💰 Поповнення на <b>{amount_grn} грн</b>\n\n"
-        f"Перекажіть <b>точно</b> цю суму на БАНКУ Monobank:\n\n"
-        f"За посиланням: {MONO_JAR_LINK}\n\n"
-        f"Чи на карту : <code>{MONO_JAR_CARD}</code>\n\n"
+        f"Перекажіть <b>точно</b> цю суму на картку Monobank:\n\n"
+        f"💳 <code>{escape(MONO_CARD or '')}</code>\n\n"
         f"❗Після оплати натисни кнопку «Перевірити платіж»"
     )
 
@@ -1706,7 +1703,7 @@ async def check_payment(event: Message | CallbackQuery):
                 await message.answer(
                     f"❌ Платіж ще не знайдено.\n\n"
                     f"✓ Відправив точно <b>{target_amount_grn} грн</b>\n"
-                    f"✓ На правильну картку: <b>{MONO_JAR_CARD}</b>\n\n"
+                    f"✓ На правильну картку: <code>{escape(MONO_CARD or '')}</code>\n\n"
                     f"Почекай 1–2 хвилини і спробуй знову.",
                     parse_mode="HTML", reply_markup=kb
                 )
