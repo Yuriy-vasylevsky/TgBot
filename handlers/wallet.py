@@ -103,6 +103,7 @@ def _crypto_pay_client() -> CryptoPayClient:
     return CryptoPayClient(CRYPTO_PAY_TOKEN, testnet=CRYPTO_PAY_TESTNET)
 
 MIN_SUM = 300
+CRYPTO_MIN_SUM = 100
 KYIV_OFFSET = timedelta(hours=3)
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
@@ -523,7 +524,7 @@ async def _ask_crypto_amount(callback: CallbackQuery, state: FSMContext) -> None
     await state.update_data(topup_mode="crypto")
     await state.set_state(WalletStates.enter_amount)
     await callback.message.answer(
-        "Введіть суму поповнення в гривнях (мінімум 10 грн). "
+        f"Введіть суму поповнення в гривнях (мінімум {CRYPTO_MIN_SUM} грн). "
         "Crypto Pay автоматично розрахує суму оплати в USDT.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[
@@ -780,8 +781,10 @@ async def process_amount(message: Message, state: FSMContext):
             return
         try:
             amount_grn = int((message.text or "").strip())
-            if amount_grn < 10:
-                await message.answer("❌ Мінімум 10 грн", reply_markup=cancel_kb)
+            if amount_grn < CRYPTO_MIN_SUM:
+                await message.answer(
+                    f"❌ Мінімум {CRYPTO_MIN_SUM} грн", reply_markup=cancel_kb
+                )
                 return
             invoice = await _crypto_pay_client().create_uah_invoice(
                 amount_grn,
@@ -2302,7 +2305,7 @@ async def crypto_pay_admin_menu(message: Message):
     await message.answer(
         f"🪙 <b>Керування криптооплатою</b>\n\n"
         f"Поточний стан: <b>{status}</b>\n"
-        f"Мінімальне поповнення: <b>10 грн</b>\n\n"
+        f"Мінімальне поповнення: <b>{CRYPTO_MIN_SUM} грн</b>\n\n"
         "Стан зберігається після перезапуску бота.",
         parse_mode="HTML",
         reply_markup=crypto_pay_admin_kb(),
@@ -2322,7 +2325,7 @@ async def toggle_crypto_pay(callback: CallbackQuery):
     await callback.message.edit_text(
         f"🪙 <b>Керування криптооплатою</b>\n\n"
         f"Поточний стан: <b>{status}</b>\n"
-        f"Мінімальне поповнення: <b>10 грн</b>\n\n"
+        f"Мінімальне поповнення: <b>{CRYPTO_MIN_SUM} грн</b>\n\n"
         "Стан зберігається після перезапуску бота.",
         parse_mode="HTML",
         reply_markup=crypto_pay_admin_kb(),
