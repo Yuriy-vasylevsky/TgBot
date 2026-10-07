@@ -38,6 +38,7 @@ get_top_winners,
 from .wallet import (
     add_to_balance,
     credit_deposit_with_bonus,
+    settle_monobank_payment,
     get_balance,
     add_pending_payment,
     get_pending_payments,

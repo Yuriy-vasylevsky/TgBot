@@ -30,6 +30,8 @@ from handlers.config import (
     MONO_ACCOUNT,
     MONO_CARD,
     MONO_TOKEN,
+    CRYPTO_PAY_TOKEN,
+    CRYPTO_PAY_TESTNET,
     OPENAI_API_KEY,
     OPENAI_MODEL,
     OPENAI_TIMEOUT_SECONDS,
@@ -45,6 +47,7 @@ from db import (
     add_to_balance,
     mark_tx_used,
     credit_deposit_with_bonus,
+    settle_monobank_payment,
     is_tx_used,
     add_payment_log,
     award_referral_bonus,
@@ -78,8 +81,10 @@ from services.receipt_analyzer import (
     evaluate_auto_approval,
     get_receipt_analyzer,
 )
+from services.crypto_pay import CryptoPayClient, CryptoPayError
 
 import asyncio
+import httpx
 
 # Налаштування автоматичної перевірки поповнень.
 # Змініть ці значення тут, якщо потрібні інші обмеження.
@@ -91,6 +96,10 @@ MAX_AMOUNT_FOR_GPT_CHECK = 500
 _payment_locks: dict[int, asyncio.Lock] = {}
 _manual_receipt_locks: dict[int, asyncio.Lock] = {}
 router = Router(name="wallet")
+
+
+def _crypto_pay_client() -> CryptoPayClient:
+    return CryptoPayClient(CRYPTO_PAY_TOKEN, testnet=CRYPTO_PAY_TESTNET)
 
 MIN_SUM = 300
 KYIV_OFFSET = timedelta(hours=3)
@@ -255,6 +264,11 @@ async def wallet_menu(message: Message):
             ],
             [
                 InlineKeyboardButton(
+                    text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup"
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🔒 Заморозити кошти", callback_data="wallet_freeze"
                 )
             ],
@@ -273,6 +287,7 @@ async def wallet_balance(callback: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="Поповнити баланс", callback_data="wallet_topup")],
+                [InlineKeyboardButton(text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup")],
                 [InlineKeyboardButton(text="🔒 Заморозити кошти", callback_data="wallet_freeze")],
             ]
         ),
@@ -372,8 +387,175 @@ async def choose_freeze_duration(callback: CallbackQuery, state: FSMContext):
 
 
 # ==================== ПОПОВНЕННЯ ====================
+def _crypto_invoice_keyboard(invoice: dict) -> InlineKeyboardMarkup:
+    rows = []
+    invoice_url = invoice.get("bot_invoice_url") or invoice.get("mini_app_invoice_url")
+    if invoice_url:
+        rows.append([InlineKeyboardButton(text="💵 Сплатити USDT", url=invoice_url)])
+    rows.append([
+        InlineKeyboardButton(
+            text="🔄 Перевірити оплату",
+            callback_data=f"crypto_check:{invoice['invoice_id']}",
+        )
+    ])
+    rows.append([
+        InlineKeyboardButton(
+            text="❌ Скасувати рахунок",
+            callback_data=f"crypto_cancel:{invoice['invoice_id']}",
+        )
+    ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _settle_crypto_invoice(
+    callback: CallbackQuery,
+    pending: dict,
+    invoice: dict,
+) -> bool:
+    user = callback.from_user
+    amount_grn = pending["amount_kop"] // 100
+    invoice_id = int(invoice.get("invoice_id", 0))
+    expected_comment = f"CRYPTO_PAY:{invoice_id}"
+    expected_payload = f"wallet:{user.id}:{amount_grn}"
+
+    if (
+        invoice.get("status") != "paid"
+        or pending.get("comment") != expected_comment
+        or invoice.get("payload") != expected_payload
+        or invoice.get("currency_type") != "fiat"
+        or invoice.get("fiat") != "UAH"
+        or str(invoice.get("amount")) not in {str(amount_grn), f"{amount_grn}.0", f"{amount_grn}.00"}
+    ):
+        return False
+
+    result = await settle_monobank_payment(
+        tx_id=f"CRYPTO_PAY:{invoice_id}",
+        user_id=user.id,
+        amount_kop=pending["amount_kop"],
+        payment_id=expected_comment,
+        username=user.username or user.full_name or str(user.id),
+    )
+    if not result.get("ok"):
+        if result.get("reason") == "already_used":
+            await callback.message.answer("⚠️ Цей рахунок уже був зарахований.")
+        return False
+
+    await _notify_referral_bonus(
+        callback.bot,
+        result.get("referrer_id"),
+        user.id,
+        user.username,
+        user.full_name,
+    )
+    balance = await get_balance(user.id)
+    bonus_text = (
+        f"\n🎁 Вітальний бонус: <b>+{result['bonus']} грн</b>"
+        if result.get("bonus")
+        else ""
+    )
+    await callback.message.answer(
+        f"✅ Оплату USDT зараховано!\n\n"
+        f"💰 Поповнення: <b>{amount_grn} грн</b>{bonus_text}\n"
+        f"💳 Баланс: <b>{balance} грн</b>",
+        parse_mode="HTML",
+        reply_markup=main_menu(),
+    )
+    try:
+        await callback.bot.send_message(
+            ADMIN_ID,
+            f"💵 Нове криптопоповнення\n\n"
+            f"👤 <code>{user.id}</code>\n"
+            f"💰 <b>{amount_grn} грн</b>\n"
+            f"🪙 {escape(str(invoice.get('paid_amount') or ''))} "
+            f"{escape(str(invoice.get('paid_asset') or 'USDT'))}\n"
+            f"🧾 Invoice: <code>{invoice_id}</code>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        logging.exception("Failed to notify admin about Crypto Pay invoice %s", invoice_id)
+    return True
+
+
+@router.callback_query(F.data == "wallet_crypto_topup")
+async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
+    if not CRYPTO_PAY_TOKEN:
+        await callback.answer(
+            "Криптоплатежі тимчасово недоступні.", show_alert=True
+        )
+        return
+
+    pending = await get_pending_payments()
+    current = next(
+        (item for item in pending if item["user_id"] == callback.from_user.id),
+        None,
+    )
+    if current:
+        comment = str(current.get("comment") or "")
+        if comment.startswith("CRYPTO_PAY:"):
+            invoice_id = int(comment.rsplit(":", 1)[1])
+            try:
+                invoice = await _crypto_pay_client().get_invoice(invoice_id)
+            except Exception:
+                logging.exception("Failed to load Crypto Pay invoice %s", invoice_id)
+                invoice = None
+            if invoice and invoice.get("status") == "active":
+                await callback.message.answer(
+                    "У вас уже є активний рахунок USDT.",
+                    reply_markup=_crypto_invoice_keyboard(invoice),
+                )
+                await callback.answer()
+                return
+            if invoice and invoice.get("status") == "paid":
+                await _settle_crypto_invoice(callback, current, invoice)
+                await callback.answer()
+                return
+            await remove_pending_payment(callback.from_user.id)
+        else:
+            await callback.answer(
+                "Спочатку завершіть поточне поповнення.", show_alert=True
+            )
+            return
+
+    await state.update_data(topup_mode="crypto")
+    await state.set_state(WalletStates.enter_amount)
+    await callback.message.answer(
+        f"Введіть суму поповнення в гривнях (від {MIN_SUM} грн). "
+        "Рахунок буде виставлено в USDT.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")
+            ]]
+        ),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "wallet_topup")
 async def start_topup(callback: CallbackQuery, state: FSMContext):
+    pending = await get_pending_payments()
+    current = next(
+        (item for item in pending if item["user_id"] == callback.from_user.id),
+        None,
+    )
+    if current and str(current.get("comment") or "").startswith("CRYPTO_PAY:"):
+        invoice_id = int(str(current["comment"]).rsplit(":", 1)[1])
+        try:
+            invoice = await _crypto_pay_client().get_invoice(invoice_id)
+        except Exception:
+            invoice = None
+        if invoice and invoice.get("status") == "active":
+            await callback.message.answer(
+                "Спочатку завершіть або скасуйте активний рахунок USDT.",
+                reply_markup=_crypto_invoice_keyboard(invoice),
+            )
+            await callback.answer()
+            return
+        if invoice and invoice.get("status") == "paid":
+            await _settle_crypto_invoice(callback, current, invoice)
+            await callback.answer()
+            return
+        await remove_pending_payment(callback.from_user.id)
+
     topup_mode = "auto" if is_auto_topup_time() else "manual"
     recent_payment_minutes: int | None = None
     if topup_mode == "manual":
@@ -522,6 +704,40 @@ async def process_amount(message: Message, state: FSMContext):
         return
 
     state_data = await state.get_data()
+    if state_data.get("topup_mode") == "crypto":
+        try:
+            invoice = await _crypto_pay_client().create_uah_invoice(
+                amount_grn,
+                user_id=message.from_user.id,
+            )
+            invoice_id = int(invoice["invoice_id"])
+            await add_pending_payment(
+                message.from_user.id,
+                amount_grn * 100,
+                f"CRYPTO_PAY:{invoice_id}",
+            )
+        except (CryptoPayError, httpx.HTTPError, KeyError, TypeError, ValueError):
+            logging.exception(
+                "Failed to create Crypto Pay invoice for user_id=%s",
+                message.from_user.id,
+            )
+            await message.answer(
+                "❌ Не вдалося створити крипторахунок. Спробуйте трохи пізніше.",
+                reply_markup=main_menu(),
+            )
+            await state.clear()
+            return
+
+        await message.answer(
+            f"💵 <b>Рахунок на {amount_grn} грн створено</b>\n\n"
+            "Оплатіть його через Crypto Bot у USDT, після чого натисніть "
+            "«Перевірити оплату». Рахунок діє 60 хвилин.",
+            parse_mode="HTML",
+            reply_markup=_crypto_invoice_keyboard(invoice),
+        )
+        await state.clear()
+        return
+
     if state_data.get("topup_mode") == "manual":
         active_payment = await get_pending_manual_payment_for_user(
             message.from_user.id
@@ -1635,6 +1851,97 @@ async def review_manual_topup(callback: CallbackQuery):
 
 
 
+@router.callback_query(F.data.startswith("crypto_cancel:"))
+async def cancel_crypto_payment(callback: CallbackQuery):
+    await callback.answer()
+    try:
+        invoice_id = int(callback.data.rsplit(":", 1)[1])
+    except (TypeError, ValueError):
+        await callback.message.answer("❌ Некоректний номер рахунку.")
+        return
+
+    pending = await get_pending_payments()
+    current = next((p for p in pending if p["user_id"] == callback.from_user.id), None)
+    if not current or current.get("comment") != f"CRYPTO_PAY:{invoice_id}":
+        await callback.message.answer("Цей рахунок уже не активний.")
+        return
+
+    try:
+        invoice = await _crypto_pay_client().get_invoice(invoice_id)
+        if invoice and invoice.get("status") == "paid":
+            if not await _settle_crypto_invoice(callback, current, invoice):
+                await callback.message.answer("❌ Не вдалося зарахувати оплачений рахунок.")
+            return
+        if invoice and invoice.get("status") == "active":
+            await _crypto_pay_client().delete_invoice(invoice_id)
+    except (CryptoPayError, httpx.HTTPError, ValueError):
+        logging.exception("Failed to cancel Crypto Pay invoice %s", invoice_id)
+        await callback.message.answer("❌ Не вдалося скасувати рахунок.")
+        return
+
+    await remove_pending_payment(callback.from_user.id)
+    await callback.message.answer(
+        "✅ Рахунок USDT скасовано.", reply_markup=main_menu()
+    )
+
+
+@router.callback_query(F.data.startswith("crypto_check:"))
+async def check_crypto_payment(callback: CallbackQuery):
+    await callback.answer()
+    user_id = callback.from_user.id
+    if user_id not in _payment_locks:
+        _payment_locks[user_id] = asyncio.Lock()
+
+    lock = _payment_locks[user_id]
+    if lock.locked():
+        await callback.message.answer("⏳ Платіж уже перевіряється.")
+        return
+
+    async with lock:
+        try:
+            requested_invoice_id = int(callback.data.rsplit(":", 1)[1])
+        except (TypeError, ValueError):
+            await callback.message.answer("❌ Некоректний номер рахунку.")
+            return
+
+        pending = await get_pending_payments()
+        current = next((p for p in pending if p["user_id"] == user_id), None)
+        expected_comment = f"CRYPTO_PAY:{requested_invoice_id}"
+        if not current or current.get("comment") != expected_comment:
+            await callback.message.answer("❌ Цей рахунок уже не активний.")
+            return
+
+        try:
+            invoice = await _crypto_pay_client().get_invoice(requested_invoice_id)
+        except (CryptoPayError, httpx.HTTPError, ValueError):
+            logging.exception("Failed to check Crypto Pay invoice %s", requested_invoice_id)
+            await callback.message.answer(
+                "❌ Не вдалося перевірити оплату. Спробуйте ще раз пізніше."
+            )
+            return
+
+        if not invoice:
+            await callback.message.answer("❌ Рахунок не знайдено в Crypto Pay.")
+            return
+        if invoice.get("status") == "expired":
+            await remove_pending_payment(user_id)
+            await callback.message.answer(
+                "⌛ Термін дії рахунку минув. Створіть новий рахунок."
+            )
+            return
+        if invoice.get("status") != "paid":
+            await callback.message.answer(
+                "⏳ Оплату ще не отримано. Після оплати зачекайте кілька секунд і перевірте знову.",
+                reply_markup=_crypto_invoice_keyboard(invoice),
+            )
+            return
+
+        if not await _settle_crypto_invoice(callback, current, invoice):
+            await callback.message.answer(
+                "❌ Дані платежу не збігаються з рахунком. Зверніться до адміністратора."
+            )
+
+
 @router.callback_query(F.data == "wallet_check")
 @router.message(Command("check"))
 async def check_payment(event: Message | CallbackQuery):
@@ -1665,6 +1972,25 @@ async def check_payment(event: Message | CallbackQuery):
         target_amount_kop = p["amount_kop"]
         target_amount_grn = target_amount_kop // 100
         payment_id = p["comment"]
+
+        if str(payment_id).startswith("CRYPTO_PAY:"):
+            try:
+                invoice_id = int(str(payment_id).rsplit(":", 1)[1])
+                invoice = await _crypto_pay_client().get_invoice(invoice_id)
+            except Exception:
+                logging.exception("Failed to load Crypto Pay invoice from /check")
+                await message.answer(
+                    "❌ Не вдалося перевірити крипторахунок. Скористайтеся кнопкою під рахунком."
+                )
+                return
+            if invoice:
+                await message.answer(
+                    "Для криптоплатежу натисніть кнопку нижче.",
+                    reply_markup=_crypto_invoice_keyboard(invoice),
+                )
+            else:
+                await message.answer("❌ Крипторахунок не знайдено.")
+            return
 
         await message.answer("🔍 Перевіряю платіж...")
 

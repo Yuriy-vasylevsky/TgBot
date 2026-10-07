@@ -11,6 +11,13 @@ MONO_TOKEN = os.getenv("MONO_TOKEN")
 MONO_ACCOUNT = os.getenv("MONO_ACCOUNT", "0")
 ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 MONO_CARD = os.getenv("MONO_CARD")
+CRYPTO_PAY_TOKEN = os.getenv("CRYPTO_PAY_TOKEN", "").strip()
+CRYPTO_PAY_TESTNET = os.getenv("CRYPTO_PAY_TESTNET", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 MATIC_SUBAGENT = os.getenv("MATIC_SUBAGENT", "").strip()
 MATIC_PASSWORD = os.getenv("MATIC_PASSWORD", "")
 SAFE_API_ORIGINS = tuple(filter(None, (
