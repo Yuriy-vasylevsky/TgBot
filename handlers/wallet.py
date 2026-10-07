@@ -5,7 +5,7 @@ import logging
 from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_DOWN
+from decimal import Decimal, InvalidOperation
 from zoneinfo import ZoneInfo
 
 from aiogram import Router, F
@@ -175,27 +175,44 @@ AUTOPAY_MODE_FORCE_OFF = "force_off" # адмін примусово вимкн�
 _SETTINGS_FILE = Path(__file__).resolve().parent.parent / "data" / "wallet_settings.json"
 
 
-def _load_autopay_mode() -> str:
+def _load_wallet_settings() -> dict:
     try:
         if _SETTINGS_FILE.exists():
             data = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
-            mode = data.get("autopay_mode", AUTOPAY_MODE_AUTO)
-            if mode in (AUTOPAY_MODE_AUTO, AUTOPAY_MODE_FORCE_ON, AUTOPAY_MODE_FORCE_OFF):
-                return mode
+            if isinstance(data, dict):
+                return data
     except Exception as e:
         logging.error(f"❌ Не вдалося прочитати wallet_settings.json: {e}")
-    return AUTOPAY_MODE_AUTO
+    return {}
 
 
-def _save_autopay_mode(mode: str) -> None:
+def _save_wallet_settings() -> None:
     try:
         _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-        _SETTINGS_FILE.write_text(json.dumps({"autopay_mode": mode}), encoding="utf-8")
+        _SETTINGS_FILE.write_text(
+            json.dumps(
+                {
+                    "autopay_mode": _autopay_mode,
+                    "crypto_pay_enabled": _crypto_pay_enabled,
+                }
+            ),
+            encoding="utf-8",
+        )
     except Exception as e:
         logging.error(f"❌ Не вдалося зберегти wallet_settings.json: {e}")
 
 
-_autopay_mode: str = _load_autopay_mode()
+_wallet_settings = _load_wallet_settings()
+_autopay_mode: str = _wallet_settings.get("autopay_mode", AUTOPAY_MODE_AUTO)
+if _autopay_mode not in {
+    AUTOPAY_MODE_AUTO,
+    AUTOPAY_MODE_FORCE_ON,
+    AUTOPAY_MODE_FORCE_OFF,
+}:
+    _autopay_mode = AUTOPAY_MODE_AUTO
+_crypto_pay_enabled: bool = bool(
+    _wallet_settings.get("crypto_pay_enabled", True)
+)
 
 
 def _mode_label(mode: str) -> str:
@@ -251,8 +268,7 @@ async def _format_freeze_status(user_id: int) -> str:
 async def wallet_menu(message: Message):
     balance = await get_balance(message.from_user.id)
     freeze_text = await _format_freeze_status(message.from_user.id)
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
+    rows = [
             [
                 InlineKeyboardButton(
                     text=f"Баланс: {balance} грн", callback_data="wallet_balance"
@@ -263,18 +279,21 @@ async def wallet_menu(message: Message):
                     text="Поповнити баланс", callback_data="wallet_topup"
                 )
             ],
-            [
-                InlineKeyboardButton(
-                    text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup"
-                )
-            ],
+    ]
+    if _crypto_pay_enabled:
+        rows.append([
+            InlineKeyboardButton(
+                text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup"
+            )
+        ])
+    rows.append(
             [
                 InlineKeyboardButton(
                     text="🔒 Заморозити кошти", callback_data="wallet_freeze"
                 )
-            ],
-        ]
+            ]
     )
+    kb = InlineKeyboardMarkup(inline_keyboard=rows)
     await message.answer(f"💰 Ваш гаманець\nБаланс: {balance} грн{freeze_text}", reply_markup=kb)
 
 
@@ -283,15 +302,19 @@ async def wallet_balance(callback: CallbackQuery):
     balance = await get_balance(callback.from_user.id)
     freeze_text = await _format_freeze_status(callback.from_user.id)
     await callback.answer()
+    rows = [
+        [InlineKeyboardButton(text="Поповнити баланс", callback_data="wallet_topup")],
+    ]
+    if _crypto_pay_enabled:
+        rows.append([
+            InlineKeyboardButton(text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup")
+        ])
+    rows.append([
+        InlineKeyboardButton(text="🔒 Заморозити кошти", callback_data="wallet_freeze")
+    ])
     await callback.message.edit_text(
         f"💰 Ваш гаманець\nБаланс: {balance} грн{freeze_text}",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="Поповнити баланс", callback_data="wallet_topup")],
-                [InlineKeyboardButton(text="💵 Поповнити через USDT", callback_data="wallet_crypto_topup")],
-                [InlineKeyboardButton(text="🔒 Заморозити кошти", callback_data="wallet_freeze")],
-            ]
-        ),
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=rows),
     )
 
 
@@ -500,8 +523,8 @@ async def _ask_crypto_amount(callback: CallbackQuery, state: FSMContext) -> None
     await state.update_data(topup_mode="crypto")
     await state.set_state(WalletStates.enter_amount)
     await callback.message.answer(
-        "Введіть суму поповнення в USDT (мінімум 1 USDT). "
-        "На баланс буде зараховано гривні за поточним курсом Crypto Pay.",
+        "Введіть суму поповнення в гривнях (мінімум 10 грн). "
+        "Crypto Pay автоматично розрахує суму оплати в USDT.",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[[
                 InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")
@@ -513,7 +536,7 @@ async def _ask_crypto_amount(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(F.data == "wallet_crypto_topup")
 async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
-    if not CRYPTO_PAY_TOKEN:
+    if not CRYPTO_PAY_TOKEN or not _crypto_pay_enabled:
         await callback.answer(
             "Криптоплатежі тимчасово недоступні.", show_alert=True
         )
@@ -564,6 +587,11 @@ async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "wallet_crypto_replace")
 async def replace_pending_with_crypto(callback: CallbackQuery, state: FSMContext):
+    if not CRYPTO_PAY_TOKEN or not _crypto_pay_enabled:
+        await callback.answer(
+            "Криптоплатежі тимчасово недоступні.", show_alert=True
+        )
+        return
     pending = await get_pending_payments()
     current = next(
         (item for item in pending if item["user_id"] == callback.from_user.id),
@@ -743,26 +771,21 @@ async def process_amount(message: Message, state: FSMContext):
     )
     state_data = await state.get_data()
     if state_data.get("topup_mode") == "crypto":
+        if not CRYPTO_PAY_TOKEN or not _crypto_pay_enabled:
+            await state.clear()
+            await message.answer(
+                "🚫 Криптоплатежі наразі вимкнені.",
+                reply_markup=main_menu(),
+            )
+            return
         try:
-            amount_usdt = Decimal((message.text or "").strip().replace(",", "."))
-            if not amount_usdt.is_finite() or amount_usdt < Decimal("1"):
-                await message.answer("❌ Мінімум 1 USDT", reply_markup=cancel_kb)
+            amount_grn = int((message.text or "").strip())
+            if amount_grn < 10:
+                await message.answer("❌ Мінімум 10 грн", reply_markup=cancel_kb)
                 return
-            if amount_usdt.as_tuple().exponent < -2:
-                await message.answer(
-                    "❌ Вкажіть не більше двох знаків після крапки.",
-                    reply_markup=cancel_kb,
-                )
-                return
-            amount_usdt_text = format(amount_usdt.normalize(), "f")
-            rate = Decimal(await _crypto_pay_client().get_exchange_rate("USDT", "UAH"))
-            amount_grn = int((amount_usdt * rate).to_integral_value(rounding=ROUND_DOWN))
-            if amount_grn <= 0:
-                raise ValueError("Calculated UAH amount is zero")
-            invoice = await _crypto_pay_client().create_usdt_invoice(
-                amount_usdt_text,
+            invoice = await _crypto_pay_client().create_uah_invoice(
+                amount_grn,
                 user_id=message.from_user.id,
-                amount_grn=amount_grn,
             )
             invoice_id = int(invoice["invoice_id"])
             await add_pending_payment(
@@ -770,9 +793,9 @@ async def process_amount(message: Message, state: FSMContext):
                 amount_grn * 100,
                 f"CRYPTO_PAY:{invoice_id}",
             )
-        except InvalidOperation:
+        except (TypeError, ValueError):
             await message.answer(
-                "❌ Введіть суму в USDT, наприклад: 1 або 2.50",
+                "❌ Введіть цілу суму в гривнях, наприклад: 10 або 50",
                 reply_markup=cancel_kb,
             )
             return
@@ -780,9 +803,6 @@ async def process_amount(message: Message, state: FSMContext):
             CryptoPayError,
             httpx.HTTPError,
             KeyError,
-            TypeError,
-            ValueError,
-            OverflowError,
         ):
             logging.exception(
                 "Failed to create Crypto Pay invoice for user_id=%s",
@@ -796,9 +816,8 @@ async def process_amount(message: Message, state: FSMContext):
             return
 
         await message.answer(
-            f"💵 <b>Рахунок на {amount_usdt_text} USDT створено</b>\n\n"
-            f"Після оплати на баланс буде зараховано <b>{amount_grn} грн</b> "
-            f"за курсом <b>{rate} UAH/USDT</b>.\n\n"
+            f"💵 <b>Рахунок на {amount_grn} грн створено</b>\n\n"
+            "Crypto Pay покаже суму оплати в USDT за актуальним курсом.\n\n"
             "Натисніть «Перевірити оплату» після переказу. "
             "Рахунок діє 60 хвилин.",
             parse_mode="HTML",
@@ -2247,7 +2266,7 @@ async def set_autopay_mode(callback: CallbackQuery):
     }
     new_mode = mode_map.get(key, AUTOPAY_MODE_AUTO)
     _autopay_mode = new_mode
-    _save_autopay_mode(new_mode)
+    _save_wallet_settings()
 
     await callback.message.edit_text(
         f"⚙️ <b>Керування автооплатою</b>\n\n"
@@ -2255,5 +2274,57 @@ async def set_autopay_mode(callback: CallbackQuery):
         f"За розкладом автоплата працює з 22:00 до 09:00 (Київ).",
         parse_mode="HTML",
         reply_markup=autopay_admin_kb(),
+    )
+    await callback.answer("✅ Збережено")
+
+
+def crypto_pay_admin_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(
+                text=(
+                    "🚫 Вимкнути криптооплату"
+                    if _crypto_pay_enabled
+                    else "✅ Увімкнути криптооплату"
+                ),
+                callback_data="crypto_pay_toggle",
+            )
+        ]]
+    )
+
+
+@router.message(F.text == "🪙 Криптооплата")
+@router.message(Command("cryptopay"))
+async def crypto_pay_admin_menu(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    status = "✅ Увімкнено" if _crypto_pay_enabled else "🚫 Вимкнено"
+    await message.answer(
+        f"🪙 <b>Керування криптооплатою</b>\n\n"
+        f"Поточний стан: <b>{status}</b>\n"
+        f"Мінімальне поповнення: <b>10 грн</b>\n\n"
+        "Стан зберігається після перезапуску бота.",
+        parse_mode="HTML",
+        reply_markup=crypto_pay_admin_kb(),
+    )
+
+
+@router.callback_query(F.data == "crypto_pay_toggle")
+async def toggle_crypto_pay(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer()
+        return
+
+    global _crypto_pay_enabled
+    _crypto_pay_enabled = not _crypto_pay_enabled
+    _save_wallet_settings()
+    status = "✅ Увімкнено" if _crypto_pay_enabled else "🚫 Вимкнено"
+    await callback.message.edit_text(
+        f"🪙 <b>Керування криптооплатою</b>\n\n"
+        f"Поточний стан: <b>{status}</b>\n"
+        f"Мінімальне поповнення: <b>10 грн</b>\n\n"
+        "Стан зберігається після перезапуску бота.",
+        parse_mode="HTML",
+        reply_markup=crypto_pay_admin_kb(),
     )
     await callback.answer("✅ Збережено")
