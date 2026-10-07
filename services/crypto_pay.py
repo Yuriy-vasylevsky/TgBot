@@ -63,6 +63,39 @@ class CryptoPayClient:
             },
         )
 
+    async def create_usdt_invoice(
+        self,
+        amount_usdt: str,
+        *,
+        user_id: int,
+        amount_grn: int,
+        expires_in: int = 3600,
+    ) -> dict[str, Any]:
+        return await self._request(
+            "createInvoice",
+            {
+                "currency_type": "crypto",
+                "asset": "USDT",
+                "amount": amount_usdt,
+                "description": f"Поповнення балансу на {amount_grn} грн",
+                "payload": f"wallet:{user_id}:{amount_grn}:{amount_usdt}",
+                "allow_comments": False,
+                "allow_anonymous": False,
+                "expires_in": expires_in,
+            },
+        )
+
+    async def get_exchange_rate(self, source: str, target: str) -> str:
+        rates = await self._request("getExchangeRates")
+        for rate in rates if isinstance(rates, list) else []:
+            if (
+                rate.get("source") == source
+                and rate.get("target") == target
+                and rate.get("is_valid") is not False
+            ):
+                return str(rate["rate"])
+        raise CryptoPayError(f"Exchange rate {source}/{target} is unavailable")
+
     async def get_invoice(self, invoice_id: int) -> dict[str, Any] | None:
         result = await self._request(
             "getInvoices",

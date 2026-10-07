@@ -5,6 +5,7 @@ import logging
 from html import escape
 from pathlib import Path
 from datetime import datetime, timedelta
+from decimal import Decimal, InvalidOperation, ROUND_DOWN
 from zoneinfo import ZoneInfo
 
 from aiogram import Router, F
@@ -416,15 +417,34 @@ async def _settle_crypto_invoice(
     amount_grn = pending["amount_kop"] // 100
     invoice_id = int(invoice.get("invoice_id", 0))
     expected_comment = f"CRYPTO_PAY:{invoice_id}"
-    expected_payload = f"wallet:{user.id}:{amount_grn}"
+    payload = str(invoice.get("payload") or "")
+    payload_parts = payload.split(":")
+    payload_matches = (
+        len(payload_parts) in {3, 4}
+        and payload_parts[:3] == ["wallet", str(user.id), str(amount_grn)]
+    )
+    if invoice.get("currency_type") == "crypto":
+        try:
+            payment_matches = (
+                invoice.get("asset") == "USDT"
+                and len(payload_parts) == 4
+                and Decimal(str(invoice.get("amount"))) == Decimal(payload_parts[3])
+            )
+        except (InvalidOperation, TypeError):
+            payment_matches = False
+    else:
+        payment_matches = (
+            invoice.get("currency_type") == "fiat"
+            and invoice.get("fiat") == "UAH"
+            and str(invoice.get("amount"))
+            in {str(amount_grn), f"{amount_grn}.0", f"{amount_grn}.00"}
+        )
 
     if (
         invoice.get("status") != "paid"
         or pending.get("comment") != expected_comment
-        or invoice.get("payload") != expected_payload
-        or invoice.get("currency_type") != "fiat"
-        or invoice.get("fiat") != "UAH"
-        or str(invoice.get("amount")) not in {str(amount_grn), f"{amount_grn}.0", f"{amount_grn}.00"}
+        or not payload_matches
+        or not payment_matches
     ):
         return False
 
@@ -476,6 +496,21 @@ async def _settle_crypto_invoice(
     return True
 
 
+async def _ask_crypto_amount(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.update_data(topup_mode="crypto")
+    await state.set_state(WalletStates.enter_amount)
+    await callback.message.answer(
+        "Введіть суму поповнення в USDT (мінімум 1 USDT). "
+        "На баланс буде зараховано гривні за поточним курсом Crypto Pay.",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[[
+                InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")
+            ]]
+        ),
+    )
+    await callback.answer()
+
+
 @router.callback_query(F.data == "wallet_crypto_topup")
 async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
     if not CRYPTO_PAY_TOKEN:
@@ -511,23 +546,35 @@ async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
                 return
             await remove_pending_payment(callback.from_user.id)
         else:
-            await callback.answer(
-                "Спочатку завершіть поточне поповнення.", show_alert=True
+            await callback.message.answer(
+                "У вас є незавершене поповнення карткою. Щоб перейти на USDT, "
+                "спочатку скасуйте ту заявку.",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(
+                        text="✅ Скасувати поточне й перейти на USDT",
+                        callback_data="wallet_crypto_replace",
+                    )]]
+                ),
             )
+            await callback.answer()
             return
 
-    await state.update_data(topup_mode="crypto")
-    await state.set_state(WalletStates.enter_amount)
-    await callback.message.answer(
-        f"Введіть суму поповнення в гривнях (від {MIN_SUM} грн). "
-        "Рахунок буде виставлено в USDT.",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[[
-                InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")
-            ]]
-        ),
+    await _ask_crypto_amount(callback, state)
+
+
+@router.callback_query(F.data == "wallet_crypto_replace")
+async def replace_pending_with_crypto(callback: CallbackQuery, state: FSMContext):
+    pending = await get_pending_payments()
+    current = next(
+        (item for item in pending if item["user_id"] == callback.from_user.id),
+        None,
     )
-    await callback.answer()
+    if current and str(current.get("comment") or "").startswith("CRYPTO_PAY:"):
+        await callback.answer("У вас уже є крипторахунок.", show_alert=True)
+        return
+    if current:
+        await remove_pending_payment(callback.from_user.id)
+    await _ask_crypto_amount(callback, state)
 
 
 @router.callback_query(F.data == "wallet_topup")
@@ -694,21 +741,28 @@ async def process_amount(message: Message, state: FSMContext):
             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
         ]
     )
-    try:
-        amount_grn = int(message.text)
-        if amount_grn < MIN_SUM:
-            await message.answer(f"❌ Мінімум {MIN_SUM} грн", reply_markup=cancel_kb)
-            return
-    except Exception:
-        await message.answer("Введи суму поповнення або скасуй платіж", reply_markup=cancel_kb)
-        return
-
     state_data = await state.get_data()
     if state_data.get("topup_mode") == "crypto":
         try:
-            invoice = await _crypto_pay_client().create_uah_invoice(
-                amount_grn,
+            amount_usdt = Decimal((message.text or "").strip().replace(",", "."))
+            if not amount_usdt.is_finite() or amount_usdt < Decimal("1"):
+                await message.answer("❌ Мінімум 1 USDT", reply_markup=cancel_kb)
+                return
+            if amount_usdt.as_tuple().exponent < -2:
+                await message.answer(
+                    "❌ Вкажіть не більше двох знаків після крапки.",
+                    reply_markup=cancel_kb,
+                )
+                return
+            amount_usdt_text = format(amount_usdt.normalize(), "f")
+            rate = Decimal(await _crypto_pay_client().get_exchange_rate("USDT", "UAH"))
+            amount_grn = int((amount_usdt * rate).to_integral_value(rounding=ROUND_DOWN))
+            if amount_grn <= 0:
+                raise ValueError("Calculated UAH amount is zero")
+            invoice = await _crypto_pay_client().create_usdt_invoice(
+                amount_usdt_text,
                 user_id=message.from_user.id,
+                amount_grn=amount_grn,
             )
             invoice_id = int(invoice["invoice_id"])
             await add_pending_payment(
@@ -716,7 +770,20 @@ async def process_amount(message: Message, state: FSMContext):
                 amount_grn * 100,
                 f"CRYPTO_PAY:{invoice_id}",
             )
-        except (CryptoPayError, httpx.HTTPError, KeyError, TypeError, ValueError):
+        except InvalidOperation:
+            await message.answer(
+                "❌ Введіть суму в USDT, наприклад: 1 або 2.50",
+                reply_markup=cancel_kb,
+            )
+            return
+        except (
+            CryptoPayError,
+            httpx.HTTPError,
+            KeyError,
+            TypeError,
+            ValueError,
+            OverflowError,
+        ):
             logging.exception(
                 "Failed to create Crypto Pay invoice for user_id=%s",
                 message.from_user.id,
@@ -729,13 +796,24 @@ async def process_amount(message: Message, state: FSMContext):
             return
 
         await message.answer(
-            f"💵 <b>Рахунок на {amount_grn} грн створено</b>\n\n"
-            "Оплатіть його через Crypto Bot у USDT, після чого натисніть "
-            "«Перевірити оплату». Рахунок діє 60 хвилин.",
+            f"💵 <b>Рахунок на {amount_usdt_text} USDT створено</b>\n\n"
+            f"Після оплати на баланс буде зараховано <b>{amount_grn} грн</b> "
+            f"за курсом <b>{rate} UAH/USDT</b>.\n\n"
+            "Натисніть «Перевірити оплату» після переказу. "
+            "Рахунок діє 60 хвилин.",
             parse_mode="HTML",
             reply_markup=_crypto_invoice_keyboard(invoice),
         )
         await state.clear()
+        return
+
+    try:
+        amount_grn = int(message.text)
+        if amount_grn < MIN_SUM:
+            await message.answer(f"❌ Мінімум {MIN_SUM} грн", reply_markup=cancel_kb)
+            return
+    except Exception:
+        await message.answer("Введи суму поповнення або скасуй платіж", reply_markup=cancel_kb)
         return
 
     if state_data.get("topup_mode") == "manual":
