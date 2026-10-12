@@ -2,22 +2,6 @@ import aiosqlite
 from .core import DB_PATH
 
 
-async def get_issued_checks_with_owners(platform=None):
-    """All bot-issued checks for the selected platform, with their owners."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            "SELECT DISTINCT c.user_id, c.code, "
-            "'Matic' AS platform, u.full_name, u.username "
-            "FROM issued_checks c LEFT JOIN users u ON u.user_id = c.user_id "
-            "WHERE (? IS NULL OR ?='Matic') "
-            "AND (LOWER(c.check_type) LIKE '%matic%' "
-            "OR LOWER(c.check_type) LIKE '%superomatic%') "
-            "ORDER BY c.id DESC", (platform, platform)
-        ) as cursor:
-            return [dict(row) for row in await cursor.fetchall()]
-
-
 async def add_check_code(table: str, code: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
