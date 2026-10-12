@@ -137,7 +137,7 @@ async def handle_reward_confirm(cb: CallbackQuery):
         if casino_type == "champion":
             url = f"https://spinplanet.net/?login_code={code_text}"
         else:
-            url = f"https://code.greenhost.pw/?c={code_text}"
+            url = f"https://azclub.net/?c={code_text}"
 
         await cb.message.edit_text(
             f"✅ Виграш підтверджено.\n🎁 Код: {casino_type} - {code_text}\n"

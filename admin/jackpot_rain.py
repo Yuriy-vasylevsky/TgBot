@@ -1,6 +1,7 @@
 """Read-only overview of funded checks issued through the bot."""
 
 import asyncio
+import logging
 from decimal import Decimal
 from html import escape
 
@@ -8,28 +9,28 @@ from aiogram import F, Router
 from aiogram.types import Message
 
 from db.check import get_issued_checks_with_owners
-from handlers.casino_api import check_invoice, get_matic_api
+from handlers.casino_api import get_matic_api
 from handlers.config import ADMIN_ID
 
 router = Router(name="jackpot_rain")
 _scan_lock = asyncio.Lock()
+logger = logging.getLogger(__name__)
 
 
 async def check_balance(check):
     """None means unverified; zero/negative means no funded active check."""
     try:
-        if check["platform"] == "Champion":
-            result = await asyncio.wait_for(check_invoice(check["code"]), 20)
-            if not isinstance(result, dict) or not result.get("success"):
-                return None
-            value = result["sum"]
-        else:
-            value = await asyncio.wait_for(
-                get_matic_api().get_balance_by_code(check["code"]), 20
-            )
+        value = await asyncio.wait_for(
+            get_matic_api().get_balance_by_code(check["code"]), 20
+        )
         balance = Decimal(str(value))
         return balance if balance.is_finite() else None
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Superomatic balance check failed for code ending %s: %s",
+            str(check.get("code", ""))[-4:],
+            exc,
+        )
         return None
 
 
@@ -56,8 +57,15 @@ async def jackpot_rain(message: Message):
         return
 
     async with _scan_lock:
-        await message.answer("⏳ Перевіряю баланси чеків Champion і Matic…")
-        checks = await get_issued_checks_with_owners()
+        await message.answer("⏳ Перевіряю баланси чеків Matic…")
+        checks = await get_issued_checks_with_owners("Matic")
+        if not checks:
+            await message.answer(
+                "❌ У поточній базі бота немає жодного збереженого "
+                "Matic/Superomatic-коду.\n\n"
+                "Перевірка API не запускалась."
+            )
+            return
         funded = []
         failed = 0
         for offset in range(0, len(checks), 5):
@@ -73,7 +81,7 @@ async def jackpot_rain(message: Message):
         total = sum((balance for _, balance in funded), Decimal(0))
         text = (
             "🌠 <b>Зорепад джекпотів</b>\n"
-            "Чеки, видані через бота · баланс на момент перевірки\n\n"
+            "Активні чеки Superomatic із коштами\n\n"
             f"Активних із коштами: <b>{len(funded)}</b>\n"
             f"Загалом: <b>{total:.2f} грн</b>\n\n"
         )

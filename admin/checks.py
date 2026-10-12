@@ -224,7 +224,7 @@ async def matic_my_codes(message: Message):
             text += (
                 f"🔑 <code>{code}</code>\n"
                 f"💰 Баланс: <b>{remaining:.0f} грн</b>\n"
-                f"🔗 https://code.greenhost.pw/?c={code}\n\n"
+                f"🔗 https://azclub.net/?c={code}\n\n"
             )
         except Exception as e:
             print(f"[matic_my_codes] code={code} error={e}")
@@ -336,7 +336,7 @@ async def issue_matic_check(target_message: Message, user, amount: int, code: st
 
     await target_message.answer(
         f"✅ <b>Чек Matic видано!</b>\n\n"
-        f"🔗 https://code.greenhost.pw/?c={code}\n\n"
+        f"🔗 https://azclub.net/?c={code}\n\n"
         f"💰 Залишок: {await get_balance(user_id)} грн",
         parse_mode="HTML",
         disable_web_page_preview=True
