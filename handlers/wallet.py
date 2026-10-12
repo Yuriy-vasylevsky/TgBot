@@ -103,7 +103,7 @@ def _crypto_pay_client() -> CryptoPayClient:
     return CryptoPayClient(CRYPTO_PAY_TOKEN, testnet=CRYPTO_PAY_TESTNET)
 
 MIN_SUM = 300
-CRYPTO_MIN_SUM = 100
+CRYPTO_MIN_SUM = 10
 KYIV_OFFSET = timedelta(hours=3)
 KYIV_ZONE = ZoneInfo("Europe/Kyiv")
 
