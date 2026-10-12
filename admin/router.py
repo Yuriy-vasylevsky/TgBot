@@ -19,10 +19,12 @@ from .losses import router as losses_router
 from .piggy_bank import router as piggy_bank_router
 from .top_players import router as top_players_router
 from .receipt_analyzer import router as receipt_analyzer_router
+from .jackpot_rain import router as jackpot_rain_router
 
 router = Router(name="admin")
 
 # Підключаємо всі підроутери
+router.include_router(jackpot_rain_router)
 router.include_router(admin_checks_router) 
 router.include_router(payment_history_router)
 router.include_router(losses_router)
