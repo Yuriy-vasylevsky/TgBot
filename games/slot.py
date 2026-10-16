@@ -52,14 +52,14 @@ def _bet_keyboard_no_back() -> ReplyKeyboardMarkup:
 async def start_slots(message: types.Message, state: FSMContext):
     await state.set_state(SlotGameFSM.playing)
     await state.update_data(
-        coupons=15,
+        coupons=25,
         in_spin=False,
         started=False,   # гра ще не розпочата — кнопку "до ігор" можна показувати
     )
 
     await message.answer(
         f"<b>🎰 Слоти</b>\n\n"
-        f"💎 Початковий баланс: <b>15 купонів</b>\n"
+        f"💎 Початковий баланс: <b>25 купонів</b>\n"
         f"Ціль — набрати <b>50 купонів</b>!\n\n"
         f"Обери ставку 👇",
         parse_mode="HTML",
@@ -106,7 +106,7 @@ async def slot_spin(message: types.Message, state: FSMContext):
     except:
         return await message.answer("⚠️ Обери ставку з кнопок.")
 
-    coupons = data.get("coupons", 15)
+    coupons = data.get("coupons", 25)
 
     if bet > coupons:
         return await message.answer("⚠️ Недостатньо купонів!")

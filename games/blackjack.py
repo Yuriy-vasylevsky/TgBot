@@ -109,15 +109,15 @@ async def cmd_blackjack(message: types.Message, state: FSMContext):
 
         deck = create_deck(num_decks=2)
         await state.clear()
-        await state.update_data(balance=20, deck=deck)
+        await state.update_data(balance=25, deck=deck)
         await state.set_state(BlackjackFSM.choosing_bet)
         await message.answer(
             f"🃏 <b>Blackjack (21)</b>\n\n"
-            f"Стартовий баланс: <b>20 купонів</b>\n"
+            f"Стартовий баланс: <b>25 купонів</b>\n"
             f"Ціль — набрати <b>50 купонів</b>!\n\n"
             f"Оберіть ставку:",
             parse_mode="HTML",
-            reply_markup=bet_keyboard(20),
+            reply_markup=bet_keyboard(25),
         )
 
 
@@ -141,7 +141,7 @@ async def handle_bet_choice(message: types.Message, state: FSMContext):
 
         bet = 5 if "5" in text else 10
         data = await state.get_data()
-        balance = data.get("balance", 20)
+        balance = data.get("balance", 25)
         deck = data.get("deck") or create_deck(num_decks=2)
 
         if bet > balance:
