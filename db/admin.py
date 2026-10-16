@@ -265,7 +265,7 @@ async def get_daily_winnings_summary() -> dict:
             continue
 
         if type_ == "slots" and "✅" in msg:
-            totals["slots"] += 30
+            totals["slots"] += 50
 
         elif type_ == "fortune":
             # Формат: "Колесо фортуни: +50 грн (50 грн)"
@@ -274,10 +274,10 @@ async def get_daily_winnings_summary() -> dict:
                 totals["fortune"] += int(match.group(1))
 
         elif type_ == "one_of_three" and "✅" in msg:
-            totals["one_of_three"] += 30  # вкажи правильну суму якщо інша
+            totals["one_of_three"] += 50
 
         elif type_ == "blackjack" and "✅" in msg:
-            totals["blackjack"] += 30  # вкажи правильну суму якщо інша
+            totals["blackjack"] += 50
 
     grand_total = sum(totals.values())
     return {**totals, "grand_total": grand_total}

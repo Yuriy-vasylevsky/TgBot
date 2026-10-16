@@ -30,7 +30,7 @@ async def start_one_of_three(message: types.Message):
     await message.answer(
         "<b>🎯 Один із трьох!</b>\n\n"
         "Перед тобою три закриті коробки 📦📦📦\n"
-        "Одна з них містить <b>приз 30 грн</b> 💸\n\n"
+        "Одна з них містить <b>приз 50 грн</b> 💸\n\n"
 
         "Обери коробку 👇",
         parse_mode="HTML",
@@ -99,7 +99,7 @@ async def open_boxes(cb: CallbackQuery):
     admin_status = ""
 
     if is_win:
-        payout = min(30, await get_available_game_win(user_id))
+        payout = min(50, await get_available_game_win(user_id))
 
         if payout > 0:
             await add_to_balance(user_id, payout)
@@ -119,23 +119,23 @@ async def open_boxes(cb: CallbackQuery):
                 f"Твоя коробка <b>📦 {user_choice + 1}</b> — виграшна!\n\n"
                 f"<b>+{payout} грн</b> нараховано на баланс 💸"
                 + (
-                    f"\nРешта <b>{30 - payout} грн</b> буде зарахована до депозиту"
-                    if payout < 30 else ""
+                    f"\nРешта <b>{50 - payout} грн</b> буде зарахована до депозиту"
+                    if payout < 50 else ""
                 ),
                 parse_mode="HTML",
             )
             admin_status = f" | +{payout} грн на баланс"
-            if payout < 30:
-                admin_status += f" | +{30 - payout} грн до депозиту"
+            if payout < 50:
+                admin_status += f" | +{50 - payout} грн до депозиту"
         else:
             await result_msg.edit_text(
                 f"{header}{boxes_str}\n\n"
                 f"<b>🎉 Технічно перемога!</b>\n"
                 f"Твоя коробка <b>📦 {user_choice + 1}</b> — виграшна!\n\n"
-                f"💸 Виграш <b>30 грн</b> буде зарахований до депозиту",
+                f"💸 Виграш <b>50 грн</b> буде зарахований до депозиту",
                 parse_mode="HTML",
             )
-            admin_status = " | +30 грн до депозиту"
+            admin_status = " | +50 грн до депозиту"
     else:
         await result_msg.edit_text(
             f"{header}{boxes_str}\n\n"

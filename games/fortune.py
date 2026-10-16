@@ -26,14 +26,12 @@ FORTUNE_COST = 4
 
 # ====================== ПРИЗИ ======================
 PRIZES = [
-    {"title": "30 грн", "value": 30, "emoji": "💵"},
     {"title": "50 грн", "value": 50, "emoji": "💵"},
-    {"title": "60 грн", "value": 60, "emoji": "💵"},
     {"title": "100 грн", "value": 100, "emoji": "💵"},
-    {"title": "500 грн", "value": 500, "emoji": "🏆"},
+    {"title": "150 грн", "value": 150, "emoji": "🏆"},
 ]
 
-WEIGHTS = [44, 32, 20, 4, 0]
+WEIGHTS = [85, 14, 1]
 
 
 def _positive_or_zero(value: int) -> int:
@@ -100,7 +98,7 @@ async def fortune_spin(cb: CallbackQuery):
     # === Перевірка депозиту сьогодні + вчора (мінусові дні ігноруються) ===
 
     # === Перевірка ліміту виграшу ===
-    allowed, msg = await can_receive_prize(user_id, prize_amount=30)
+    allowed, msg = await can_receive_prize(user_id, prize_amount=50)
     if not allowed:
         await cb.answer(msg, show_alert=True)
         return

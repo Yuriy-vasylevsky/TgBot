@@ -109,14 +109,15 @@ async def cmd_blackjack(message: types.Message, state: FSMContext):
 
         deck = create_deck(num_decks=2)
         await state.clear()
-        await state.update_data(balance=10, deck=deck)
+        await state.update_data(balance=20, deck=deck)
         await state.set_state(BlackjackFSM.choosing_bet)
         await message.answer(
             f"🃏 <b>Blackjack (21)</b>\n\n"
-            f"Стартовий баланс: <b>10 купонів</b>\n\n"
+            f"Стартовий баланс: <b>20 купонів</b>\n"
+            f"Ціль — набрати <b>50 купонів</b>!\n\n"
             f"Оберіть ставку:",
             parse_mode="HTML",
-            reply_markup=bet_keyboard(10),
+            reply_markup=bet_keyboard(20),
         )
 
 
@@ -140,7 +141,7 @@ async def handle_bet_choice(message: types.Message, state: FSMContext):
 
         bet = 5 if "5" in text else 10
         data = await state.get_data()
-        balance = data.get("balance", 10)
+        balance = data.get("balance", 20)
         deck = data.get("deck") or create_deck(num_decks=2)
 
         if bet > balance:
@@ -313,14 +314,14 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
     await message.answer(result, parse_mode="HTML")
 
     # === Перевірка завершення гри ===
-    if balance >= 30 or balance <= 0:
-        await add_blackjack_session(is_win=balance >= 30)
+    if balance >= 50 or balance <= 0:
+        await add_blackjack_session(is_win=balance >= 50)
 
         admin_status = ""
 
-        if balance >= 30:
+        if balance >= 50:
             # Нова система перевірки
-            payout = min(30, await get_available_game_win(message.from_user.id))
+            payout = min(50, await get_available_game_win(message.from_user.id))
 
             if payout > 0:
                 await add_to_balance(message.from_user.id, payout)
@@ -340,19 +341,19 @@ async def finish_round(message: types.Message, state: FSMContext, busted: bool):
 
                 final_text = f"🎉 Вітаю! +{payout} грн нараховано на баланс!"
                 admin_status = f" | +{payout} грн на баланс"
-                if payout < 30:
-                    final_text += f"\n💸 Решта {30 - payout} грн буде зарахована до депозиту"
-                    admin_status += f" | +{30 - payout} грн до депозиту"
+                if payout < 50:
+                    final_text += f"\n💸 Решта {50 - payout} грн буде зарахована до депозиту"
+                    admin_status += f" | +{50 - payout} грн до депозиту"
             else:
-                final_text = "💸 Виграш 30 грн буде зарахований до депозиту"
-                admin_status = " | +30 грн до депозиту"
+                final_text = "💸 Виграш 50 грн буде зарахований до депозиту"
+                admin_status = " | +50 грн до депозиту"
         else:
             final_text = "💀 Баланс 0. Гра завершена."
 
         # Сповіщення адміністратору
         try:
             username = f"@{message.from_user.username}" if message.from_user.username else f"<a href='tg://user?id={message.from_user.id}'>{message.from_user.full_name}</a>"
-            outcome = "ВИГРАВ" if balance >= 30 else "ПРОГРАВ"
+            outcome = "ВИГРАВ" if balance >= 50 else "ПРОГРАВ"
             
             await message.bot.send_message(
                 ADMIN_ID,

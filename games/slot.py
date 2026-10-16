@@ -52,15 +52,15 @@ def _bet_keyboard_no_back() -> ReplyKeyboardMarkup:
 async def start_slots(message: types.Message, state: FSMContext):
     await state.set_state(SlotGameFSM.playing)
     await state.update_data(
-        coupons=10,
+        coupons=15,
         in_spin=False,
         started=False,   # гра ще не розпочата — кнопку "до ігор" можна показувати
     )
 
     await message.answer(
         f"<b>🎰 Слоти</b>\n\n"
-        f"💎 Початковий баланс: <b>10 купонів</b>\n"
-        f"Ціль — набрати <b>30 купонів</b>!\n\n"
+        f"💎 Початковий баланс: <b>15 купонів</b>\n"
+        f"Ціль — набрати <b>50 купонів</b>!\n\n"
         f"Обери ставку 👇",
         parse_mode="HTML",
         reply_markup=_bet_keyboard_with_back(),
@@ -106,7 +106,7 @@ async def slot_spin(message: types.Message, state: FSMContext):
     except:
         return await message.answer("⚠️ Обери ставку з кнопок.")
 
-    coupons = data.get("coupons", 10)
+    coupons = data.get("coupons", 15)
 
     if bet > coupons:
         return await message.answer("⚠️ Недостатньо купонів!")
@@ -208,11 +208,11 @@ async def slot_spin(message: types.Message, state: FSMContext):
             await state.clear()
             return
 
-        if coupons >= 30:
+        if coupons >= 50:
             await add_slot_session(user_id, "win", coupons)
 
             # === НОВА СИСТЕМА ПЕРЕВІРКИ ВИГРАШУ ===
-            payout = min(30, await get_available_game_win(user_id))
+            payout = min(50, await get_available_game_win(user_id))
 
             if payout > 0:
                 await add_to_balance(user_id, payout)
@@ -229,12 +229,12 @@ async def slot_spin(message: types.Message, state: FSMContext):
                 
                 result_text = f"🎉 Вітаю! +{payout} грн нараховано на баланс!"
                 admin_status = f" | +{payout} грн на баланс"
-                if payout < 30:
-                    result_text += f"\n💸 Решта {30 - payout} грн буде зарахована до депозиту"
-                    admin_status += f" | +{30 - payout} грн до депозиту"
+                if payout < 50:
+                    result_text += f"\n💸 Решта {50 - payout} грн буде зарахована до депозиту"
+                    admin_status += f" | +{50 - payout} грн до депозиту"
             else:
-                result_text = "💸 Виграш 30 грн буде зарахований до депозиту"
-                admin_status = " | +30 грн до депозиту"
+                result_text = "💸 Виграш 50 грн буде зарахований до депозиту"
+                admin_status = " | +50 грн до депозиту"
 
             # Сповіщення адміністратору
             try:
