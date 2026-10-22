@@ -195,6 +195,7 @@ def _save_wallet_settings() -> None:
                 {
                     "autopay_mode": _autopay_mode,
                     "crypto_pay_enabled": _crypto_pay_enabled,
+                    "cash_desk_mode": _cash_desk_mode,
                 }
             ),
             encoding="utf-8",
@@ -214,6 +215,91 @@ if _autopay_mode not in {
 _crypto_pay_enabled: bool = bool(
     _wallet_settings.get("crypto_pay_enabled", True)
 )
+
+
+CASH_DESK_MODES = {
+    "auto": "🕒 За графіком (закрито 00:00–09:00)",
+    "closed": "🔒 Примусово закрита",
+    "open": "🟢 Завжди відкрита",
+}
+_cash_desk_mode = _wallet_settings.get("cash_desk_mode", "auto")
+if _cash_desk_mode not in CASH_DESK_MODES:
+    _cash_desk_mode = "auto"
+
+
+def is_cash_desk_open(now: datetime | None = None) -> bool:
+    if _cash_desk_mode == "closed":
+        return False
+    if _cash_desk_mode == "open":
+        return True
+    local_now = datetime.now(KYIV_ZONE) if now is None else now.astimezone(KYIV_ZONE)
+    return local_now.hour >= 9
+
+
+async def _cash_desk_blocks(event: Message | CallbackQuery, state: FSMContext) -> bool:
+    if is_cash_desk_open():
+        return False
+    await state.clear()
+    text = (
+        "🌙 Каса закрита. Поповнення доступне з 09:00 за київським часом."
+        if _cash_desk_mode == "auto"
+        else "🔒 Каса тимчасово закрита адміністратором. Спробуйте пізніше."
+    )
+    if isinstance(event, CallbackQuery):
+        await event.answer(text, show_alert=True)
+    else:
+        await event.answer(text, reply_markup=main_menu())
+    return True
+
+
+def cash_desk_admin_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=("✅ " if mode == _cash_desk_mode else "") + label,
+            callback_data=f"cash_desk_mode:{mode}",
+        )]
+        for mode, label in CASH_DESK_MODES.items()
+    ])
+
+
+def _cash_desk_status_text() -> str:
+    status = "🟢 Відкрита" if is_cash_desk_open() else "🔒 Закрита"
+    return (
+        f"💰 <b>Керування касою</b>\n\n"
+        f"Режим: <b>{CASH_DESK_MODES[_cash_desk_mode]}</b>\n"
+        f"Зараз: <b>{status}</b>\n\n"
+        "За графіком каса щодня закрита з 00:00 до 09:00 за Києвом.\n"
+        "Закриття блокує нові поповнення карткою та USDT. "
+        "Квитанції й перевірка попередніх оплат залишаються доступними."
+    )
+
+
+@router.message(F.text == "💰 Каса")
+@router.message(Command("cashdesk"))
+async def cash_desk_admin_menu(message: Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await message.answer(
+        _cash_desk_status_text(), parse_mode="HTML", reply_markup=cash_desk_admin_kb()
+    )
+
+
+@router.callback_query(F.data.startswith("cash_desk_mode:"))
+async def set_cash_desk_mode(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("⛔ Немає доступу", show_alert=True)
+        return
+    mode = callback.data.split(":", 1)[1]
+    if mode not in CASH_DESK_MODES:
+        await callback.answer("Невідомий режим", show_alert=True)
+        return
+    global _cash_desk_mode
+    _cash_desk_mode = mode
+    _save_wallet_settings()
+    await callback.message.answer(
+        _cash_desk_status_text(), parse_mode="HTML", reply_markup=cash_desk_admin_kb()
+    )
+    await callback.answer("Режим каси збережено")
 
 
 def _mode_label(mode: str) -> str:
@@ -537,6 +623,8 @@ async def _ask_crypto_amount(callback: CallbackQuery, state: FSMContext) -> None
 
 @router.callback_query(F.data == "wallet_crypto_topup")
 async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
+    if await _cash_desk_blocks(callback, state):
+        return
     if not CRYPTO_PAY_TOKEN or not _crypto_pay_enabled:
         await callback.answer(
             "Криптоплатежі тимчасово недоступні.", show_alert=True
@@ -588,6 +676,8 @@ async def start_crypto_topup(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "wallet_crypto_replace")
 async def replace_pending_with_crypto(callback: CallbackQuery, state: FSMContext):
+    if await _cash_desk_blocks(callback, state):
+        return
     if not CRYPTO_PAY_TOKEN or not _crypto_pay_enabled:
         await callback.answer(
             "Криптоплатежі тимчасово недоступні.", show_alert=True
@@ -608,6 +698,8 @@ async def replace_pending_with_crypto(callback: CallbackQuery, state: FSMContext
 
 @router.callback_query(F.data == "wallet_topup")
 async def start_topup(callback: CallbackQuery, state: FSMContext):
+    if await _cash_desk_blocks(callback, state):
+        return
     pending = await get_pending_payments()
     current = next(
         (item for item in pending if item["user_id"] == callback.from_user.id),
@@ -765,6 +857,8 @@ async def _show_manual_payment_details(
 
 @router.message(WalletStates.enter_amount)
 async def process_amount(message: Message, state: FSMContext):
+    if await _cash_desk_blocks(message, state):
+        return
     cancel_kb = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="❌ Скасувати", callback_data="wallet_cancel")]
@@ -934,6 +1028,8 @@ async def continue_large_manual_topup(
     callback: CallbackQuery,
     state: FSMContext,
 ):
+    if await _cash_desk_blocks(callback, state):
+        return
     data = await state.get_data()
     amount_grn = data.get("manual_amount")
     if not isinstance(amount_grn, int) or amount_grn <= MAX_AMOUNT_FOR_GPT_CHECK:
