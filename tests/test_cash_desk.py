@@ -44,21 +44,60 @@ class CashDeskTests(unittest.TestCase):
 
 
 class CashDeskFlowTests(unittest.IsolatedAsyncioTestCase):
-    async def test_closed_desk_blocks_every_new_payment_entry(self):
+    async def test_closed_desk_blocks_new_card_payments(self):
         for handler in (
-            wallet.start_topup, wallet.start_crypto_topup,
-            wallet.replace_pending_with_crypto, wallet.process_amount,
+            wallet.start_topup, wallet.process_amount,
             wallet.continue_large_manual_topup,
         ):
             event, state = AsyncMock(), AsyncMock()
+            state.get_data.return_value = {"topup_mode": "manual"}
             with self.subTest(handler=handler.__name__), patch.object(
                 wallet, "_cash_desk_mode", "closed"
             ):
                 await handler(event, state)
                 state.clear.assert_awaited_once()
                 event.answer.assert_awaited_once()
-                state.get_data.assert_not_awaited()
                 state.set_state.assert_not_awaited()
+
+    async def test_crypto_entry_points_remain_available_when_closed(self):
+        for handler in (wallet.start_crypto_topup, wallet.replace_pending_with_crypto):
+            event, state = AsyncMock(), AsyncMock()
+            with self.subTest(handler=handler.__name__), patch.object(
+                wallet, "_cash_desk_mode", "closed"
+            ), patch.object(wallet, "CRYPTO_PAY_TOKEN", "test"), patch.object(
+                wallet, "_crypto_pay_enabled", True
+            ), patch.object(wallet, "get_pending_payments", AsyncMock(return_value=[])), patch.object(
+                wallet, "_ask_crypto_amount", AsyncMock()
+            ) as ask:
+                await handler(event, state)
+                ask.assert_awaited_once_with(event, state)
+                state.clear.assert_not_awaited()
+
+    async def test_crypto_amount_is_not_blocked_by_closed_desk(self):
+        message, state = AsyncMock(), AsyncMock()
+        message.text = "100"
+        state.get_data.return_value = {"topup_mode": "crypto"}
+        with patch.object(wallet, "_cash_desk_mode", "closed"), patch.object(
+            wallet, "CRYPTO_PAY_TOKEN", "test"
+        ), patch.object(wallet, "_crypto_pay_enabled", True), patch.object(
+            wallet, "_crypto_pay_client"
+        ) as client:
+            client.return_value.create_uah_invoice = AsyncMock(side_effect=wallet.CryptoPayError("test"))
+            await wallet.process_amount(message, state)
+            client.return_value.create_uah_invoice.assert_awaited_once()
+
+    async def test_closed_notice_offers_crypto_button(self):
+        message, state = AsyncMock(), AsyncMock()
+        with patch.object(wallet, "_cash_desk_mode", "closed"), patch.object(
+            wallet, "CRYPTO_PAY_TOKEN", "test"
+        ), patch.object(wallet, "_crypto_pay_enabled", True):
+            self.assertTrue(await wallet._cash_desk_blocks(message, state))
+            args = message.answer.call_args
+            self.assertIn("лише криптовалютою", args.args[0])
+            self.assertEqual(
+                args.kwargs["reply_markup"].inline_keyboard[0][0].callback_data,
+                "wallet_crypto_topup",
+            )
 
     async def test_non_admin_cannot_change_mode(self):
         callback = AsyncMock()
