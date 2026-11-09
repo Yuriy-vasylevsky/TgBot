@@ -19,6 +19,8 @@ class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
         self.patch.start()
         self.previous = promotions._enabled
         self.previous_piggy = promotions._piggy_enabled
+        self.previous_fortune = promotions._daily_fortune_enabled
+        promotions._daily_fortune_enabled = True
         promotions._piggy_enabled = True
         async with aiosqlite.connect(self.path) as db:
             await db.execute("CREATE TABLE settings(key TEXT PRIMARY KEY, value REAL)")
@@ -27,6 +29,7 @@ class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         promotions._enabled = self.previous
         promotions._piggy_enabled = self.previous_piggy
+        promotions._daily_fortune_enabled = self.previous_fortune
         self.patch.stop()
         self.path.unlink(missing_ok=True)
 
@@ -43,6 +46,30 @@ class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(any(b.text in promotions.PROMO_BUTTONS for b in row))
         await promotions.set_promotions(True)
         self.assertEqual([make().model_dump() for make in menus], originals)
+
+    async def test_daily_fortune_switch_persists_and_blocks_stale_roll(self):
+        from handlers.daily_fortune import fortune_keyboard
+        from admin.promotions import promotions_keyboard
+        await promotions.set_daily_fortune(False)
+        promotions._daily_fortune_enabled = True
+        await promotions.load_promotions()
+        self.assertFalse(promotions.daily_fortune_enabled())
+        self.assertTrue(promotions.promotions_enabled())
+        self.assertNotIn('🎲 Фортуна', [b.text for row in main_menu().keyboard for b in row])
+        self.assertEqual(fortune_keyboard().inline_keyboard, [])
+        self.assertTrue(any(b.callback_data == 'promotions:daily_fortune:1'
+                            for row in promotions_keyboard().inline_keyboard for b in row))
+        event = types.CallbackQuery(
+            id='test', from_user=types.User(id=1, is_bot=False, first_name='Test'),
+            chat_instance='test', data='daily_fortune:roll',
+        )
+        handler = AsyncMock()
+        with patch.object(types.CallbackQuery, 'answer', new_callable=AsyncMock):
+            await PromotionsMiddleware()(handler, event, {})
+        handler.assert_not_awaited()
+        await promotions.set_daily_fortune(True)
+        self.assertIn('🎲 Фортуна', [b.text for row in main_menu().keyboard for b in row])
+        self.assertTrue(fortune_keyboard().inline_keyboard)
 
     async def test_pending_redemption_blocked_and_state_cleared(self):
         await promotions.set_promotions(False)

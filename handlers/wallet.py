@@ -367,8 +367,19 @@ async def _format_freeze_status(user_id: int) -> str:
 # ==================== МЕНЮ ГАМАНЦЯ ====================
 @router.message(F.text.in_({"💰 Гаманець", "Гаманець"}))
 async def wallet_menu(message: Message):
-    balance = await get_balance(message.from_user.id)
-    freeze_text = await _format_freeze_status(message.from_user.id)
+    await send_wallet_menu(message, message.from_user.id)
+
+
+@router.callback_query(F.data == "wallet_open")
+async def open_wallet_inline(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    await send_wallet_menu(callback.message, callback.from_user.id)
+
+
+async def send_wallet_menu(message: Message, user_id: int):
+    balance = await get_balance(user_id)
+    freeze_text = await _format_freeze_status(user_id)
     rows = [
             [
                 InlineKeyboardButton(

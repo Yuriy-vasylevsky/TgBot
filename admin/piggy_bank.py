@@ -44,6 +44,7 @@ def piggy_admin_keyboard() -> InlineKeyboardMarkup:
                     text="🔄 Оновити", callback_data="piggy_admin:refresh"
                 )
             ],
+            [InlineKeyboardButton(text="← Керування акціями", callback_data="piggy_admin:back")],
         ]
     )
 
@@ -73,6 +74,30 @@ async def open_piggy_admin(message: types.Message):
         parse_mode="HTML",
         reply_markup=piggy_admin_keyboard(),
     )
+
+
+@router.callback_query(F.data == "piggy_admin:open")
+async def open_piggy_admin_inline(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Немає доступу", show_alert=True)
+        return
+    await state.clear()
+    current = await get_piggy_bank_state()
+    await callback.answer()
+    await callback.message.edit_text(
+        piggy_admin_text(current), parse_mode="HTML", reply_markup=piggy_admin_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "piggy_admin:back")
+async def back_to_promotions(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        await callback.answer("Немає доступу", show_alert=True)
+        return
+    from admin.promotions import promotions_keyboard
+    await state.clear()
+    await callback.answer()
+    await callback.message.edit_text("📣 Керування акціями", reply_markup=promotions_keyboard())
 
 
 @router.callback_query(F.data == "piggy_admin:refresh")

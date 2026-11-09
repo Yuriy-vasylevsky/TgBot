@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from aiogram.exceptions import TelegramRetryAfter
+from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from db.auto_broadcast import enqueue_due, claim_delivery, finish_delivery
 
@@ -33,6 +33,19 @@ async def run_auto_broadcast(bot):
                     except TelegramRetryAfter as error:
                         await finish_delivery(delivery['id'], 'pending')
                         await asyncio.sleep(error.retry_after)
+                        break
+                    except (TelegramForbiddenError, TelegramBadRequest) as error:
+                        if isinstance(error, TelegramForbiddenError) or "chat not found" in error.message.lower():
+                            logger.info(
+                                "Auto broadcast skipped unavailable chat | delivery_id=%s user_id=%s reason=%s",
+                                delivery['id'], delivery['user_id'], error.message,
+                            )
+                        else:
+                            logger.exception(
+                                "Auto broadcast request failed | delivery_id=%s user_id=%s",
+                                delivery['id'], delivery['user_id'],
+                            )
+                        await finish_delivery(delivery['id'], 'failed')
                         break
                     except Exception:
                         logger.exception("Auto broadcast delivery failed: %s", delivery['id'])

@@ -2,12 +2,13 @@ from aiogram import BaseMiddleware, types
 from services.promotions import (
     promotions_enabled, PROMO_BUTTONS, promo_callback,
     piggy_bank_enabled, piggy_callback, disabled_callback,
+    daily_fortune_enabled, daily_fortune_callback,
 )
 
 
 class PromotionsMiddleware(BaseMiddleware):
     async def __call__(self, handler, event, data):
-        if promotions_enabled() and piggy_bank_enabled():
+        if promotions_enabled() and piggy_bank_enabled() and daily_fortune_enabled():
             return await handler(event, data)
         state = data.get("state")
         current = await state.get_state() if state else None
@@ -19,11 +20,16 @@ class PromotionsMiddleware(BaseMiddleware):
             (isinstance(event, types.Message) and event.text == "🐷 Скарбничка")
             or (isinstance(event, types.CallbackQuery) and piggy_callback(event.data))
         )
-        if not (promo_blocked or piggy_blocked):
+        fortune_blocked = not daily_fortune_enabled() and (
+            (isinstance(event, types.Message) and event.text == "🎲 Фортуна")
+            or (isinstance(event, types.CallbackQuery) and daily_fortune_callback(event.data))
+        )
+        if not (promo_blocked or piggy_blocked or fortune_blocked):
             return await handler(event, data)
         if pending:
             await state.clear()
-        text = ("⏸ Скарбничку тимчасово вимкнено." if piggy_blocked
+        text = ("⏸ Фортуну тимчасово вимкнено." if fortune_blocked
+                else "⏸ Скарбничку тимчасово вимкнено." if piggy_blocked
                 else "⏸ Промокоди та колесо фортуни тимчасово вимкнено.")
         if isinstance(event, types.CallbackQuery):
             await event.answer(text, show_alert=True)

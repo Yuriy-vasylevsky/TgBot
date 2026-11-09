@@ -50,6 +50,8 @@ from middlewares.promotions import PromotionsMiddleware
 from services.promotions import load_promotions
 from db.auto_broadcast import init_auto_broadcast
 from services.auto_broadcast import run_auto_broadcast
+from db.daily_fortune import init_daily_fortune
+from handlers.daily_fortune import router as daily_fortune_router
 from middlewares.middleware import BanMiddleware, SaveUserMiddleware
 
 # ==================== РОУТЕРИ ====================
@@ -121,6 +123,7 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
+dp.include_router(daily_fortune_router)
 dp.message.outer_middleware(PromotionsMiddleware())
 dp.callback_query.outer_middleware(PromotionsMiddleware())
 
@@ -276,9 +279,9 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
             "Поповнюй баланс, обирай гру та випробовуй удачу! 🍀🔥"
         )
 
-    photo = types.FSInputFile("images/4444.jpg")
-    await message.answer_photo(
-        photo=photo,
+    animation = types.FSInputFile("images/4444.gif")
+    await message.answer_animation(
+        animation=animation,
         caption=caption,
         reply_markup=keyboard,
     )
@@ -455,6 +458,7 @@ async def main():
     auto_broadcast_task = None
     try:
         await init_db()
+        await init_daily_fortune()
         await init_auto_broadcast()
         await load_promotions()
         await wait_for_telegram()

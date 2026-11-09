@@ -9,6 +9,7 @@ from db.core import DB_PATH
 from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from services.promotions import promotions_enabled, set_promotions, piggy_bank_enabled, set_piggy_bank
+from services.promotions import daily_fortune_enabled, set_daily_fortune
 
 router = Router(name="admin_promotions")
 _update_task = None
@@ -27,6 +28,15 @@ def promotions_keyboard():
         types.InlineKeyboardButton(
             text=f"🐷 Скарбничка: {'✅ Увімкнено' if piggy_bank_enabled() else '⛔ Вимкнено'}",
             callback_data=f"promotions:piggy:{int(not piggy_bank_enabled())}",
+        )
+    ], [
+        types.InlineKeyboardButton(
+            text=f"🎲 Фортуна: {'✅ Увімкнено' if daily_fortune_enabled() else '⛔ Вимкнено'}",
+            callback_data=f"promotions:daily_fortune:{int(not daily_fortune_enabled())}",
+        )
+    ], [
+        types.InlineKeyboardButton(
+            text="🐷 Керування скарбничкою", callback_data="piggy_admin:open",
         )
     ]])
 
@@ -70,6 +80,7 @@ async def refresh_menus(bot, feature="Промокоди та колесо фо�
 
 @router.callback_query(F.data.in_({
     "promotions:set:0", "promotions:set:1", "promotions:piggy:0", "promotions:piggy:1",
+    "promotions:daily_fortune:0", "promotions:daily_fortune:1",
 }))
 async def toggle_promotions(callback: types.CallbackQuery):
     global _update_task
@@ -81,12 +92,16 @@ async def toggle_promotions(callback: types.CallbackQuery):
             await callback.answer("⏳ Триває оновлення меню. Зачекайте завершення.", show_alert=True)
             return
         enabled = callback.data.endswith(":1")
-        is_piggy = callback.data.startswith("promotions:piggy:")
-        if enabled == (piggy_bank_enabled() if is_piggy else promotions_enabled()):
+        switches = {
+            "set": (promotions_enabled, set_promotions, "Промокоди та колесо фортуни"),
+            "piggy": (piggy_bank_enabled, set_piggy_bank, "Скарбничка"),
+            "daily_fortune": (daily_fortune_enabled, set_daily_fortune, "Фортуна"),
+        }
+        get_enabled, set_enabled, feature = switches[callback.data.split(":")[1]]
+        if enabled == get_enabled():
             await callback.answer("Цей стан уже встановлено. Відкрийте меню керування ще раз.")
             return
-        await (set_piggy_bank(enabled) if is_piggy else set_promotions(enabled))
+        await set_enabled(enabled)
         await callback.answer("Стан збережено. Оновлюю меню користувачів.")
-        feature = "Скарбничка" if is_piggy else "Промокоди та колесо фортуни"
         _update_task = asyncio.create_task(refresh_menus(callback.bot, feature, enabled))
         await callback.message.edit_reply_markup(reply_markup=promotions_keyboard())
