@@ -48,6 +48,8 @@ from db import (
 
 from middlewares.promotions import PromotionsMiddleware
 from services.promotions import load_promotions
+from db.auto_broadcast import init_auto_broadcast
+from services.auto_broadcast import run_auto_broadcast
 from middlewares.middleware import BanMiddleware, SaveUserMiddleware
 
 # ==================== РОУТЕРИ ====================
@@ -450,8 +452,10 @@ async def main():
     instance_lock = acquire_instance_lock()
     api_runner = None
     cleanup_task = None
+    auto_broadcast_task = None
     try:
         await init_db()
+        await init_auto_broadcast()
         await load_promotions()
         await wait_for_telegram()
         try:
@@ -460,9 +464,13 @@ async def main():
             logger.warning("Could not register commands; continuing startup")
         api_runner = await run_api()
         cleanup_task = asyncio.create_task(run_cleanup_loop(), name="database-cleanup")
+        auto_broadcast_task = asyncio.create_task(run_auto_broadcast(bot), name="auto-broadcast")
         logger.info("Bot started")
         await dp.start_polling(bot)
     finally:
+        if auto_broadcast_task:
+            auto_broadcast_task.cancel()
+            await asyncio.gather(auto_broadcast_task, return_exceptions=True)
         if cleanup_task:
             cleanup_task.cancel()
             await asyncio.gather(cleanup_task, return_exceptions=True)

@@ -118,7 +118,18 @@ def matic_amount_kb() -> InlineKeyboardMarkup:
 
 @router.message(F.text == "🎮 Грати")
 async def play_menu(message: Message):
-    balance = await get_balance(message.from_user.id)
+    await send_play_menu(message, message.from_user.id)
+
+
+@router.callback_query(F.data == "auto_broadcast:play")
+async def broadcast_play(callback: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.answer()
+    await send_play_menu(callback.message, callback.from_user.id)
+
+
+async def send_play_menu(message: Message, user_id: int):
+    balance = await get_balance(user_id)
 
     # === Перше повідомлення — Баланс + Інлайн кнопки ===
     inline_kb = InlineKeyboardMarkup(

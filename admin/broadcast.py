@@ -29,6 +29,7 @@ async def start_broadcast(message: types.Message, state: FSMContext):
     kb = InlineKeyboardBuilder()
     kb.button(text="📄 Створити шаблон", callback_data="create_template")
     kb.button(text="📂 Шаблони", callback_data="show_templates")
+    kb.button(text="🔁 Авторозсилка", callback_data="ab:list:0")
     kb.button(text="❌ Скасувати", callback_data="cancel_broadcast")
     kb.adjust(2, 1)
 
