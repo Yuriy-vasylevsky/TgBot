@@ -17,14 +17,14 @@ from admin.bans import is_banned
 
 router = Router(name="admin_checks")
 
-MATIC_BLOCKED_TEXT = "😔 Вибачте, SuperMatic тимчасово не працює."
+MATIC_BLOCKED_TEXT = "😔 Вибачте, Superomatic тимчасово не працює."
 
 
 async def _matic_blocked(target) -> bool:
     """
     Перевіряє, чи забанений користувач.
-    Якщо так — надсилає повідомлення про тимчасову недоступність Matic і повертає True.
-    Використовувати на початку кожного Matic-хендлера: `if await _matic_blocked(message): return`
+    Якщо так — надсилає повідомлення про тимчасову недоступність Superomatic і повертає True.
+    Використовувати на початку кожного Superomatic-хендлера: `if await _matic_blocked(message): return`
     """
     user_id = target.from_user.id
     if await is_banned(user_id):
@@ -51,7 +51,7 @@ class CheckFSM(StatesGroup):
 def play_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🏆 Champion"), KeyboardButton(text="🎰 Matic")],
+            [KeyboardButton(text="🏆 Champion"), KeyboardButton(text="🎰 Superomatic")],
             [KeyboardButton(text="🔙 Назад до головного меню")]
         ],
         resize_keyboard=True
@@ -73,10 +73,10 @@ def champion_main_kb() -> ReplyKeyboardMarkup:
 def matic_main_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="💰 Купити чек Matic")],
-            [KeyboardButton(text="🔒 Закрити чек Matic")],
-            [KeyboardButton(text="💵 Добавити на Matic")],
-            [KeyboardButton(text="📋 Мої коди Matic")],
+            [KeyboardButton(text="💰 Купити чек Superomatic")],
+            [KeyboardButton(text="🔒 Закрити чек Superomatic")],
+            [KeyboardButton(text="💵 Добавити на Superomatic")],
+            [KeyboardButton(text="📋 Мої коди Superomatic")],
             [KeyboardButton(text="🔙 Назад")]
         ],
         resize_keyboard=True
@@ -168,25 +168,25 @@ async def buy_champion(message: Message):
 # ==================== MATIC ====================
 
 
-@router.message(F.text == "🎰 Matic")
+@router.message(F.text.in_({"🎰 Matic", "🎰 Superomatic"}))
 async def matic_menu(message: Message):
     if await _matic_blocked(message):
         return
     balance = await get_balance(message.from_user.id)
     await message.answer(
-        f"🎰 <b>Matic</b>\n\n"
+        f"🎰 <b>Superomatic</b>\n\n"
         f"💰 <b>Ваш баланс: {balance:,} грн</b>",
         parse_mode="HTML",
         reply_markup=matic_main_kb()
     )
 
 
-@router.message(F.text == "💰 Купити чек Matic")
+@router.message(F.text.in_({"💰 Купити чек Matic", "💰 Купити чек Superomatic"}))
 async def buy_matic(message: Message):
     if await _matic_blocked(message):
         return
     await message.answer(
-        "🎰 Оберіть суму Matic:",
+        "🎰 Оберіть суму Superomatic:",
         reply_markup=matic_amount_kb()
     )
 
@@ -194,7 +194,7 @@ async def buy_matic(message: Message):
 
 
 
-@router.message(F.text == "📋 Мої коди Matic")
+@router.message(F.text.in_({"📋 Мої коди Matic", "📋 Мої коди Superomatic"}))
 async def matic_my_codes(message: Message):
     if await _matic_blocked(message):
         return
@@ -203,10 +203,10 @@ async def matic_my_codes(message: Message):
     matic_checks = [ch for ch in checks if "Matic" in ch.get("check_type", "")]
 
     if not matic_checks:
-        await message.answer("❌ У вас немає активних Matic кодів")
+        await message.answer("❌ У вас немає активних Superomatic кодів")
         return
 
-    text = "📋 <b>Ваші активні Matic коди:</b>\n\n"
+    text = "📋 <b>Ваші активні Superomatic коди:</b>\n\n"
     found = 0
 
     for ch in matic_checks:
@@ -330,19 +330,19 @@ async def issue_matic_check(target_message: Message, user, amount: int, code: st
     name = f"@{user.username}" if user.username else user.full_name or f"#{user_id}"
     await target_message.bot.send_message(
         ADMIN_ID,
-        f"🎁 Видано Matic {amount} грн\n👤 {name}\n🔑 <code>{code}</code>",
+        f"🎁 Видано Superomatic {amount} грн\n👤 {name}\n🔑 <code>{code}</code>",
         parse_mode="HTML"
     )
 
     await target_message.answer(
-        f"✅ <b>Чек Matic видано!</b>\n\n"
+        f"✅ <b>Чек Superomatic видано!</b>\n\n"
         f"🔗 https://azclub.net/?c={code}\n\n"
         f"💰 Залишок: {await get_balance(user_id)} грн",
         parse_mode="HTML",
         disable_web_page_preview=True
 )
 
-    await target_message.answer("🎰 Matic меню:", reply_markup=matic_main_kb())
+    await target_message.answer("🎰 Superomatic меню:", reply_markup=matic_main_kb())
 
 
 # ==================== CALLBACKS КУПІВЛІ ====================
@@ -419,7 +419,7 @@ async def process_custom_matic(message: Message, state: FSMContext):
             code = code_info.get("code") or code_info.get("login") or code_info.get("key") or str(code_info)
             await issue_matic_check(message, message.from_user, amount, code)
         else:
-            await message.answer("❌ Не вдалося створити Matic чек")
+            await message.answer("❌ Не вдалося створити Superomatic чек")
     except Exception as e:
         await message.answer(f"❌ Помилка: {e}")
 
@@ -445,7 +445,7 @@ async def matic_pick_amount(callback: CallbackQuery, state: FSMContext):
 
     if value == "custom":
         await state.set_state(CheckFSM.waiting_for_custom_matic_amount)
-        await callback.message.edit_text("🎰 Введіть суму Matic (від 30 грн):")
+        await callback.message.edit_text("🎰 Введіть суму Superomatic (від 30 грн):")
         await callback.answer()
         return
 
@@ -463,7 +463,7 @@ async def matic_pick_amount(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=None)
             await issue_matic_check(callback.message, callback.from_user, amount, code)
         else:
-            await callback.message.edit_text("❌ Не вдалося створити Matic чек")
+            await callback.message.edit_text("❌ Не вдалося створити Superomatic чек")
     except Exception as e:
         await callback.message.edit_text(f"❌ Помилка: {e}")
 
@@ -478,7 +478,7 @@ async def matic_cancel(callback: CallbackQuery):
 
 from handlers.casino_api import SuperplatMatic
 
-# Глобальний екземпляр API для Matic
+# Глобальний екземпляр API для Superomatic
 matic_api = SuperplatMatic()
 
 
@@ -589,7 +589,7 @@ async def show_champion_to_topup(message: Message, state: FSMContext):
 
 
 # ==================== MATIC ====================
-@router.message(F.text == "🔒 Закрити чек Matic")
+@router.message(F.text.in_({"🔒 Закрити чек Matic", "🔒 Закрити чек Superomatic"}))
 async def show_my_matic_checks(message: Message):
     if await _matic_blocked(message):
         return
@@ -599,10 +599,10 @@ async def show_my_matic_checks(message: Message):
     matic_checks = [ch for ch in checks if "Matic" in ch.get("check_type", "")]
 
     if not matic_checks:
-        await message.answer("❌ У вас немає виданих чеків Matic.")
+        await message.answer("❌ У вас немає виданих чеків Superomatic.")
         return
 
-    text = "🔒 **Ваші активні чеки Matic**\n\nОберіть чек для закриття:\n\n"
+    text = "🔒 **Ваші активні чеки Superomatic**\n\nОберіть чек для закриття:\n\n"
     buttons = []
     active_count = 0
 
@@ -632,11 +632,11 @@ async def show_my_matic_checks(message: Message):
             ])
 
         except Exception as e:
-            print(f"[Matic Check Error] code={code} error={e}")
+            print(f"[Superomatic Check Error] code={code} error={e}")
             continue
 
     if active_count == 0:
-        await message.answer("❌ Немає активних Matic чеків з балансом > 0 грн.")
+        await message.answer("❌ Немає активних Superomatic чеків з балансом > 0 грн.")
         return
 
     buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="close_cancel")])
@@ -648,7 +648,7 @@ async def show_my_matic_checks(message: Message):
     )
 
     
-@router.message(F.text == "💵 Добавити на Matic")
+@router.message(F.text.in_({"💵 Добавити на Matic", "💵 Добавити на Superomatic"}))
 async def show_matic_to_topup(message: Message, state: FSMContext):
     if await _matic_blocked(message):
         return
@@ -658,10 +658,10 @@ async def show_matic_to_topup(message: Message, state: FSMContext):
     matic_checks = [ch for ch in checks if "Matic" in ch.get("check_type", "")]
 
     if not matic_checks:
-        await message.answer("❌ У вас немає чеків Matic.")
+        await message.answer("❌ У вас немає чеків Superomatic.")
         return
 
-    text = "💵 **Оберіть Matic чек для поповнення**\n\n"
+    text = "💵 **Оберіть Superomatic чек для поповнення**\n\n"
     buttons = []
 
     for ch in matic_checks:
@@ -682,11 +682,11 @@ async def show_matic_to_topup(message: Message, state: FSMContext):
                 )
             ])
         except Exception as e:
-            print(f"[Matic Topup List Error] code={code} error={e}")
+            print(f"[Superomatic Topup List Error] code={code} error={e}")
             continue
 
     if not buttons:
-        await message.answer("❌ Немає доступних Matic чеків для поповнення.")
+        await message.answer("❌ Немає доступних Superomatic чеків для поповнення.")
         return
 
     buttons.append([InlineKeyboardButton(text="❌ Скасувати", callback_data="topup_cancel")])
@@ -737,7 +737,7 @@ async def process_close_matic(callback: CallbackQuery):
     code = callback.data.removeprefix("close_matic_")
     user_id = callback.from_user.id
 
-    await callback.answer("🔄 Закриваємо Matic чек...")
+    await callback.answer("🔄 Закриваємо Superomatic чек...")
 
     try:
         result = await matic_api.close_check_by_code(code)
@@ -749,20 +749,20 @@ async def process_close_matic(callback: CallbackQuery):
         await delete_issued_check(code)  # прибираємо з бази, щоб не висів у списках
 
         await callback.message.edit_text(
-            f"✅ Matic чек успішно закрито!\n\n"
+            f"✅ Superomatic чек успішно закрито!\n\n"
             f"💰 Повернено на баланс: <b>{remaining:.0f} грн</b>",
             parse_mode="HTML"
         )
 
         await callback.bot.send_message(
             ADMIN_ID,
-            f"🔒 Закрито Matic чек\n"
+            f"🔒 Закрито Superomatic чек\n"
             f"Користувач: {callback.from_user.full_name}\n"
             f"Повернено: {remaining:.0f} грн",
             parse_mode="HTML"
         )
     except Exception as e:
-        await callback.message.edit_text(f"❌ Помилка при закритті Matic чека:\n{str(e)}")
+        await callback.message.edit_text(f"❌ Помилка при закритті Superomatic чека:\n{str(e)}")
 
 # ==================== CALLBACKS ПОПОВНЕННЯ ====================
 
@@ -786,7 +786,7 @@ async def start_topup_matic(callback: CallbackQuery, state: FSMContext):
     await state.update_data(matic_code=code, check_type="matic")
     await state.set_state(CheckFSM.waiting_for_amount_topup)
     await callback.message.edit_text(
-        f"💵 Введіть суму поповнення для Matic чека <code>{code}</code>\n(від 10 грн)",
+        f"💵 Введіть суму поповнення для Superomatic чека <code>{code}</code>\n(від 10 грн)",
         parse_mode="HTML"
     )
 

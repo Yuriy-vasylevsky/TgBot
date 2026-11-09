@@ -55,6 +55,9 @@ async def send_demo(message: types.Message):
 
 @router.message(F.text == "🔹 Акції")
 async def send_actions(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("Меню оновлено ⬇️", reply_markup=main_menu())
+        return
     await message.answer("Оберіть одну з наших акцій:", reply_markup=actions_menu())
 
 

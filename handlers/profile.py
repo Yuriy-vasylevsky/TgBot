@@ -1,3 +1,4 @@
+from services.promotions import promotions_enabled, promo_callback
 
 
 import logging
@@ -73,6 +74,11 @@ async def get_available_win_limit(user_id: int) -> int:
 
 def build_profile_text(user_id, username, full_name, balance, weekly_coupons, 
                        daily_game_win: int, available_win_limit: int) -> str:
+    promo_text = (
+        f"<b>Зібрано PROMO:</b> <code>{weekly_coupons}</code>\n"
+        f"{'🎟 ' * min(weekly_coupons, 15)}{'+' + str(weekly_coupons - 15) if weekly_coupons > 15 else ''}\n"
+        f"━━━━━━━━━━━━\n\n"
+    ) if promotions_enabled() else ""
     return (
         f"╔════════════╗\n"
         f"║ 👤 <b>МІЙ КАБІНЕТ</b> \n"
@@ -83,12 +89,7 @@ def build_profile_text(user_id, username, full_name, balance, weekly_coupons,
         f"💰 <b>БАЛАНС</b>: {balance} грн\n"
         # f"{build_balance_bar(balance)}\n"
         f"━━━━━━━━━━━━\n\n"
-        f"<b>Зібрано PROMO:</b> <code>{weekly_coupons}</code>\n"
-        f"{'🎟 ' * min(weekly_coupons, 15)}{'+' + str(weekly_coupons - 15) if weekly_coupons > 15 else ''}\n"
-        f"━━━━━━━━━━━━\n\n"
-        f"🏆 <b>💸 БЕЗДЕПИ 💸</b>\n\n"
-        f"🏆 <b>Виграно сьогодні:</b> <code>{daily_game_win} грн</code>\n"
-        f"🏅 <b>Доступно ще:</b> <code>{available_win_limit} грн</code>\n"
+        f"{promo_text}"
     )
 
 
@@ -142,7 +143,10 @@ def build_progress_bars(today_net: int, cashback_status: dict, promo_status: dic
             f"[{cashback_bar}] {available_net}/{CASHBACK_GOAL} грн\n"
         )
 
-    return f"\n━━━━━━━━━━━━\n📊 <b>Трекер акцій</b>\n\n{promo_line}\n{cashback_line}"
+    tracker_lines = [cashback_line]
+    if promotions_enabled():
+        tracker_lines.insert(0, promo_line)
+    return "\n━━━━━━━━━━━━\n📊 <b>Трекер акцій</b>\n\n" + "\n".join(tracker_lines)
 
 
 def profile_keyboard() -> InlineKeyboardMarkup:
@@ -160,7 +164,10 @@ def profile_keyboard() -> InlineKeyboardMarkup:
             callback_data="profile:fortune"
         )],
     ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+    return InlineKeyboardMarkup(inline_keyboard=[
+        row for row in keyboard
+        if promotions_enabled() or not any(promo_callback(b.callback_data) for b in row)
+    ])
 
 
 async def render_profile(user_id: int, username: str, full_name: str):

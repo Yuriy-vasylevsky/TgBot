@@ -1,3 +1,4 @@
+from services.promotions import promotions_enabled
 
 import asyncio
 import random
@@ -40,6 +41,8 @@ def _positive_or_zero(value: int) -> int:
 
 
 def fortune_keyboard(current_promo: int = 0) -> InlineKeyboardMarkup:
+    if not promotions_enabled():
+        return InlineKeyboardMarkup(inline_keyboard=[])
     status = f"{min(current_promo, FORTUNE_COST)}/{FORTUNE_COST}"
     return InlineKeyboardMarkup(
         inline_keyboard=[

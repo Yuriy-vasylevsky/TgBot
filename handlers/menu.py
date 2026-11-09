@@ -1,3 +1,4 @@
+from services.promotions import visible_rows
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 # ==========================
@@ -24,7 +25,7 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
             ["💰 Гаманець", "🎮 Грати" ],
             ["🎟 Ввести промокод", "🐷 Скарбничка"],
             ["👤 Мій кабінет"],
-            [ "🔹 Акції", "👥 Реферали"],
+            ["👥 Реферали"],
             ["🎲 Група", "💎 Касир"],
             # ["💫 КОД в посилання", "🏅 Провайдери"],
             # ["💳 Номер карти", "🏅 Провайдери"],
@@ -33,7 +34,7 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
         #     keyboard.append(["🎁 Подарунок"])
 
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
         resize_keyboard=True,
     )
 
@@ -46,14 +47,14 @@ def main_menu(is_admin: bool = False, user_has_gift: bool = False):
 def checks_menu():
     keyboard = [
         # ["🏆 Чек 100 Champion", "🏆 Чек 200 Champion"],
-        ["🎰 Чек 100 Matic", "🎰 Чек 200 Matic"],
+        ["🎰 Чек 100 Superomatic", "🎰 Чек 200 Superomatic"],
         ["➕ Додати промокод"],
         ["📜 Перегляд кодів", "📊 Чеки"],
         ["🔙 Назад до головного меню"]
     ]
 
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
         resize_keyboard=True
     )
 
@@ -64,6 +65,7 @@ def checks_menu():
 def admin_menu():
     keyboard = [
         ["📢 Розсилка", "🛠 Оновити меню"],
+        ["📣 Керування акціями"],
         ["⚙️ Автооплата", "🪙 Криптооплата"],
         ["💰 Каса", "👥 Всі реферали"],
         ["🔒 Сейф",  "💳 Всі оплати"],
@@ -71,7 +73,7 @@ def admin_menu():
         ["💳 Керування картами", "🔙 Назад до головного меню"],
     ]
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
         resize_keyboard=True,
     )
 
@@ -90,7 +92,7 @@ def admin_menu():
 #         ["🔙 Назад до головного меню"],
 #     ]
 #     return ReplyKeyboardMarkup(
-#         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+#         keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
 #         resize_keyboard=True,
 #     )
 
@@ -105,7 +107,7 @@ def admin_menu2():
         ["📦 Скачати БД", "🔙 Назад до головного меню"],
     ]
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
         resize_keyboard=True,
     )
 
@@ -122,6 +124,6 @@ def actions_menu():
         ["🃏 Cash Back", "🎟 Промокоди"],
     ]
     return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
+        keyboard=[[KeyboardButton(text=b) for b in row] for row in visible_rows(keyboard)],
         resize_keyboard=True,
     )

@@ -1,3 +1,4 @@
+from .promotions import router as promotions_router
 from aiogram import Router
 
 # Підключаємо всі адмін-модулі
@@ -21,6 +22,7 @@ from .top_players import router as top_players_router
 from .receipt_analyzer import router as receipt_analyzer_router
 
 router = Router(name="admin")
+router.include_router(promotions_router)
 
 # Підключаємо всі підроутери
 router.include_router(admin_checks_router) 

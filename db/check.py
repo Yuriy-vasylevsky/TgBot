@@ -31,8 +31,8 @@ async def get_checks_stats():
     tables = {
         "🏆 Чек 100 Champion": "champion_checks_100",
         "🏆 Чек 200 Champion": "champion_checks_200",
-        "🎰 Чек 100 Matic": "matic_checks_100",
-        "🎰 Чек 200 Matic": "matic_checks_200",
+        "🎰 Чек 100 Superomatic": "matic_checks_100",
+        "🎰 Чек 200 Superomatic": "matic_checks_200",
     }
 
     result = {}
@@ -107,8 +107,8 @@ async def get_checks_total_balance():
     total = (
         stats.get("🏆 Чек 100 Champion", 0) * 100 +
         stats.get("🏆 Чек 200 Champion", 0) * 200 +
-        stats.get("🎰 Чек 100 Matic", 0) * 100 +
-        stats.get("🎰 Чек 200 Matic", 0) * 200
+        stats.get("🎰 Чек 100 Superomatic", 0) * 100 +
+        stats.get("🎰 Чек 200 Superomatic", 0) * 200
     )
 
     return total

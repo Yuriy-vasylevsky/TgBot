@@ -11,6 +11,7 @@ from db import (
     get_piggy_bank_state,
 )
 from handlers.config import ADMIN_ID
+from services.promotions import piggy_bank_enabled
 
 
 router = Router(name="piggy_bank")
@@ -18,6 +19,8 @@ PIGGY_BANK_GROUP_ID = -1001964846494
 
 
 def piggy_bank_keyboard(_state: dict) -> InlineKeyboardMarkup:
+    if not piggy_bank_enabled():
+        return InlineKeyboardMarkup(inline_keyboard=[])
     buttons = [
         InlineKeyboardButton(
             text=f"➕ {amount} грн", callback_data=f"piggy:add:{amount}"

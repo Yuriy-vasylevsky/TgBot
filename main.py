@@ -15,6 +15,7 @@ from services.health import health
 from aiohttp import web
  
 from aiogram import Bot, Dispatcher, F, types
+from aiogram.exceptions import TelegramNetworkError, TelegramServerError
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
 from aiogram.client.default import DefaultBotProperties
@@ -45,6 +46,8 @@ from db import (
     add_referral, 
 )
 
+from middlewares.promotions import PromotionsMiddleware
+from services.promotions import load_promotions
 from middlewares.middleware import BanMiddleware, SaveUserMiddleware
 
 # ==================== РОУТЕРИ ====================
@@ -116,6 +119,8 @@ bot = Bot(
     default=DefaultBotProperties(parse_mode=ParseMode.HTML)
 )
 dp = Dispatcher()
+dp.message.outer_middleware(PromotionsMiddleware())
+dp.callback_query.outer_middleware(PromotionsMiddleware())
 
 # Підключаємо роутери (тільки один раз!)
 dp.include_router(maize_router)
@@ -428,6 +433,18 @@ async def run_cleanup_loop():
 # ==========================
 # ЗАПУСК
 # ==========================
+async def wait_for_telegram():
+    """Retry transient API failures before aiogram's initial bot.me() call."""
+    while True:
+        try:
+            await asyncio.wait_for(bot.me(), timeout=15)
+            logger.info("Telegram API connected")
+            return
+        except (TelegramNetworkError, TelegramServerError, asyncio.TimeoutError):
+            logger.warning("Telegram API unavailable; retrying startup in 5 seconds")
+            await asyncio.sleep(5)
+
+
 async def main():
     config.validate_config()
     instance_lock = acquire_instance_lock()
@@ -435,7 +452,12 @@ async def main():
     cleanup_task = None
     try:
         await init_db()
-        await set_commands()
+        await load_promotions()
+        await wait_for_telegram()
+        try:
+            await set_commands()
+        except (TelegramNetworkError, TelegramServerError):
+            logger.warning("Could not register commands; continuing startup")
         api_runner = await run_api()
         cleanup_task = asyncio.create_task(run_cleanup_loop(), name="database-cleanup")
         logger.info("Bot started")
