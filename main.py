@@ -279,9 +279,9 @@ async def cmd_start(message: types.Message, is_new_user: bool = True):
             "Поповнюй баланс, обирай гру та випробовуй удачу! 🍀🔥"
         )
 
-    animation = types.FSInputFile("images/4444.gif")
-    await message.answer_animation(
-        animation=animation,
+    photo = types.FSInputFile("images/4444.png")
+    await message.answer_photo(
+        photo=photo,
         caption=caption,
         reply_markup=keyboard,
     )
