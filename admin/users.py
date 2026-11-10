@@ -11,6 +11,7 @@ from db import (
     DB_PATH,
     get_balance,
     add_to_balance,
+    add_payment_log,
     get_daily_net,
     get_yesterday_net,
     update_daily_net,
@@ -605,10 +606,16 @@ async def balance_add_start(callback: types.CallbackQuery, state: FSMContext):
 
 @router.message(BalanceFSM.add_amount)
 async def balance_add_finish(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
     try:
         amount = int(message.text)
     except:
         await message.answer("❌ Введіть число")
+        return
+
+    if amount <= 0:
+        await message.answer("❌ Введіть суму більше 0")
         return
 
     data = await state.get_data()
@@ -616,6 +623,7 @@ async def balance_add_finish(message: types.Message, state: FSMContext):
 
     await add_to_balance(user_id, amount)
     await update_daily_net(user_id, amount, deposit=True)
+    await add_payment_log(user_id, None, amount, comment="CASHIER_USER_MENU")
     balance = await get_balance(user_id)
 
     await message.answer(
@@ -928,6 +936,7 @@ async def handle_numpad(callback: types.CallbackQuery, state: FSMContext):
             if action == "add":
                 await add_to_balance(user_id, amount)
                 await update_daily_net(user_id, amount, deposit=True)
+                await add_payment_log(user_id, None, amount, comment="CASHIER_USER_MENU")
                 balance = await get_balance(user_id)
 
                 result_text = (
