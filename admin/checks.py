@@ -764,7 +764,7 @@ async def process_close_matic(callback: CallbackQuery):
         remaining = superomatic_refund(balance, price, promotion_active)
         deduction_text = (
             f"🎰 Акція Superomatic: −25% від {price} грн = {price * 0.25:g} грн\n"
-            if promotion_active else ""
+            if promotion_active and price >= 100 else ""
         )
 
         if remaining > 0:

@@ -13,7 +13,7 @@ def superomatic_enabled():
 
 
 def superomatic_refund(balance, price, enabled):
-    deduction = price * 0.25 if enabled else 0
+    deduction = price * 0.25 if enabled and price >= 100 else 0
     return max(0, int(balance - deduction))
 
 
