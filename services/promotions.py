@@ -5,6 +5,27 @@ from db.core import DB_PATH
 _enabled = True
 _piggy_enabled = True
 _daily_fortune_enabled = True
+_superomatic_enabled = False
+
+
+def superomatic_enabled():
+    return _superomatic_enabled
+
+
+def superomatic_refund(balance, price, enabled):
+    deduction = price * 0.25 if enabled else 0
+    return max(0, int(balance - deduction))
+
+
+async def set_superomatic(enabled):
+    global _superomatic_enabled
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings(key, value) VALUES ('superomatic_enabled', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (int(enabled),)
+        )
+        await db.commit()
+    _superomatic_enabled = enabled
 PROMO_BUTTONS = {
     "🤞 Згенерувати промо", "🎟 Ввести промокод", "➕ Створити промокод",
     "🎟 Активні Promo", "🎡 Колесо фортуни", "🎟 Промокоди",
@@ -57,7 +78,7 @@ def visible_rows(rows):
 
 
 async def load_promotions():
-    global _enabled, _piggy_enabled, _daily_fortune_enabled
+    global _enabled, _piggy_enabled, _daily_fortune_enabled, _superomatic_enabled
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT value FROM settings WHERE key='promotions_enabled'") as cur:
             row = await cur.fetchone()
@@ -65,9 +86,12 @@ async def load_promotions():
             piggy_row = await cur.fetchone()
         async with db.execute("SELECT value FROM settings WHERE key='daily_fortune_enabled'") as cur:
             fortune_row = await cur.fetchone()
+        async with db.execute("SELECT value FROM settings WHERE key='superomatic_enabled'") as cur:
+            superomatic_row = await cur.fetchone()
     _enabled = row is None or bool(row[0])
     _piggy_enabled = piggy_row is None or bool(piggy_row[0])
     _daily_fortune_enabled = fortune_row is None or bool(fortune_row[0])
+    _superomatic_enabled = superomatic_row is not None and bool(superomatic_row[0])
     return _enabled
 
 

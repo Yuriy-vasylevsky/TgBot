@@ -14,6 +14,8 @@ from db import get_issued_checks_for_user
 from handlers.menu import checks_menu
 from handlers.casino_api import create_invoice, create_matic_checks, close_invoice, check_invoice, add_to_invoice
 from admin.bans import is_banned
+from db.check import get_matic_check_price
+from services.promotions import superomatic_enabled, superomatic_refund
 
 router = Router(name="admin_checks")
 
@@ -748,11 +750,22 @@ async def process_close_matic(callback: CallbackQuery):
     code = callback.data.removeprefix("close_matic_")
     user_id = callback.from_user.id
 
+    price = await get_matic_check_price(user_id, code)
+    if price is None:
+        await callback.answer("❌ Чек не знайдено серед ваших активних чеків.", show_alert=True)
+        return
+    promotion_active = superomatic_enabled()
+
     await callback.answer("🔄 Закриваємо Superomatic чек...")
 
     try:
         result = await matic_api.close_check_by_code(code)
-        remaining = result.get("balance", 0)
+        balance = result.get("balance", 0)
+        remaining = superomatic_refund(balance, price, promotion_active)
+        deduction_text = (
+            f"🎰 Акція Superomatic: −25% від {price} грн = {price * 0.25:g} грн\n"
+            if promotion_active else ""
+        )
 
         if remaining > 0:
             await add_to_balance(user_id, int(remaining))
@@ -761,6 +774,7 @@ async def process_close_matic(callback: CallbackQuery):
 
         await callback.message.edit_text(
             f"✅ Superomatic чек успішно закрито!\n\n"
+            f"{deduction_text}"
             f"💰 Повернено на баланс: <b>{remaining:.0f} грн</b>",
             parse_mode="HTML"
         )
@@ -768,6 +782,7 @@ async def process_close_matic(callback: CallbackQuery):
         await callback.bot.send_message(
             ADMIN_ID,
             f"🔒 Закрито Superomatic чек\n"
+            f"{deduction_text}"
             f"Користувач: {callback.from_user.full_name}\n"
             f"Повернено: {remaining:.0f} грн",
             parse_mode="HTML"

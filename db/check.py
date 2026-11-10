@@ -2,6 +2,16 @@ import aiosqlite
 from .core import DB_PATH
 
 
+async def get_matic_check_price(user_id: int, code: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT price FROM issued_checks WHERE user_id=? AND code=? "
+            "AND LOWER(check_type) LIKE '%matic%' LIMIT 1", (user_id, code)
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else None
+
+
 async def add_check_code(table: str, code: str):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(

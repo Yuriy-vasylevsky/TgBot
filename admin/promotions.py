@@ -10,6 +10,7 @@ from handlers.config import ADMIN_ID
 from handlers.menu import main_menu
 from services.promotions import promotions_enabled, set_promotions, piggy_bank_enabled, set_piggy_bank
 from services.promotions import daily_fortune_enabled, set_daily_fortune
+from services.promotions import superomatic_enabled, set_superomatic
 
 router = Router(name="admin_promotions")
 _update_task = None
@@ -33,6 +34,11 @@ def promotions_keyboard():
         types.InlineKeyboardButton(
             text=f"🎲 Фортуна: {'✅ Увімкнено' if daily_fortune_enabled() else '⛔ Вимкнено'}",
             callback_data=f"promotions:daily_fortune:{int(not daily_fortune_enabled())}",
+        )
+    ], [
+        types.InlineKeyboardButton(
+            text=f"🎰 Superomatic −25%: {'✅ Увімкнено' if superomatic_enabled() else '⛔ Вимкнено'}",
+            callback_data=f"promotions:superomatic:{int(not superomatic_enabled())}",
         )
     ], [
         types.InlineKeyboardButton(
@@ -81,6 +87,7 @@ async def refresh_menus(bot, feature="Промокоди та колесо фо�
 @router.callback_query(F.data.in_({
     "promotions:set:0", "promotions:set:1", "promotions:piggy:0", "promotions:piggy:1",
     "promotions:daily_fortune:0", "promotions:daily_fortune:1",
+    "promotions:superomatic:0", "promotions:superomatic:1",
 }))
 async def toggle_promotions(callback: types.CallbackQuery):
     global _update_task
@@ -96,12 +103,17 @@ async def toggle_promotions(callback: types.CallbackQuery):
             "set": (promotions_enabled, set_promotions, "Промокоди та колесо фортуни"),
             "piggy": (piggy_bank_enabled, set_piggy_bank, "Скарбничка"),
             "daily_fortune": (daily_fortune_enabled, set_daily_fortune, "Фортуна"),
+            "superomatic": (superomatic_enabled, set_superomatic, "Superomatic −25%"),
         }
         get_enabled, set_enabled, feature = switches[callback.data.split(":")[1]]
         if enabled == get_enabled():
             await callback.answer("Цей стан уже встановлено. Відкрийте меню керування ще раз.")
             return
         await set_enabled(enabled)
+        if callback.data.split(":")[1] == "superomatic":
+            await callback.answer("Стан збережено. Відрахування діє при закритті чека.")
+            await callback.message.edit_reply_markup(reply_markup=promotions_keyboard())
+            return
         await callback.answer("Стан збережено. Оновлюю меню користувачів.")
         _update_task = asyncio.create_task(refresh_menus(callback.bot, feature, enabled))
         await callback.message.edit_reply_markup(reply_markup=promotions_keyboard())

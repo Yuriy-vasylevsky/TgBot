@@ -1,11 +1,13 @@
 import asyncio
 import logging
+from html import escape
 from pathlib import Path
 
 from aiogram import F, Router, types
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter, TelegramNetworkError, TelegramServerError
 from db.daily_fortune import MAX_DEPOSIT_BASE, fortune_status, reserve_fortune, release_fortune, settle_fortune
 from services.promotions import daily_fortune_enabled
+from handlers.config import ADMIN_ID
 
 router = Router(name='daily_deposit_fortune')
 logger = logging.getLogger(__name__)
@@ -71,6 +73,23 @@ async def roll_fortune(callback: types.CallbackQuery):
         await callback.message.answer('⏳ Не вдалося підтвердити кидок. Звернись до адміністратора, щоб перевірити спробу.')
         return
     reward = await asyncio.shield(settle_fortune(attempt_id, dice.dice.value, dice.message_id))
+    if reward['bonus'] > 0:
+        user = callback.from_user
+        username = f" (@{escape(user.username)})" if user.username else ""
+        try:
+            await callback.bot.send_message(
+                ADMIN_ID,
+                f"🎲 Виграш у Фортуні!\n\n"
+                f'👤 <a href="tg://user?id={user.id}">{escape(user.full_name)}</a>{username}\n'
+                f"🆔 ID: <code>{user.id}</code>\n"
+                f"🎲 Випало: <b>{reward['value']}</b> ({reward['value'] * 10}%)\n"
+                f"💳 Депозит: <b>{reward['deposit_amount']} грн</b>\n"
+                f"Сума для розрахунку: <b>{reward['bonus_base']} грн</b>\n"
+                f"🎁 Зараховано: <b>+{reward['bonus']} грн</b>",
+                parse_mode='HTML',
+            )
+        except TelegramAPIError:
+            logger.exception('Daily fortune admin notification failed | attempt_id=%s user_id=%s', attempt_id, user.id)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except TelegramBadRequest:
