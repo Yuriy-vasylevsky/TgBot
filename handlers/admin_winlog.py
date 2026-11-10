@@ -11,6 +11,7 @@ TYPE_LABELS = {
     "promo":    "🎟 Промокод",
     "game":     "🎮 Особисті ігри",
     "fortune":  "🎡 Колесо фортуни",
+    "daily_fortune": "🎲 Фортуна",
     "group":    "👥 Групові ігри",
 }
 
@@ -21,7 +22,7 @@ def _label(win_type: str) -> str:
     return TYPE_LABELS.get(win_type, win_type)
 
 
-PROMO_TYPES = ("fortune", "game", "group", "promo")
+PROMO_TYPES = ("fortune", "daily_fortune", "game", "group", "promo")
 
 
 async def build_summary_text(date_offset: int) -> str:

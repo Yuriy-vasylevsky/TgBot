@@ -4,6 +4,7 @@ from datetime import datetime, timezone, timedelta
 from html import escape
 from db import get_all_users_info, search_users, get_issued_checks_for_user, get_all_balances
 from handlers.config import ADMIN_ID
+from db.daily_fortune import get_fortune_winnings
 from group_games.football_router import is_promo_on_cooldown, get_promo_cooldown_remaining
 from handlers.menu import main_menu
 import aiosqlite
@@ -338,7 +339,10 @@ async def show_user_detail(callback: types.CallbackQuery):
     daily_net = await get_daily_net(user_id)
     yesterday_net = await get_yesterday_net(user_id)
     daily_game_win = await get_daily_game_win(user_id) 
+    fortune_today, fortune_yesterday = await get_fortune_winnings(user_id)
+    daily_game_win += fortune_today
     yesterday_game_win = await get_yesterday_game_win(user_id)
+    yesterday_game_win += fortune_yesterday
 
     freeze_text = ""
     if frozen_balance:

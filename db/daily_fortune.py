@@ -1,5 +1,5 @@
 """One deposit dice bonus per Kyiv calendar day, credited atomically."""
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from zoneinfo import ZoneInfo
 
@@ -8,6 +8,20 @@ from db.core import DB_PATH
 
 KYIV = ZoneInfo("Europe/Kyiv")
 MAX_DEPOSIT_BASE = 500
+
+
+async def get_fortune_winnings(user_id, *, now=None):
+    """Return settled bonuses for today and yesterday in Kyiv."""
+    today = datetime.fromtimestamp(time.time() if now is None else now, KYIV).date()
+    days = (today.isoformat(), (today - timedelta(days=1)).isoformat())
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT day, COALESCE(SUM(bonus),0) FROM daily_fortune "
+            "WHERE user_id=? AND day IN (?,?) AND dice_value IS NOT NULL GROUP BY day",
+            (user_id, *days),
+        )
+        totals = dict(await cur.fetchall())
+    return totals.get(days[0], 0), totals.get(days[1], 0)
 
 
 async def init_daily_fortune():
@@ -69,7 +83,7 @@ async def release_fortune(attempt_id):
         await db.commit()
 
 
-async def settle_fortune(attempt_id, value, message_id):
+async def settle_fortune(attempt_id, value, message_id, *, username=None, full_name=None):
     if type(value) is not int or not 1 <= value <= 6:
         raise ValueError('Invalid dice value')
     async with aiosqlite.connect(DB_PATH) as db:
@@ -85,6 +99,13 @@ async def settle_fortune(attempt_id, value, message_id):
             if credited.rowcount != 1:
                 raise ValueError('Player not found')
             await db.execute("UPDATE daily_fortune SET dice_value=?,bonus=?,dice_message_id=? WHERE id=?", (value, bonus, message_id, attempt_id))
+            if bonus > 0:
+                await db.execute(
+                    "INSERT INTO win_log(user_id,username,full_name,win_type,source,amount) "
+                    "VALUES (?,?,?,?,?,?)",
+                    (row['user_id'], username or '—', full_name or '—',
+                     'daily_fortune', 'Фортуна — бонус за депозит', bonus),
+                )
         else:
             value, bonus = row['dice_value'], row['bonus']
         cur = await db.execute('SELECT balance FROM users WHERE user_id=?', (row['user_id'],))

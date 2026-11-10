@@ -11,6 +11,7 @@ from handlers.config import ADMIN_ID
 
 router = Router(name='daily_deposit_fortune')
 logger = logging.getLogger(__name__)
+FORTUNE_GROUP_ID = -1001964846494
 
 
 def fortune_keyboard():
@@ -72,7 +73,10 @@ async def roll_fortune(callback: types.CallbackQuery):
         logger.exception('Daily fortune dice delivery uncertain | attempt_id=%s user_id=%s', attempt_id, callback.from_user.id)
         await callback.message.answer('⏳ Не вдалося підтвердити кидок. Звернись до адміністратора, щоб перевірити спробу.')
         return
-    reward = await asyncio.shield(settle_fortune(attempt_id, dice.dice.value, dice.message_id))
+    reward = await asyncio.shield(settle_fortune(
+        attempt_id, dice.dice.value, dice.message_id,
+        username=callback.from_user.username, full_name=callback.from_user.full_name,
+    ))
     if reward['bonus'] > 0:
         user = callback.from_user
         username = f" (@{escape(user.username)})" if user.username else ""
@@ -90,6 +94,16 @@ async def roll_fortune(callback: types.CallbackQuery):
             )
         except TelegramAPIError:
             logger.exception('Daily fortune admin notification failed | attempt_id=%s user_id=%s', attempt_id, user.id)
+        try:
+            await callback.bot.send_message(
+                FORTUNE_GROUP_ID,
+                "🎲✨ <b>Фортуна дарує виграш!</b>\n\n"
+                f"🎁 Щойно зараховано <b>+{reward['bonus']} грн</b> бонусу!\n\n"
+                "🍀 Вітаємо з виграшем! Нехай щастить і тобі!",
+                parse_mode='HTML',
+            )
+        except TelegramAPIError:
+            logger.exception('Daily fortune group notification failed | attempt_id=%s', attempt_id)
     try:
         await callback.message.edit_reply_markup(reply_markup=None)
     except TelegramBadRequest:

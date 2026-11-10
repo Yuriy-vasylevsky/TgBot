@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 from db import daily_fortune as fortune
+from db import winlog
 
 
 class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
@@ -18,6 +19,8 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
         self.patch.start()
         self.now = datetime(2026, 11, 9, 15, 0, tzinfo=fortune.KYIV).timestamp()
         await fortune.init_daily_fortune()
+        with patch.object(winlog, 'DB_PATH', self.path):
+            await winlog.ensure_win_log_table()
         async with aiosqlite.connect(self.path) as db:
             await db.execute('CREATE TABLE users(user_id INTEGER PRIMARY KEY, balance INTEGER)')
             await db.execute('INSERT INTO users VALUES (1, 100)')
@@ -46,6 +49,18 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
         status = await fortune.reserve_fortune(1, now=self.now)
         self.assertTrue(status['success'])
         self.assertEqual(status['deposit_amount'], 300)
+
+    async def test_user_card_winnings_follow_kyiv_day(self):
+        await self.deposit(200)
+        attempt = await fortune.reserve_fortune(1, now=self.now)
+        self.assertEqual(await fortune.get_fortune_winnings(1, now=self.now), (0, 0))
+        await fortune.settle_fortune(attempt['attempt_id'], 3, 123)
+        self.assertEqual(await fortune.get_fortune_winnings(1, now=self.now), (60, 0))
+        self.assertEqual(await fortune.get_fortune_winnings(2, now=self.now), (0, 0))
+        tomorrow = datetime(2026, 11, 10, 0, 0, tzinfo=fortune.KYIV).timestamp()
+        self.assertEqual(await fortune.get_fortune_winnings(1, now=tomorrow), (0, 60))
+        later = datetime(2026, 11, 11, 0, 0, tzinfo=fortune.KYIV).timestamp()
+        self.assertEqual(await fortune.get_fortune_winnings(1, now=later), (0, 0))
 
     async def test_last_deposit_not_sum_or_safe_award(self):
         await self.deposit(1000, at=self.now - 60)
@@ -92,6 +107,8 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute('SELECT balance FROM users WHERE user_id=1')
             self.assertEqual((await cur.fetchone())[0], 180)
+            cur = await db.execute("SELECT amount, win_type FROM win_log")
+            self.assertEqual(await cur.fetchall(), [(80, 'daily_fortune')])
         await fortune.init_daily_fortune()
         await self.deposit(500)
         self.assertEqual((await fortune.reserve_fortune(1, now=self.now))['reason'], 'used')
@@ -129,12 +146,22 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
             chat=SimpleNamespace(type='private'), answer=AsyncMock(), edit_reply_markup=AsyncMock(),
             answer_dice=AsyncMock(return_value=SimpleNamespace(dice=SimpleNamespace(value=5), message_id=777)),
         )
-        cb = SimpleNamespace(from_user=SimpleNamespace(id=1), message=message, answer=AsyncMock())
+        cb = SimpleNamespace(from_user=SimpleNamespace(id=1, username='private_player', full_name='Private Player'),
+                             message=message, answer=AsyncMock(), bot=SimpleNamespace(send_message=AsyncMock()))
         with patch('db.daily_fortune.time.time', return_value=self.now):
             await roll_fortune(cb)
             await roll_fortune(cb)
         message.answer_dice.assert_awaited_once_with(emoji='🎲')
         self.assertIn('+250', message.answer.call_args.args[0])
+        from handlers.daily_fortune import FORTUNE_GROUP_ID
+        group_messages = [call for call in cb.bot.send_message.call_args_list if call.args[0] == FORTUNE_GROUP_ID]
+        self.assertEqual(len(group_messages), 1)
+        public_text = group_messages[0].args[1]
+        self.assertIn('+250', public_text)
+        for private_info in ('private_player', 'Private Player', 'tg://user'):
+            self.assertNotIn(private_info, public_text)
         async with aiosqlite.connect(self.path) as db:
             cur = await db.execute('SELECT balance FROM users WHERE user_id=1')
             self.assertEqual((await cur.fetchone())[0], 350)
+            cur = await db.execute('SELECT username,full_name,amount FROM win_log')
+            self.assertEqual(await cur.fetchall(), [('private_player', 'Private Player', 250)])
