@@ -32,7 +32,10 @@ async def init_auto_broadcast():
             caption TEXT, clock TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
             next_run REAL NOT NULL)""")
         cur = await db.execute("PRAGMA table_info(auto_broadcasts)")
-        if 'days_mask' not in {row[1] for row in await cur.fetchall()}:
+        columns = {row[1] for row in await cur.fetchall()}
+        if 'title' not in columns:
+            await db.execute("ALTER TABLE auto_broadcasts ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+        if 'days_mask' not in columns:
             await db.execute("ALTER TABLE auto_broadcasts ADD COLUMN days_mask INTEGER NOT NULL DEFAULT 127")
         await db.execute("""CREATE TABLE IF NOT EXISTS auto_broadcast_deliveries (
             id INTEGER PRIMARY KEY AUTOINCREMENT, broadcast_id INTEGER NOT NULL,
@@ -52,20 +55,24 @@ async def list_broadcasts():
         return [dict(row) for row in await cur.fetchall()]
 
 
-async def save_broadcast(photo, caption, clock, days_mask=127):
+async def save_broadcast(photo, caption, clock, days_mask=127, *, title=''):
     when = next_daily(clock, days_mask=days_mask)
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "INSERT INTO auto_broadcasts(photo, caption, clock, next_run, days_mask) VALUES (?,?,?,?,?)",
-            (photo, caption, clock, when, days_mask),
+            "INSERT INTO auto_broadcasts(photo, caption, clock, next_run, days_mask, title) VALUES (?,?,?,?,?,?)",
+            (photo, caption, clock, when, days_mask, title),
         )
         await db.commit()
         return cur.lastrowid
 
 
-async def change_broadcast(bid, action, clock=None, days_mask=None):
+async def change_broadcast(bid, action, clock=None, days_mask=None, *, title=None):
     async with aiosqlite.connect(DB_PATH) as db:
-        if action == "delete":
+        if action == "title":
+            if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80:
+                raise ValueError("Title must contain 1–80 characters")
+            await db.execute("UPDATE auto_broadcasts SET title=? WHERE id=?", (title.strip(), bid))
+        elif action == "delete":
             await db.execute("DELETE FROM auto_broadcast_deliveries WHERE broadcast_id=?", (bid,))
             await db.execute("DELETE FROM auto_broadcasts WHERE id=?", (bid,))
         elif action == "toggle":

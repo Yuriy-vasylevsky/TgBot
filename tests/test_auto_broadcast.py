@@ -12,6 +12,20 @@ from services import auto_broadcast as worker
 
 
 class AutoBroadcastTests(unittest.IsolatedAsyncioTestCase):
+    async def test_title_persisted_shown_and_renamed(self):
+        from admin.auto_broadcast import show_list
+        bid = await store.save_broadcast('photo', 'caption', '18:30', title='Дартс щовечора')
+        await store.init_auto_broadcast()
+        rows = await store.list_broadcasts()
+        self.assertEqual(rows[0]['title'], 'Дартс щовечора')
+        message = AsyncMock()
+        await show_list(message)
+        markup = message.answer.call_args.kwargs['reply_markup']
+        self.assertIn('Дартс щовечора', markup.inline_keyboard[0][0].text)
+        await store.change_broadcast(bid, 'title', title='Нова назва')
+        self.assertEqual((await store.list_broadcasts())[0]['title'], 'Нова назва')
+        self.assertEqual((await store.list_broadcasts())[0]['caption'], 'caption')
+
     async def asyncSetUp(self):
         folder = Path(__file__).resolve().parent.parent / '.tmp'
         folder.mkdir(exist_ok=True)

@@ -18,6 +18,7 @@ WEEKDAYS = ("Понеділок", "Вівторок", "Середа", "Четв�
 
 
 class AutoBroadcastFSM(StatesGroup):
+    title = State()
     photo = State()
     caption = State()
     clock = State()
@@ -61,7 +62,8 @@ async def show_list(message, page=0):
     kb = InlineKeyboardBuilder()
     for row in rows[page * 8:page * 8 + 8]:
         bid = row['id']
-        kb.button(text=f"#{bid} · {row['clock']} · {'✅' if row['enabled'] else '⏸'}", callback_data=f"ab:view:{bid}")
+        title = row.get('title') or f"Авторозсилка #{bid}"
+        kb.button(text=f"{title} · {row['clock']} · {'✅' if row['enabled'] else '⏸'}", callback_data=f"ab:view:{bid}")
     if page:
         kb.button(text="← Попередні", callback_data=f"ab:list:{page - 1}")
     if (page + 1) * 8 < len(rows):
@@ -85,9 +87,36 @@ async def open_list(cb: types.CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "ab:new")
 async def new_broadcast(cb: types.CallbackQuery, state: FSMContext):
     await state.clear()
-    await state.set_state(AutoBroadcastFSM.photo)
+    await state.set_state(AutoBroadcastFSM.title)
     await cb.answer()
-    await cb.message.answer("🖼 Надішліть картинку як фото.", reply_markup=cancel_keyboard())
+    await cb.message.answer("🏷 Введіть назву розсилки (до 80 символів). Вона показуватиметься у списку для адміністратора.", reply_markup=cancel_keyboard())
+
+
+@router.message(AutoBroadcastFSM.title)
+async def receive_title(message: types.Message, state: FSMContext):
+    title = ' '.join((message.text or '').split())
+    if not 1 <= len(title) <= 80:
+        await message.answer("Введіть назву від 1 до 80 символів.", reply_markup=cancel_keyboard())
+        return
+    data = await state.get_data()
+    if data.get('edit_title_id'):
+        await change_broadcast(data['edit_title_id'], 'title', title=title)
+        await state.clear()
+        await message.answer("✅ Назву змінено.")
+        await show_list(message)
+        return
+    await state.update_data(title=title)
+    await state.set_state(AutoBroadcastFSM.photo)
+    await message.answer("🖼 Надішліть картинку як фото.", reply_markup=cancel_keyboard())
+
+
+@router.callback_query(F.data.startswith("ab:title:"))
+async def edit_title(cb: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await state.update_data(edit_title_id=int(cb.data.rsplit(':', 1)[1]))
+    await state.set_state(AutoBroadcastFSM.title)
+    await cb.answer()
+    await cb.message.answer("🏷 Введіть нову назву розсилки (до 80 символів).", reply_markup=cancel_keyboard())
 
 
 @router.message(AutoBroadcastFSM.photo)
@@ -198,7 +227,7 @@ async def confirm_broadcast(cb: types.CallbackQuery, state: FSMContext):
         if await state.get_state() != AutoBroadcastFSM.confirm.state or not data.get('photo'):
             await cb.answer("Цю розсилку вже збережено або скасовано.")
             return
-        bid = await save_broadcast(data['photo'], data.get('caption'), data['clock'], data['days_mask'])
+        bid = await save_broadcast(data['photo'], data.get('caption'), data['clock'], data['days_mask'], title=data.get('title', ''))
         await state.clear()
     await cb.answer("Збережено")
     await cb.message.edit_reply_markup(reply_markup=None)
@@ -219,12 +248,13 @@ async def view_broadcast(cb: types.CallbackQuery, state: FSMContext):
     await cb.message.answer_photo(row['photo'], caption=row['caption'], parse_mode=None, reply_markup=play_button())
     kb = InlineKeyboardBuilder()
     kb.button(text="⏸ Призупинити" if row['enabled'] else "▶️ Увімкнути", callback_data=f"ab:toggle:{bid}")
+    kb.button(text="🏷 Змінити назву", callback_data=f"ab:title:{bid}")
     kb.button(text="🕒 Змінити час", callback_data=f"ab:time:{bid}")
     kb.button(text="📅 Дні тижня", callback_data=f"ab:days:{bid}")
     kb.button(text="🗑 Видалити", callback_data=f"ab:delete:{bid}")
     kb.button(text="← До списку", callback_data="ab:list:0")
     kb.adjust(1)
-    await cb.message.answer(f"Авторозсилка #{bid}\nО {row['clock']} за Києвом.\nДні: {days_text(row['days_mask'])}.\nСтан: {'увімкнено' if row['enabled'] else 'призупинено'}.", reply_markup=kb.as_markup())
+    await cb.message.answer(f"Авторозсилка #{bid}\nНазва: {row.get('title') or 'Без назви'}\nО {row['clock']} за Києвом.\nДні: {days_text(row['days_mask'])}.\nСтан: {'увімкнено' if row['enabled'] else 'призупинено'}.", parse_mode=None, reply_markup=kb.as_markup())
 
 
 @router.callback_query(F.data.startswith("ab:days:"))
