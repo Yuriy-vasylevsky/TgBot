@@ -32,6 +32,9 @@ async def init_daily_fortune():
             deposit_id INTEGER NOT NULL, deposit_amount INTEGER NOT NULL,
             dice_value INTEGER, bonus INTEGER, dice_message_id INTEGER,
             UNIQUE(user_id, day))""")
+        cur = await db.execute("PRAGMA table_info(daily_fortune)")
+        if 'game' not in {r[1] for r in await cur.fetchall()}:
+            await db.execute("ALTER TABLE daily_fortune ADD COLUMN game TEXT NOT NULL DEFAULT 'fortune'")
         await db.commit()
 
 
@@ -62,15 +65,17 @@ async def fortune_status(user_id, *, now=None):
         return await _status(db, user_id, time.time() if now is None else now)
 
 
-async def reserve_fortune(user_id, *, now=None):
+async def reserve_fortune(user_id, *, now=None, game='fortune'):
+    if game not in {'fortune', 'darts'}:
+        raise ValueError('Invalid daily bonus game')
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         await db.execute('BEGIN IMMEDIATE')
         result = await _status(db, user_id, time.time() if now is None else now)
         if not result['success']:
             return result
-        cur = await db.execute("""INSERT INTO daily_fortune(user_id, day, deposit_id, deposit_amount)
-            VALUES (?,?,?,?)""", (user_id, result['day'], result['deposit_id'], result['deposit_amount']))
+        cur = await db.execute("""INSERT INTO daily_fortune(user_id, day, deposit_id, deposit_amount, game)
+            VALUES (?,?,?,?,?)""", (user_id, result['day'], result['deposit_id'], result['deposit_amount'], game))
         result['attempt_id'] = cur.lastrowid
         await db.commit()
         return result
@@ -94,7 +99,8 @@ async def settle_fortune(attempt_id, value, message_id, *, username=None, full_n
         if not row:
             raise ValueError('Attempt not found')
         if row['dice_value'] is None:
-            bonus = min(row['deposit_amount'], MAX_DEPOSIT_BASE) * value // 10
+            multiplier = value - 1 if row['game'] == 'darts' else value
+            bonus = min(row['deposit_amount'], MAX_DEPOSIT_BASE) * multiplier // 10
             credited = await db.execute("UPDATE users SET balance=COALESCE(balance,0)+? WHERE user_id=?", (bonus, row['user_id']))
             if credited.rowcount != 1:
                 raise ValueError('Player not found')
@@ -104,7 +110,8 @@ async def settle_fortune(attempt_id, value, message_id, *, username=None, full_n
                     "INSERT INTO win_log(user_id,username,full_name,win_type,source,amount) "
                     "VALUES (?,?,?,?,?,?)",
                     (row['user_id'], username or '—', full_name or '—',
-                     'daily_fortune', 'Фортуна — бонус за депозит', bonus),
+                     'daily_darts' if row['game'] == 'darts' else 'daily_fortune',
+                     'Дартс — бонус за депозит' if row['game'] == 'darts' else 'Фортуна — бонус за депозит', bonus),
                 )
         else:
             value, bonus = row['dice_value'], row['bonus']

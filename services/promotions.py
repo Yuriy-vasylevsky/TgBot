@@ -5,6 +5,7 @@ from db.core import DB_PATH
 _enabled = True
 _piggy_enabled = True
 _daily_fortune_enabled = True
+_daily_darts_enabled = False
 _superomatic_enabled = False
 
 
@@ -50,6 +51,10 @@ def daily_fortune_enabled():
     return _daily_fortune_enabled
 
 
+def daily_darts_enabled():
+    return _daily_darts_enabled
+
+
 def daily_fortune_callback(value):
     return bool(value and value.startswith("daily_fortune:"))
 
@@ -61,7 +66,8 @@ def piggy_callback(value):
 def disabled_callback(value):
     return ((not _enabled and promo_callback(value))
             or (not _piggy_enabled and piggy_callback(value))
-            or (not _daily_fortune_enabled and daily_fortune_callback(value)))
+            or (not _daily_fortune_enabled and daily_fortune_callback(value))
+            or (not _daily_darts_enabled and bool(value and value.startswith("daily_darts:"))))
 
 
 def promo_callback(value):
@@ -78,7 +84,7 @@ def visible_rows(rows):
 
 
 async def load_promotions():
-    global _enabled, _piggy_enabled, _daily_fortune_enabled, _superomatic_enabled
+    global _enabled, _piggy_enabled, _daily_fortune_enabled, _superomatic_enabled, _daily_darts_enabled
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT value FROM settings WHERE key='promotions_enabled'") as cur:
             row = await cur.fetchone()
@@ -86,12 +92,15 @@ async def load_promotions():
             piggy_row = await cur.fetchone()
         async with db.execute("SELECT value FROM settings WHERE key='daily_fortune_enabled'") as cur:
             fortune_row = await cur.fetchone()
+        async with db.execute("SELECT value FROM settings WHERE key='daily_darts_enabled'") as cur:
+            darts_row = await cur.fetchone()
         async with db.execute("SELECT value FROM settings WHERE key='superomatic_enabled'") as cur:
             superomatic_row = await cur.fetchone()
     _enabled = row is None or bool(row[0])
     _piggy_enabled = piggy_row is None or bool(piggy_row[0])
     _daily_fortune_enabled = fortune_row is None or bool(fortune_row[0])
     _superomatic_enabled = superomatic_row is not None and bool(superomatic_row[0])
+    _daily_darts_enabled = darts_row is not None and bool(darts_row[0]) and not _daily_fortune_enabled
     return _enabled
 
 
@@ -119,6 +128,8 @@ async def set_piggy_bank(enabled):
 
 async def set_daily_fortune(enabled):
     global _daily_fortune_enabled
+    if enabled and _daily_darts_enabled:
+        raise ValueError("Спочатку вимкніть Дартс.")
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT INTO settings(key, value) VALUES ('daily_fortune_enabled', ?) "
@@ -126,3 +137,16 @@ async def set_daily_fortune(enabled):
         )
         await db.commit()
     _daily_fortune_enabled = enabled
+
+
+async def set_daily_darts(enabled):
+    global _daily_darts_enabled
+    if enabled and _daily_fortune_enabled:
+        raise ValueError("Спочатку вимкніть Фортуну.")
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings(key, value) VALUES ('daily_darts_enabled', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (int(enabled),)
+        )
+        await db.commit()
+    _daily_darts_enabled = enabled

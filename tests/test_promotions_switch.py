@@ -13,6 +13,56 @@ from services import promotions
 
 
 class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_darts_requires_deactivation_and_persists(self):
+        with patch.object(promotions, '_daily_darts_enabled', False):
+            with self.assertRaises(ValueError):
+                await promotions.set_daily_darts(True)
+            await promotions.set_daily_fortune(False)
+            await promotions.set_daily_darts(True)
+            with self.assertRaises(ValueError):
+                await promotions.set_daily_fortune(True)
+            promotions._daily_darts_enabled = False
+            await promotions.load_promotions()
+            self.assertTrue(promotions.daily_darts_enabled())
+            self.assertFalse(promotions.daily_fortune_enabled())
+            from handlers.daily_fortune import open_daily_bonus
+            message = AsyncMock()
+            with patch('handlers.daily_fortune.open_darts', new_callable=AsyncMock) as darts:
+                await open_daily_bonus(message)
+                darts.assert_awaited_once_with(message)
+            await promotions.set_daily_darts(False)
+            await promotions.set_daily_fortune(True)
+
+    async def test_daily_bonus_opens_game_directly_or_reports_unavailable(self):
+        from handlers.daily_fortune import open_daily_bonus
+        message = AsyncMock()
+        message.from_user.id = 1
+        with patch('handlers.daily_fortune.fortune_status', new_callable=AsyncMock) as status:
+            status.return_value = {'success': True, 'deposit_amount': 100}
+            await promotions.set_daily_fortune(True)
+            await open_daily_bonus(message)
+            message.answer_photo.assert_awaited_once()
+            await promotions.set_daily_fortune(False)
+            status.reset_mock()
+            await open_daily_bonus(message)
+            status.assert_not_awaited()
+            message.answer.assert_awaited_once()
+
+    async def test_fortune_toggle_does_not_broadcast_menu(self):
+        from types import SimpleNamespace
+        from admin import promotions as admin_promotions
+        callback = SimpleNamespace(
+            from_user=SimpleNamespace(id=admin_promotions.ADMIN_ID),
+            data='promotions:daily_fortune:0', answer=AsyncMock(),
+            message=SimpleNamespace(edit_reply_markup=AsyncMock()),
+        )
+        with patch.object(admin_promotions, '_update_task', None), patch.object(
+            admin_promotions, 'refresh_menus', new_callable=AsyncMock
+        ) as refresh:
+            await admin_promotions.toggle_promotions(callback)
+            refresh.assert_not_called()
+        self.assertFalse(promotions.daily_fortune_enabled())
+
     async def asyncSetUp(self):
         self.path = Path(__file__).resolve().parent.parent / ".tmp" / f"promotions-{uuid4().hex}.db"
         self.patch = patch.object(promotions, "DB_PATH", self.path)
@@ -55,7 +105,8 @@ class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
         await promotions.load_promotions()
         self.assertFalse(promotions.daily_fortune_enabled())
         self.assertTrue(promotions.promotions_enabled())
-        self.assertNotIn('🎲 Фортуна', [b.text for row in main_menu().keyboard for b in row])
+        disabled_menu = main_menu().model_dump()
+        self.assertIn('🎁 Щоденний бонус', [b.text for row in main_menu().keyboard for b in row])
         self.assertEqual(fortune_keyboard().inline_keyboard, [])
         self.assertTrue(any(b.callback_data == 'promotions:daily_fortune:1'
                             for row in promotions_keyboard().inline_keyboard for b in row))
@@ -68,7 +119,7 @@ class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
             await PromotionsMiddleware()(handler, event, {})
         handler.assert_not_awaited()
         await promotions.set_daily_fortune(True)
-        self.assertIn('🎲 Фортуна', [b.text for row in main_menu().keyboard for b in row])
+        self.assertEqual(main_menu().model_dump(), disabled_menu)
         self.assertTrue(fortune_keyboard().inline_keyboard)
 
     async def test_pending_redemption_blocked_and_state_cleared(self):

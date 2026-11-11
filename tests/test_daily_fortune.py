@@ -11,6 +11,47 @@ from db import winlog
 
 
 class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
+    async def test_darts_faces_cap_logging_and_shared_attempt(self):
+        for value in range(1, 7):
+            with self.subTest(value=value):
+                await self.deposit(1000, comment='CASHIER_USER_MENU')
+                attempt = await fortune.reserve_fortune(1, now=self.now, game='darts')
+                reward = await fortune.settle_fortune(attempt['attempt_id'], value, 100)
+                expected = 500 * (value - 1) // 10
+                self.assertEqual(reward['bonus'], expected)
+                self.assertEqual((await fortune.reserve_fortune(1, now=self.now))['reason'], 'used')
+                await fortune.settle_fortune(attempt['attempt_id'], value, 100)
+                self.assertEqual(await fortune.get_fortune_winnings(1, now=self.now), (expected, 0))
+                async with aiosqlite.connect(self.path) as db:
+                    cur = await db.execute('SELECT win_type,amount FROM win_log')
+                    self.assertEqual(await cur.fetchall(), [('daily_darts', expected)] if expected else [])
+                    await db.execute('DELETE FROM daily_fortune')
+                    await db.execute('DELETE FROM win_log')
+                    await db.commit()
+
+    async def test_darts_handler_and_anonymous_notification(self):
+        from types import SimpleNamespace
+        from handlers.daily_fortune import roll_darts, FORTUNE_GROUP_ID
+        from services import promotions
+        await self.deposit(200)
+        message = SimpleNamespace(
+            chat=SimpleNamespace(type='private'), answer=AsyncMock(), edit_reply_markup=AsyncMock(),
+            answer_dice=AsyncMock(return_value=SimpleNamespace(dice=SimpleNamespace(value=6), message_id=99)),
+        )
+        cb = SimpleNamespace(from_user=SimpleNamespace(id=1, username='secret', full_name='Secret Name'),
+                             message=message, answer=AsyncMock(), bot=SimpleNamespace(send_message=AsyncMock()))
+        with patch.object(promotions, '_daily_darts_enabled', True), patch('db.daily_fortune.time.time', return_value=self.now):
+            await roll_darts(cb)
+            await roll_darts(cb)
+        message.answer_dice.assert_awaited_once_with(emoji='🎯')
+        self.assertIn('50%', message.answer.call_args.args[0])
+        self.assertIn('+100', message.answer.call_args.args[0])
+        public = [c.args[1] for c in cb.bot.send_message.call_args_list if c.args[0] == FORTUNE_GROUP_ID]
+        self.assertEqual(len(public), 1)
+        self.assertNotIn('secret', public[0])
+        self.assertNotIn('Secret Name', public[0])
+        self.assertNotIn('tg://', public[0])
+
     async def asyncSetUp(self):
         folder = Path(__file__).resolve().parent.parent / '.tmp'
         folder.mkdir(exist_ok=True)
@@ -136,7 +177,7 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
         from handlers.menu import main_menu
         from services import promotions
         with patch.object(promotions, '_enabled', False):
-            self.assertEqual(main_menu().keyboard[1][0].text, '🎲 Фортуна')
+            self.assertEqual(main_menu().keyboard[1][0].text, '🎁 Щоденний бонус')
 
     async def test_handler_credits_telegram_dice_and_blocks_second_roll(self):
         from types import SimpleNamespace
