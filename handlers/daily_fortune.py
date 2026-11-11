@@ -159,7 +159,10 @@ async def open_darts(message: types.Message):
             keyboard = types.InlineKeyboardMarkup(inline_keyboard=[[
                 types.InlineKeyboardButton(text='💰 Поповнити', callback_data='wallet_open')
             ]])
-    await message.answer(text, parse_mode='HTML', reply_markup=keyboard)
+    await message.answer_photo(
+        photo=types.FSInputFile(Path(__file__).resolve().parent.parent / 'images' / 'darc.png'),
+        caption=text, parse_mode='HTML', reply_markup=keyboard,
+    )
 
 
 @router.callback_query(F.data == 'daily_darts:roll')
