@@ -25,6 +25,7 @@ from db.wallet import (
     get_yesterday_game_win,
 )
 from handlers.menu import main_menu
+from db.users import get_regular_player_progress
 from handlers.config import ADMIN_ID
 from games.fortune import fortune_keyboard, FORTUNE_COST
 
@@ -90,6 +91,32 @@ def build_profile_text(user_id, username, full_name, balance, weekly_coupons,
         # f"{build_balance_bar(balance)}\n"
         f"━━━━━━━━━━━━\n\n"
         f"{promo_text}"
+    )
+
+
+def build_regular_player_tracker(is_regular: bool, blocks: int) -> str:
+    blocks = 10 if is_regular else max(0, min(9, blocks))
+    bar = "▰" * blocks + "▱" * (10 - blocks)
+    if is_regular:
+        details = (
+            "✅ <b>Статус отримано назавжди</b>\n"
+            "🎁 Тобі відкрито доступ до щоденного бонусу!"
+        )
+    else:
+        stage = (
+            "🌱 Початок шляху" if blocks < 3 else
+            "✨ На шляху до статусу" if blocks < 7 else
+            "🌟 Уже близько до статусу"
+        )
+        details = (
+            f"{stage}\n"
+            "🎁 Попереду — доступ до щоденного бонусу"
+        )
+    return (
+        "💎 <b>Постійний гравець</b>\n\n"
+        f"<code>{bar}</code>\n"
+        f"{details}\n"
+        "━━━━━━━━━━━━\n\n"
     )
 
 
@@ -189,7 +216,8 @@ async def render_profile(user_id: int, username: str, full_name: str):
     )
     progress_text = build_progress_bars(today_net, cashback_status, promo_status)
 
-    text = profile_text + progress_text
+    is_regular, blocks = await get_regular_player_progress(user_id)
+    text = profile_text + build_regular_player_tracker(is_regular, blocks) + progress_text
     kb = profile_keyboard()
 
     return text, kb

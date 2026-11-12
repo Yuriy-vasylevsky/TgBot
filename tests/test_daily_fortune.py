@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import aiosqlite
 from db import daily_fortune as fortune
-from db import winlog
+from db import winlog, core
 
 
 class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
@@ -62,9 +62,10 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
         await fortune.init_daily_fortune()
         with patch.object(winlog, 'DB_PATH', self.path):
             await winlog.ensure_win_log_table()
+        with patch.object(core, 'DB_PATH', self.path):
+            await core.ensure_users_table_and_columns()
         async with aiosqlite.connect(self.path) as db:
-            await db.execute('CREATE TABLE users(user_id INTEGER PRIMARY KEY, balance INTEGER)')
-            await db.execute('INSERT INTO users VALUES (1, 100)')
+            await db.execute('INSERT INTO users(user_id, balance, daily_net) VALUES (1, 100, 3000)')
             await db.execute('''CREATE TABLE payment_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, amount INTEGER,
                 comment TEXT, created_at TEXT)''')
@@ -73,6 +74,49 @@ class DailyFortuneTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         self.patch.stop()
         self.path.unlink(missing_ok=True)
+
+    async def test_regular_status_threshold_and_permanence(self):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute('INSERT INTO users(user_id, total_losses_all_time, daily_net) VALUES (2, 2500, 499)')
+            await db.commit()
+        self.assertEqual((await fortune.fortune_status(2, now=self.now))['reason'], 'not_regular')
+        self.assertEqual((await fortune.reserve_fortune(2, now=self.now, game='darts'))['reason'], 'not_regular')
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute('UPDATE users SET daily_net=500 WHERE user_id=2')
+            await db.execute('UPDATE users SET daily_net=-4000 WHERE user_id=2')
+            await db.commit()
+        with patch.object(core, 'DB_PATH', self.path):
+            await core.ensure_users_table_and_columns()
+        self.assertEqual((await fortune.fortune_status(2, now=self.now))['reason'], 'no_deposit')
+        self.assertEqual((await fortune.fortune_status(999, now=self.now))['reason'], 'not_regular')
+
+    async def test_migration_qualifies_existing_players(self):
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute('DROP TRIGGER regular_player_on_insert')
+            await db.execute('INSERT INTO users(user_id, total_losses_all_time, daily_net) VALUES (2, 4000, -1000)')
+            await db.commit()
+        with patch.object(core, 'DB_PATH', self.path):
+            await core.ensure_users_table_and_columns()
+        self.assertEqual((await fortune.fortune_status(2, now=self.now))['reason'], 'no_deposit')
+
+    async def test_non_regular_callback_does_not_roll_or_reserve(self):
+        from types import SimpleNamespace
+        from handlers.daily_fortune import roll_fortune, roll_darts
+        from services import promotions
+        async with aiosqlite.connect(self.path) as db:
+            await db.execute('INSERT INTO users(user_id, daily_net) VALUES (2, 2999)')
+            await db.commit()
+        message = SimpleNamespace(chat=SimpleNamespace(type='private'), answer_dice=AsyncMock())
+        callback = SimpleNamespace(from_user=SimpleNamespace(id=2), message=message, answer=AsyncMock())
+        with patch.object(promotions, '_daily_fortune_enabled', True):
+            await roll_fortune(callback)
+        with patch.object(promotions, '_daily_darts_enabled', True):
+            await roll_darts(callback)
+        message.answer_dice.assert_not_awaited()
+        self.assertIn('постійного гравця', callback.answer.call_args.args[0])
+        async with aiosqlite.connect(self.path) as db:
+            cur = await db.execute('SELECT COUNT(*) FROM daily_fortune')
+            self.assertEqual((await cur.fetchone())[0], 0)
 
     async def deposit(self, amount=200, at=None, comment='payment'):
         timestamp = datetime.fromtimestamp(self.now if at is None else at, timezone(timedelta(hours=3)))

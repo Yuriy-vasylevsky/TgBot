@@ -39,6 +39,12 @@ async def init_daily_fortune():
 
 
 async def _status(db, user_id, now):
+    cur = await db.execute(
+        "SELECT is_regular_player FROM users WHERE user_id=?", (user_id,)
+    )
+    player = await cur.fetchone()
+    if not player or not player['is_regular_player']:
+        return {"success": False, "reason": "not_regular"}
     local = datetime.fromtimestamp(now, KYIV)
     day = local.date().isoformat()
     cur = await db.execute("SELECT * FROM daily_fortune WHERE user_id=? AND day=?", (user_id, day))

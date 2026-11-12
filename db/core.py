@@ -50,6 +50,7 @@ async def ensure_users_table_and_columns():
             ("game_cooldown_until", "ALTER TABLE users ADD COLUMN game_cooldown_until TEXT"),
             ("promo_cooldown_until", "ALTER TABLE users ADD COLUMN promo_cooldown_until TEXT"),
             ("total_losses_all_time", "ALTER TABLE users ADD COLUMN total_losses_all_time INTEGER DEFAULT 0"),
+            ("is_regular_player", "ALTER TABLE users ADD COLUMN is_regular_player INTEGER NOT NULL DEFAULT 0"),
 
             
         ]:
@@ -57,6 +58,26 @@ async def ensure_users_table_and_columns():
                 await db.execute(sql)
                 logging.info("Added database column: %s", col)
 
+        # Capture qualification at the accounting write, even if the player has
+        # not opened the daily bonus before their net losses decrease again.
+        for event in ("INSERT", "UPDATE OF daily_net, total_losses_all_time"):
+            name = "insert" if event == "INSERT" else "update"
+            await db.execute(f"""
+                CREATE TRIGGER IF NOT EXISTS regular_player_on_{name}
+                AFTER {event} ON users
+                WHEN COALESCE(NEW.is_regular_player, 0) = 0
+                 AND COALESCE(NEW.total_losses_all_time, 0)
+                     + COALESCE(NEW.daily_net, 0) >= 3000
+                BEGIN
+                    UPDATE users SET is_regular_player = 1
+                    WHERE user_id = NEW.user_id;
+                END
+            """)
+        await db.execute("""
+            UPDATE users SET is_regular_player = 1
+            WHERE COALESCE(is_regular_player, 0) = 0
+              AND COALESCE(total_losses_all_time, 0) + COALESCE(daily_net, 0) >= 3000
+        """)
         await db.commit()
 
 

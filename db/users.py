@@ -146,6 +146,22 @@ async def add_last_action(user_id: int, action: str, chat_type: str | None = Non
         await db.commit()
 
 
+async def get_regular_player_progress(user_id: int) -> tuple[bool, int]:
+    """Return permanent status and approximate progress in ten steps."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT is_regular_player, COALESCE(total_losses_all_time, 0) "
+            "+ COALESCE(daily_net, 0) FROM users WHERE user_id = ?",
+            (user_id,),
+        ) as cur:
+            row = await cur.fetchone()
+    if not row:
+        return False, 0
+    if row[0]:
+        return True, 10
+    return False, max(0, min(9, int(row[1] // 300)))
+
+
 async def get_user_data(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(

@@ -23,6 +23,12 @@ def fortune_keyboard():
 
 
 def unavailable(result):
+    if result['reason'] == 'not_regular':
+        return (
+            '💛 На жаль, ти ще не маєш статусу постійного гравця.\n\n'
+            '🎁 Щоденний бонус доступний лише постійним гравцям. '
+            'Залишайся з нами — попереду ще більше приємних бонусів! ✨'
+        )
     if result['reason'] == 'no_deposit':
         return 'Для участі потрібен депозит сьогодні. Поповни баланс і спробуй удачу!'
     if result['reason'] == 'pending':
