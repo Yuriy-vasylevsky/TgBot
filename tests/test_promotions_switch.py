@@ -13,6 +13,37 @@ from services import promotions
 
 
 class PromotionsSwitchTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bezdep_persists_shows_poster_and_blocks_old_rolls(self):
+        from handlers.daily_fortune import open_daily_bonus, roll_fortune
+        from games import games_menu
+        from types import SimpleNamespace
+        with patch.object(promotions, '_bezdep_enabled', False):
+            await promotions.set_bezdep(True)
+            promotions._bezdep_enabled = False
+            await promotions.load_promotions()
+            self.assertTrue(promotions.bezdep_enabled())
+            self.assertTrue(promotions.disabled_callback('daily_fortune:roll'))
+            self.assertTrue(promotions.disabled_callback('daily_darts:roll'))
+            message = AsyncMock()
+            with patch('handlers.daily_fortune.fortune_status', new_callable=AsyncMock) as status:
+                await open_daily_bonus(message)
+                status.assert_not_awaited()
+            message.answer_photo.assert_awaited_once()
+            poster = message.answer_photo.call_args.kwargs['photo'].path
+            self.assertEqual(Path(poster).name, 'bezdep.png')
+            self.assertTrue(Path(poster).is_file())
+            callback = SimpleNamespace(answer=AsyncMock())
+            with patch('handlers.daily_fortune.reserve_fortune', new_callable=AsyncMock) as reserve:
+                await roll_fortune(callback)
+                reserve.assert_not_awaited()
+            await promotions.set_bezdep(False)
+            with patch('handlers.daily_fortune.open_fortune', new_callable=AsyncMock) as fortune:
+                with patch.object(promotions, '_daily_darts_enabled', False):
+                    await open_daily_bonus(message)
+                    fortune.assert_awaited_once()
+        self.assertIn('🎁 Бездепи', [b.text for row in games_menu(is_admin=True).keyboard for b in row])
+        self.assertNotIn('🎁 Бездепи', [b.text for row in games_menu().keyboard for b in row])
+
     async def test_darts_requires_deactivation_and_persists(self):
         with patch.object(promotions, '_daily_darts_enabled', False):
             with self.assertRaises(ValueError):

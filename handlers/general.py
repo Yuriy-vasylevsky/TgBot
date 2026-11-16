@@ -192,7 +192,7 @@ async def back_from_games(message: types.Message):
 async def admin_games_menu(message: types.Message):
     if message.from_user.id == ADMIN_ID:
         await message.answer(
-            "🎮 Меню ігор (адмін доступ):", reply_markup=imported_games_menu()
+            "🎮 Меню ігор (адмін доступ):", reply_markup=imported_games_menu(is_admin=True)
         )
     else:
         await message.answer("⛔ Ця функція лише для адміністратора.")

@@ -6,7 +6,7 @@ from pathlib import Path
 from aiogram import F, Router, types
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError, TelegramRetryAfter, TelegramNetworkError, TelegramServerError
 from db.daily_fortune import MAX_DEPOSIT_BASE, fortune_status, reserve_fortune, release_fortune, settle_fortune
-from services.promotions import daily_fortune_enabled, daily_darts_enabled
+from services.promotions import daily_fortune_enabled, daily_darts_enabled, bezdep_enabled
 from handlers.config import ADMIN_ID
 
 router = Router(name='daily_deposit_fortune')
@@ -61,7 +61,11 @@ async def open_fortune(message: types.Message):
 @router.message(F.text == '🎁 Щоденний бонус')
 async def open_daily_bonus(message: types.Message):
     # The permanent entry point opens the active game directly.
-    if daily_darts_enabled():
+    if bezdep_enabled():
+        await message.answer_photo(
+            photo=types.FSInputFile(Path(__file__).resolve().parent.parent / 'images' / 'bezdep.png'),
+        )
+    elif daily_darts_enabled():
         await open_darts(message)
     else:
         await open_fortune(message)
@@ -70,7 +74,7 @@ async def open_daily_bonus(message: types.Message):
 @router.callback_query(F.data == 'daily_fortune:roll')
 async def roll_fortune(callback: types.CallbackQuery, game='fortune'):
     is_darts = game == 'darts'
-    if not (daily_darts_enabled() if is_darts else daily_fortune_enabled()):
+    if bezdep_enabled() or not (daily_darts_enabled() if is_darts else daily_fortune_enabled()):
         await callback.answer('Щоденний бонус тимчасово недоступний.', show_alert=True)
         return
     emoji = '🎯' if is_darts else '🎲'

@@ -15,6 +15,7 @@ router.message.filter(F.from_user.id == ADMIN_ID)
 router.callback_query.filter(F.from_user.id == ADMIN_ID)
 _save_lock = asyncio.Lock()
 WEEKDAYS = ("Понеділок", "Вівторок", "Середа", "Четвер", "П’ятниця", "Субота", "Неділя")
+WEEKDAYS_SHORT = ("пн", "вт", "ср", "чт", "пт", "сб", "нд")
 
 
 class AutoBroadcastFSM(StatesGroup):
@@ -63,7 +64,8 @@ async def show_list(message, page=0):
     for row in rows[page * 8:page * 8 + 8]:
         bid = row['id']
         title = row.get('title') or f"Авторозсилка #{bid}"
-        kb.button(text=f"{title} · {row['clock']} · {'✅' if row['enabled'] else '⏸'}", callback_data=f"ab:view:{bid}")
+        days = ", ".join(day for i, day in enumerate(WEEKDAYS_SHORT) if row['days_mask'] & (1 << i))
+        kb.button(text=f"{title} · {days} · {row['clock']} · {'✅' if row['enabled'] else '⏸'}", callback_data=f"ab:view:{bid}")
     if page:
         kb.button(text="← Попередні", callback_data=f"ab:list:{page - 1}")
     if (page + 1) * 8 < len(rows):

@@ -12,8 +12,10 @@ from .simple_win import router as simple_win_router
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
 
 
-def games_menu():
+def games_menu(is_admin: bool = False):
     keyboard = [["🎰 Слоти"], ["🎯 Один з трьох"], ["🃏 Blackjack"]]
+    if is_admin:
+        keyboard.append(["🎁 Бездепи"])
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=b) for b in row] for row in keyboard],
         resize_keyboard=True,

@@ -7,6 +7,22 @@ _piggy_enabled = True
 _daily_fortune_enabled = True
 _daily_darts_enabled = False
 _superomatic_enabled = False
+_bezdep_enabled = False
+
+
+def bezdep_enabled():
+    return _bezdep_enabled
+
+
+async def set_bezdep(enabled):
+    global _bezdep_enabled
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT INTO settings(key, value) VALUES ('bezdep_enabled', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (int(enabled),)
+        )
+        await db.commit()
+    _bezdep_enabled = enabled
 
 
 def superomatic_enabled():
@@ -64,7 +80,8 @@ def piggy_callback(value):
 
 
 def disabled_callback(value):
-    return ((not _enabled and promo_callback(value))
+    return ((_bezdep_enabled and bool(value and value.startswith(('daily_fortune:', 'daily_darts:'))))
+            or (not _enabled and promo_callback(value))
             or (not _piggy_enabled and piggy_callback(value))
             or (not _daily_fortune_enabled and daily_fortune_callback(value))
             or (not _daily_darts_enabled and bool(value and value.startswith("daily_darts:"))))
@@ -84,6 +101,7 @@ def visible_rows(rows):
 
 
 async def load_promotions():
+    global _bezdep_enabled
     global _enabled, _piggy_enabled, _daily_fortune_enabled, _superomatic_enabled, _daily_darts_enabled
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute("SELECT value FROM settings WHERE key='promotions_enabled'") as cur:
@@ -96,6 +114,9 @@ async def load_promotions():
             darts_row = await cur.fetchone()
         async with db.execute("SELECT value FROM settings WHERE key='superomatic_enabled'") as cur:
             superomatic_row = await cur.fetchone()
+        async with db.execute("SELECT value FROM settings WHERE key='bezdep_enabled'") as cur:
+            bezdep_row = await cur.fetchone()
+    _bezdep_enabled = bezdep_row is not None and bool(bezdep_row[0])
     _enabled = row is None or bool(row[0])
     _piggy_enabled = piggy_row is None or bool(piggy_row[0])
     _daily_fortune_enabled = fortune_row is None or bool(fortune_row[0])

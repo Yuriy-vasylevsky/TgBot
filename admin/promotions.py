@@ -11,6 +11,7 @@ from handlers.menu import main_menu
 from services.promotions import promotions_enabled, set_promotions, piggy_bank_enabled, set_piggy_bank
 from services.promotions import daily_fortune_enabled, set_daily_fortune, daily_darts_enabled, set_daily_darts
 from services.promotions import superomatic_enabled, set_superomatic
+from services.promotions import bezdep_enabled, set_bezdep
 
 router = Router(name="admin_promotions")
 _update_task = None
@@ -42,6 +43,11 @@ def promotions_keyboard():
         )
     ], [
         types.InlineKeyboardButton(
+            text=f"🎁 Щоденний бонус · Бездепи: {'✅ Увімкнено' if bezdep_enabled() else '⛔ Вимкнено'}",
+            callback_data=f"promotions:bezdep:{int(not bezdep_enabled())}",
+        )
+    ], [
+        types.InlineKeyboardButton(
             text=f"🎰 Superomatic −25%: {'✅ Увімкнено' if superomatic_enabled() else '⛔ Вимкнено'}",
             callback_data=f"promotions:superomatic:{int(not superomatic_enabled())}",
         )
@@ -57,6 +63,16 @@ async def open_promotions(message: types.Message):
     if message.from_user.id != ADMIN_ID:
         return
     await message.answer("📣 Керування акціями", reply_markup=promotions_keyboard())
+
+
+@router.message(F.text == "🎁 Бездепи")
+async def open_bezdep_settings(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    await message.answer(
+        "🎁 Бездепи\n\nКоли ввімкнено, щоденний бонус показує афішу бездепів замість Фортуни або Дартсу.",
+        reply_markup=promotions_keyboard(),
+    )
 
 
 async def refresh_menus(bot, feature="Промокоди та колесо фортуни", enabled=None):
@@ -94,6 +110,7 @@ async def refresh_menus(bot, feature="Промокоди та колесо фо�
     "promotions:daily_fortune:0", "promotions:daily_fortune:1",
     "promotions:daily_darts:0", "promotions:daily_darts:1",
     "promotions:superomatic:0", "promotions:superomatic:1",
+    "promotions:bezdep:0", "promotions:bezdep:1",
 }))
 async def toggle_promotions(callback: types.CallbackQuery):
     global _update_task
@@ -111,6 +128,7 @@ async def toggle_promotions(callback: types.CallbackQuery):
             "daily_darts": (daily_darts_enabled, set_daily_darts, "Дартс"),
             "daily_fortune": (daily_fortune_enabled, set_daily_fortune, "Фортуна"),
             "superomatic": (superomatic_enabled, set_superomatic, "Superomatic −25%"),
+            "bezdep": (bezdep_enabled, set_bezdep, "Бездепи"),
         }
         get_enabled, set_enabled, feature = switches[callback.data.split(":")[1]]
         if enabled == get_enabled():
@@ -121,7 +139,7 @@ async def toggle_promotions(callback: types.CallbackQuery):
         except ValueError as exc:
             await callback.answer(str(exc), show_alert=True)
             return
-        if callback.data.split(":")[1] in {"daily_fortune", "daily_darts"}:
+        if callback.data.split(":")[1] in {"daily_fortune", "daily_darts", "bezdep"}:
             await callback.answer("Стан збережено. Кнопка «Щоденний бонус» залишається в меню.")
             await callback.message.edit_reply_markup(reply_markup=promotions_keyboard())
             return
