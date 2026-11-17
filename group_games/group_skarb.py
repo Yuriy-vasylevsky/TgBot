@@ -28,7 +28,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 
 GRID_SIZE = 7
 REQUIRED_PLAYERS = 4
-PRIZE_AMOUNT = 50
+PRIZE_AMOUNT = 100
 CLICK_COOLDOWN_SEC = 6        # мінімум між кліками одного гравця
 GLOBAL_CLICK_COOLDOWN_SEC = 1 # мінімум між будь-якими кліками (анти-флуд)
 WIN_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS

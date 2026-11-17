@@ -30,7 +30,7 @@ router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 # chat_id → {"secret": str, "revealed": list[str], "messages": list[int]}
 active_numbers_games = {}
 
-PRIZE_AMOUNT = 50
+PRIZE_AMOUNT = 100
 WIN_COOLDOWN_HOURS = GAME_COOLDOWN_HOURS
 
 # user_id → час, до якого діє кулдаун "вже вигравав"
